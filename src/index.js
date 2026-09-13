@@ -1041,36 +1041,52 @@ async function handleQuery(request, env) {
   }
 
   const body = await request.json();
-  const { question } = body;
+  const result = await runQuery(env, workspaceId, body.question);
+  return new Response(JSON.stringify(result.body), { status: result.status, headers: JSON_HEADERS });
+}
 
+// Η πραγματική ροή RAG (embedding → semantic search → Gemini), ξεχωρισμένη
+// από το πώς φτάνουμε στο workspaceId. Έτσι το ΙΔΙΟ pipeline εξυπηρετεί
+// τόσο το υπάρχον /query (session/X-Workspace-Id, editor + demo σελίδα)
+// όσο και το νέο δημόσιο /embed/{embedId}/query (Section I, embedded
+// widget σε ξένο site) -- καμία λογική δεν γράφεται δύο φορές.
+async function runQuery(env, workspaceId, question) {
   if (!question) {
-    return new Response(
-      JSON.stringify({ error: "question is required" }),
-      { status: 400, headers: JSON_HEADERS }
-    );
+    return { status: 400, body: { error: "question is required" } };
   }
 
   // Βήμα 1: embedding της ερώτησης
   const questionEmbedding = await getEmbedding(question, env.GEMINI_API_KEY);
 
-  // Βήμα 2: semantic search στο Vectorize, μόνο μέσα στο σωστό workspace
-  const matches = await env.VECTORIZE.query(questionEmbedding, {
-    topK: TOP_K,
-    namespace: workspaceId,
-    returnMetadata: "all",
-  });
+  // Βήμα 2: semantic search στο Vectorize, μόνο μέσα στο σωστό workspace.
+  //
+  // Ένα workspace που ΠΟΤΕ δεν πήρε κανένα δημοσιευμένο έγγραφο δεν έχει
+  // καν δημιουργηθεί σαν namespace στο Vectorize ακόμα -- το Vectorize
+  // πετάει σφάλμα σε αυτή την περίπτωση, ΔΕΝ επιστρέφει απλά άδεια
+  // αποτελέσματα. Το αντιμετωπίζουμε ακριβώς σαν "καμία σχετική
+  // τεκμηρίωση", ίδια συμπεριφορά με το ήδη υπάρχον fallback παρακάτω.
+  let matches;
+  try {
+    matches = await env.VECTORIZE.query(questionEmbedding, {
+      topK: TOP_K,
+      namespace: workspaceId,
+      returnMetadata: "all",
+    });
+  } catch (err) {
+    matches = { matches: [] };
+  }
 
   if (!matches.matches || matches.matches.length === 0) {
     await logFallbackQuestion(env, workspaceId, question);
-    return new Response(
-      JSON.stringify({
+    return {
+      status: 200,
+      body: {
         answer: "Δεν βρέθηκαν σχετικά έγγραφα σε αυτόν τον χώρο εργασίας.",
         isFallback: true,
         primarySource: null,
         relatedSections: [],
-      }),
-      { headers: JSON_HEADERS }
-    );
+      },
+    };
   }
 
   // Βήμα 3: χτίσε το context από τα πιο σχετικά chunks
@@ -1122,9 +1138,95 @@ async function handleQuery(request, env) {
   // KV reads σε κάθε ερώτηση. Το πεδίο μένει άδειο για συμβατότητα.
   const relatedSections = [];
 
+  return { status: 200, body: { answer, isFallback, primarySource, relatedSections } };
+}
+
+// Section I: CORS + embed-id → workspaceId, για το δημόσιο embed endpoint.
+//
+// Το Origin header έχει μορφή "https://www.site.gr" (ΧΩΡΙΣ path) -- το
+// URL API μας δίνει καθαρά το hostname χωρίς να χρειάζεται χειροκίνητο
+// parsing με regex.
+function hostnameFromOrigin(origin) {
+  try {
+    return new URL(origin).hostname.toLowerCase();
+  } catch (err) {
+    return null;
+  }
+}
+
+async function resolveWorkspaceIdFromEmbedId(env, embedId) {
+  const row = await env.DB.prepare(
+    "SELECT workspace_id FROM users WHERE embed_id = ?"
+  ).bind(embedId).first();
+  return row ? row.workspace_id : null;
+}
+
+async function isOriginAllowedForWorkspace(env, workspaceId, origin) {
+  const hostname = hostnameFromOrigin(origin);
+  if (!hostname) return false;
+  const row = await env.DB.prepare(
+    "SELECT 1 FROM embed_domains WHERE workspace_id = ? AND domain = ?"
+  ).bind(workspaceId, hostname).first();
+  return !!row;
+}
+
+// ΠΡΟΣΟΧΗ: αυτά τα headers μπαίνουν ΜΟΝΟ όταν το origin έχει ήδη περάσει
+// το isOriginAllowedForWorkspace έλεγχο. Ποτέ δεν επιστρέφουμε
+// Access-Control-Allow-Origin σε μη-επιτρεπόμενο origin -- έτσι ο browser
+// του επισκέπτη μπλοκάρει μόνος του την ανάγνωση της απάντησης, ακόμα κι
+// αν το request έφτασε μέχρι τον Worker.
+function corsHeaders(origin) {
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Max-Age": "86400",
+  };
+}
+
+// Preflight: ο browser στέλνει ΠΡΩΤΑ ένα OPTIONS request (χωρίς body) πριν
+// το πραγματικό POST, ακριβώς επειδή το request έχει Content-Type:
+// application/json. Το embedId έρχεται από το ΙΔΙΟ path -- ΟΧΙ από body ή
+// custom header -- ακριβώς επειδή στο preflight δεν υπάρχει καθόλου body
+// να διαβάσουμε.
+async function handleEmbedQueryPreflight(request, env, embedId) {
+  const origin = request.headers.get("Origin");
+  if (!origin) return new Response(null, { status: 204 });
+
+  const workspaceId = await resolveWorkspaceIdFromEmbedId(env, embedId);
+  if (!workspaceId) return new Response(null, { status: 204 });
+
+  const allowed = await isOriginAllowedForWorkspace(env, workspaceId, origin);
+  if (!allowed) return new Response(null, { status: 204 });
+
+  return new Response(null, { status: 204, headers: corsHeaders(origin) });
+}
+
+async function handleEmbedQuery(request, env, embedId) {
+  const origin = request.headers.get("Origin");
+
+  const workspaceId = await resolveWorkspaceIdFromEmbedId(env, embedId);
+  if (!workspaceId) return jsonError(404, "Unknown embed id");
+
+  // ΧΩΡΙΣ Origin header καθόλου (π.χ. ένα script/server, όχι πραγματικός
+  // browser) απορρίπτεται ρητά -- ένα embedded widget ΠΑΝΤΑ τρέχει μέσα σε
+  // browser σε ξένο domain, άρα ΠΑΝΤΑ στέλνει Origin.
+  if (!origin) return jsonError(403, "Missing Origin header");
+
+  const allowed = await isOriginAllowedForWorkspace(env, workspaceId, origin);
+  if (!allowed) return jsonError(403, "This domain is not authorized for this embed");
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonError(400, "Invalid JSON body");
+  }
+
+  const result = await runQuery(env, workspaceId, body.question);
   return new Response(
-    JSON.stringify({ answer, isFallback, primarySource, relatedSections }),
-    { headers: JSON_HEADERS }
+    JSON.stringify(result.body),
+    { status: result.status, headers: { ...JSON_HEADERS, ...corsHeaders(origin) } }
   );
 }
 
@@ -1374,6 +1476,16 @@ export default {
 
     if (url.pathname === "/embed/domains" && request.method === "PATCH") {
       return handlePatchEmbedDomains(request, env);
+    }
+
+    // Public embed endpoint -- ΔΕΝ χρησιμοποιεί resolveWorkspaceId (session/
+    // X-Workspace-Id). Το embedId έρχεται από το path, το CORS middleware
+    // ελέγχει το Origin πριν προχωρήσει καθόλου στη λογική RAG.
+    const embedQueryMatch = url.pathname.match(/^\/embed\/([^/]+)\/query$/);
+    if (embedQueryMatch) {
+      const embedId = embedQueryMatch[1];
+      if (request.method === "OPTIONS") return handleEmbedQueryPreflight(request, env, embedId);
+      if (request.method === "POST") return handleEmbedQuery(request, env, embedId);
     }
 
     if (url.pathname === "/upload" && request.method === "POST") {
