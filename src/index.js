@@ -36,6 +36,15 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PBKDF2_ITERATIONS = 100000;
 const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 ημέρες
 
+// Section I: embed layer (domain allow-list).
+//
+// Απλή, αυστηρή μορφή "domain.tld" ή "sub.domain.tld" -- χωρίς πρωτόκολλο,
+// χωρίς path, χωρίς wildcards. Το "localhost" επιτρέπεται ξεχωριστά (δεν
+// έχει τελεία) για να μπορεί κάποιος να δοκιμάσει το embed script τοπικά
+// πριν το βάλει σε πραγματικό domain.
+const DOMAIN_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
+const MAX_EMBED_DOMAINS = 10;
+
 function bufferToHex(buffer) {
   return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -196,6 +205,85 @@ async function handleLogout(request, env) {
   if (!sessionToken) return jsonError(400, "Missing X-Session-Token header");
   await env.DB.prepare("DELETE FROM sessions WHERE token = ?").bind(sessionToken).run();
   return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
+}
+
+// Δέχεται είτε σκέτο domain ("pelatis.gr") είτε ολόκληρο URL
+// ("https://www.pelatis.gr/"), και επιστρέφει πάντα το ίδιο, καθαρό
+// αποτέλεσμα ("www.pelatis.gr"). Ο χρήστης δεν χρειάζεται να ξέρει ποια
+// μορφή είναι "σωστή" -- το καθαρίζουμε εμείς πριν το validation.
+function normalizeDomain(raw) {
+  let domain = String(raw || "").trim().toLowerCase();
+  domain = domain.replace(/^https?:\/\//, "");
+  domain = domain.split("/")[0];
+  domain = domain.split(":")[0];
+  domain = domain.replace(/\.$/, "");
+  return domain;
+}
+
+// embedId + domains μαζί -- το editor τα δείχνει πάντα μαζί (χωρίς domain
+// δεν εμφανίζεται καν το embedId/script), οπότε ένα endpoint αρκεί.
+async function getEmbedSettings(env, workspaceId) {
+  const user = await env.DB.prepare(
+    "SELECT embed_id FROM users WHERE workspace_id = ?"
+  ).bind(workspaceId).first();
+  const rows = await env.DB.prepare(
+    "SELECT domain FROM embed_domains WHERE workspace_id = ? ORDER BY domain"
+  ).bind(workspaceId).all();
+  return {
+    embedId: user ? user.embed_id : null,
+    domains: rows.results.map((row) => row.domain),
+  };
+}
+
+async function handleGetEmbedDomains(request, env) {
+  const workspaceId = await resolveWorkspaceId(request, env);
+  if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
+  const settings = await getEmbedSettings(env, workspaceId);
+  return new Response(JSON.stringify(settings), { headers: JSON_HEADERS });
+}
+
+// PATCH αντικαθιστά ΟΛΟΚΛΗΡΗ τη λίστα (ο client στέλνει το πλήρες, τελικό
+// σύνολο domains) -- ίδια λογική με το ήδη υπάρχον whitelist pattern των
+// widget settings, απλά εφαρμοσμένη σε λίστα αντί για μεμονωμένα πεδία.
+// env.DB.batch() εκτελεί DELETE+INSERT σαν ΜΙΑ atomic πράξη -- είτε
+// περάσουν όλα είτε καμία αλλαγή, ποτέ ενδιάμεση/μισή κατάσταση.
+async function handlePatchEmbedDomains(request, env) {
+  const workspaceId = await resolveWorkspaceId(request, env);
+  if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonError(400, "Invalid JSON body");
+  }
+
+  if (!Array.isArray(body.domains)) {
+    return jsonError(400, "domains must be an array of strings");
+  }
+  if (body.domains.length > MAX_EMBED_DOMAINS) {
+    return jsonError(400, `Maximum ${MAX_EMBED_DOMAINS} domains allowed`);
+  }
+
+  const normalized = [...new Set(body.domains.map(normalizeDomain).filter(Boolean))];
+  const invalid = normalized.filter((domain) => domain !== "localhost" && !DOMAIN_RE.test(domain));
+  if (invalid.length > 0) {
+    return jsonError(400, `Invalid domain(s): ${invalid.join(", ")}`);
+  }
+
+  const createdAt = new Date().toISOString();
+  const statements = [
+    env.DB.prepare("DELETE FROM embed_domains WHERE workspace_id = ?").bind(workspaceId),
+    ...normalized.map((domain) =>
+      env.DB.prepare(
+        "INSERT INTO embed_domains (workspace_id, domain, created_at) VALUES (?, ?, ?)"
+      ).bind(workspaceId, domain, createdAt)
+    ),
+  ];
+  await env.DB.batch(statements);
+
+  const settings = await getEmbedSettings(env, workspaceId);
+  return new Response(JSON.stringify(settings), { headers: JSON_HEADERS });
 }
 
 // Ειδοποίηση email όταν το bot απαντάει "δεν γνωρίζω" -- ΤΟ ΠΟΛΥ μία φορά
@@ -1278,6 +1366,14 @@ export default {
 
     if (url.pathname === "/workspace/settings" && request.method === "PATCH") {
       return handlePatchSettings(request, env);
+    }
+
+    if (url.pathname === "/embed/domains" && request.method === "GET") {
+      return handleGetEmbedDomains(request, env);
+    }
+
+    if (url.pathname === "/embed/domains" && request.method === "PATCH") {
+      return handlePatchEmbedDomains(request, env);
     }
 
     if (url.pathname === "/upload" && request.method === "POST") {
