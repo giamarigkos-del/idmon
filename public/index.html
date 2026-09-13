@@ -96,7 +96,8 @@
 
   <div class="window" id="chatWindow">
     <div class="window-head">
-      <strong data-i18n="assistantTitle">Assistant</strong>
+      <img id="assistantLogo" alt="" style="display:none;width:20px;height:20px;border-radius:4px;object-fit:cover;">
+      <strong id="assistantNameText" data-i18n="assistantTitle">Assistant</strong>
     </div>
 
     <div class="chat-cell" id="userGrid">
@@ -116,6 +117,34 @@
 
   applyTranslations();
   initLangToggle("langToggle");
+
+  // Section G: εφαρμόζει τις ρυθμίσεις widget (χρώμα, όνομα, λογότυπο) του
+  // συγκεκριμένου workspace -- best-effort, αν αποτύχει το fetch το widget
+  // απλά μένει στα defaults (δεν μπλοκάρει τίποτα άλλο στη σελίδα).
+  async function applyWidgetSettings() {
+    try {
+      const res = await fetch("/workspace/settings", { headers: HEADERS });
+      if (!res.ok) return;
+      const settings = await res.json();
+
+      if (settings.accentColor) {
+        document.documentElement.style.setProperty("--accent", settings.accentColor);
+        document.documentElement.style.setProperty("--accent-soft", settings.accentColor + "22");
+      }
+      if (settings.botName) {
+        el("assistantNameText").textContent = settings.botName;
+      }
+      if (settings.logoUrl) {
+        const logo = el("assistantLogo");
+        logo.src = settings.logoUrl;
+        logo.style.display = "inline-block";
+      }
+    } catch (err) {
+      // σιωπηλή αποτυχία -- δες σχόλιο πάνω
+    }
+  }
+
+  applyWidgetSettings();
 
   // --- host page: δυναμική λίστα εγγράφων (πραγματικά δεδομένα, όχι στατικό demo κείμενο) ---
   async function loadHostDocuments() {

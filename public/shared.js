@@ -208,6 +208,19 @@ const TRANSLATIONS = {
     uploading: "Uploading…",
     sourceScoreLabel: "Source: {title} · relevance {pct}%",
     technicalDetails: "Technical details",
+
+    // widget settings
+    widgetSettings: "⚙ Widget settings",
+    widgetSettingsIntro: "Customize how the assistant looks, and get notified when it can't answer something.",
+    botNameLabel: "Bot name",
+    accentColorLabel: "Accent color",
+    logoUrlLabel: "Logo URL (optional)",
+    notifyEmailLabel: "Notification email (optional)",
+    notifyEmailHint: "You'll get an email when the assistant can't answer a question (at most once per hour).",
+    saveSettingsBtn: "Save settings",
+    settingsSaved: "✓ Settings saved.",
+    settingsSaveErrorPrefix: "Save error: ",
+    settingsLoadError: "Could not load settings.",
   },
   el: {
     loading: "Φόρτωση…",
@@ -314,6 +327,19 @@ const TRANSLATIONS = {
     uploading: "Ανέβασμα…",
     sourceScoreLabel: "Πηγή: {title} · σχετικότητα {pct}%",
     technicalDetails: "Τεχνικές λεπτομέρειες",
+
+    // widget settings
+    widgetSettings: "⚙ Ρυθμίσεις widget",
+    widgetSettingsIntro: "Προσάρμοσε την εμφάνιση του βοηθού, και μάθε πότε δεν μπορεί να απαντήσει κάτι.",
+    botNameLabel: "Όνομα bot",
+    accentColorLabel: "Χρώμα",
+    logoUrlLabel: "URL λογότυπου (προαιρετικό)",
+    notifyEmailLabel: "Email ειδοποιήσεων (προαιρετικό)",
+    notifyEmailHint: "Θα λαμβάνεις email όταν ο βοηθός δεν μπορεί να απαντήσει σε μια ερώτηση (το πολύ μία φορά την ώρα).",
+    saveSettingsBtn: "Αποθήκευση ρυθμίσεων",
+    settingsSaved: "✓ Οι ρυθμίσεις αποθηκεύτηκαν.",
+    settingsSaveErrorPrefix: "Σφάλμα αποθήκευσης: ",
+    settingsLoadError: "Δεν ήταν δυνατή η φόρτωση ρυθμίσεων.",
   },
 };
 

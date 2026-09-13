@@ -13,3 +13,10 @@ id = "e6ea2213cca7424b988d24d5307ee1ca"
 [assets]
 directory = "./public"
 not_found_handling = "none"
+
+[vars]
+# Το "from" address για τα email ειδοποιήσεων (Section G). Πρέπει να είναι σε
+# domain που έχεις επαληθεύσει στο Resend (https://resend.com/domains).
+# Το ίδιο το API key ΔΕΝ μπαίνει εδώ -- είναι secret:
+#   wrangler secret put RESEND_API_KEY
+NOTIFY_FROM_EMAIL = "onboarding@resend.dev"

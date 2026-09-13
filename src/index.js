@@ -14,6 +14,24 @@ const FALLBACK_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 ημέρες
 const PROTECTED_WORKSPACE_ID = "efood-ops-demo";
 const VISITOR_DOC_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 ημέρες
 
+// Section G: ρυθμίσεις widget ανά workspace (εμφάνιση + email ειδοποίησης).
+// Αποθηκεύονται σε ΕΝΑ KV record (όχι ξεχωριστό key ανά πεδίο) ώστε να μη
+// χρειάζονται πολλαπλά reads/writes για κάτι που πάντα διαβάζεται/γράφεται μαζί.
+const DEFAULT_WIDGET_SETTINGS = {
+  accentColor: "#6B7280",
+  botName: "Assistant",
+  logoUrl: null,
+  notifyEmail: null,
+};
+const SETTINGS_ALLOWED_FIELDS = ["accentColor", "botName", "logoUrl", "notifyEmail"];
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Ειδοποίηση email όταν το bot απαντάει "δεν γνωρίζω" -- ΤΟ ΠΟΛΥ μία φορά
+// την ώρα ανά workspace, ώστε μια σειρά αναπάντητων ερωτήσεων να μη γεμίσει
+// το inbox του πελάτη με ένα email ανά ερώτηση.
+const NOTIFY_COOLDOWN_SECONDS = 60 * 60; // 1 ώρα
+
 // Επιστρέφει τα options που πρέπει να περάσουν στο env.DOCUMENT_REGISTRY.put(),
 // και το ισοδύναμο expiresAt (για να το δείχνουμε στο frontend), ανάλογα με
 // το αν το workspace είναι το προστατευμένο ή όχι.
@@ -25,6 +43,108 @@ function docTtlFor(workspaceId) {
     putOptions: { expirationTtl: VISITOR_DOC_TTL_SECONDS },
     expiresAt: new Date(Date.now() + VISITOR_DOC_TTL_SECONDS * 1000).toISOString(),
   };
+}
+
+// Διαβάζει τις ρυθμίσεις widget ενός workspace, με τα defaults σαν βάση
+// (ώστε ένα workspace που ποτέ δεν έκανε save να παίρνει πάντα πλήρες,
+// έγκυρο αντικείμενο -- όχι undefined πεδία που σπάνε το frontend).
+async function getWorkspaceSettings(env, workspaceId) {
+  const raw = await env.DOCUMENT_REGISTRY.get(`workspace:${workspaceId}:settings`);
+  if (!raw) return { ...DEFAULT_WIDGET_SETTINGS };
+  return { ...DEFAULT_WIDGET_SETTINGS, ...JSON.parse(raw) };
+}
+
+async function handleGetSettings(request, env) {
+  const workspaceId = request.headers.get("X-Workspace-Id");
+  if (!workspaceId) {
+    return new Response(
+      JSON.stringify({ error: "Missing X-Workspace-Id header" }),
+      { status: 400, headers: JSON_HEADERS }
+    );
+  }
+  const settings = await getWorkspaceSettings(env, workspaceId);
+  return new Response(JSON.stringify(settings), { headers: JSON_HEADERS });
+}
+
+async function handlePatchSettings(request, env) {
+  const workspaceId = request.headers.get("X-Workspace-Id");
+  if (!workspaceId) {
+    return new Response(
+      JSON.stringify({ error: "Missing X-Workspace-Id header" }),
+      { status: 400, headers: JSON_HEADERS }
+    );
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return new Response(JSON.stringify({ error: "Invalid JSON body" }), { status: 400, headers: JSON_HEADERS });
+  }
+
+  const current = await getWorkspaceSettings(env, workspaceId);
+
+  // Whitelist -- αγνοούμε οτιδήποτε άλλο πεδίο σταλεί, ποτέ δεν κάνουμε
+  // spread ολόκληρου του body πάνω στο αποθηκευμένο αντικείμενο.
+  for (const field of SETTINGS_ALLOWED_FIELDS) {
+    if (field in body) current[field] = body[field];
+  }
+
+  if (current.accentColor && !HEX_COLOR_RE.test(current.accentColor)) {
+    return new Response(
+      JSON.stringify({ error: "accentColor must be a hex color like #6B7280" }),
+      { status: 400, headers: JSON_HEADERS }
+    );
+  }
+  if (current.notifyEmail && !EMAIL_RE.test(current.notifyEmail)) {
+    return new Response(
+      JSON.stringify({ error: "notifyEmail is not a valid email address" }),
+      { status: 400, headers: JSON_HEADERS }
+    );
+  }
+  if (current.botName && current.botName.length > 60) {
+    return new Response(
+      JSON.stringify({ error: "botName is too long (max 60 characters)" }),
+      { status: 400, headers: JSON_HEADERS }
+    );
+  }
+
+  // Ίδια πολιτική TTL με τα υπόλοιπα δεδομένα του workspace: το προστατευμένο
+  // demo workspace δεν λήγει ποτέ, οι επισκέπτες παίρνουν 7 ημέρες που
+  // ανανεώνονται αυτόματα σε κάθε save.
+  const { putOptions } = docTtlFor(workspaceId);
+  await env.DOCUMENT_REGISTRY.put(`workspace:${workspaceId}:settings`, JSON.stringify(current), putOptions);
+
+  return new Response(JSON.stringify(current), { headers: JSON_HEADERS });
+}
+
+// Στέλνει ένα απλό transactional email μέσω Resend (https://resend.com).
+// Best-effort: ΠΟΤΕ δεν πετάει exception προς τα έξω -- μια αποτυχία στέλνοντας
+// notification δεν πρέπει ποτέ να χαλάσει την απάντηση που παίρνει ο χρήστης
+// του widget. Αν δεν έχει ρυθμιστεί ακόμα το RESEND_API_KEY secret, απλά δεν
+// στέλνει τίποτα (σιωπηλά) -- έτσι το feature είναι "add-on", όχι hard requirement.
+async function sendFallbackNotificationEmail(env, toEmail, question, workspaceId) {
+  if (!env.RESEND_API_KEY) return;
+
+  const fromEmail = env.NOTIFY_FROM_EMAIL || "notifications@example.com";
+
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: fromEmail,
+        to: [toEmail],
+        subject: "Ο βοηθός δεν μπόρεσε να απαντήσει σε μια ερώτηση",
+        text: `Κάποιος ρώτησε κάτι που ο AI βοηθός σου δεν μπόρεσε να απαντήσει:\n\n"${question}"\n\nΜπες στο editor (καρτέλα "Unanswered questions") για να δεις όλες τις εκκρεμείς ερωτήσεις και να προσθέσεις σχετικό περιεχόμενο.\n\n(workspace: ${workspaceId})`,
+      }),
+    });
+  } catch (err) {
+    // Σκόπιμα καταπίνουμε το error -- βλ. σχόλιο πάνω από τη function.
+  }
 }
 
 function chunkText(text) {
@@ -133,6 +253,25 @@ async function logFallbackQuestion(env, workspaceId, question) {
     JSON.stringify({ question, timestamp: new Date().toISOString() }),
     { expirationTtl: FALLBACK_TTL_SECONDS }
   );
+
+  // Ειδοποίηση email, best-effort -- ΠΟΤΕ δεν πρέπει να μπλοκάρει ή να σπάσει
+  // την απάντηση προς τον χρήστη του widget αν κάτι πάει στραβά εδώ.
+  try {
+    const settings = await getWorkspaceSettings(env, workspaceId);
+    if (settings.notifyEmail) {
+      const cooldownKey = `session:${workspaceId}:notify-cooldown`;
+      const onCooldown = await env.DOCUMENT_REGISTRY.get(cooldownKey);
+      if (!onCooldown) {
+        // Το cooldown key μπαίνει ΠΡΙΝ σταλεί το email, όχι μετά -- έτσι
+        // ακόμα κι αν δύο ερωτήσεις έρθουν ταυτόχρονα (race condition), η
+        // χειρότερη περίπτωση είναι δύο emails κοντά στο όριο, ποτέ μηδέν.
+        await env.DOCUMENT_REGISTRY.put(cooldownKey, "1", { expirationTtl: NOTIFY_COOLDOWN_SECONDS });
+        await sendFallbackNotificationEmail(env, settings.notifyEmail, question, workspaceId);
+      }
+    }
+  } catch (err) {
+    // Σκόπιμα καταπίνουμε το error -- δες σχόλιο πάνω.
+  }
 }
 
 // Χειροκίνητος έλεγχος αντιφάσεων: ο editor επιλέγει 2-3 έγγραφα, ΕΝΑ ΜΟΝΟ
@@ -948,6 +1087,14 @@ export default {
 
     if (url.pathname === "/developer-login" && request.method === "POST") {
       return handleDeveloperLogin(request, env);
+    }
+
+    if (url.pathname === "/workspace/settings" && request.method === "GET") {
+      return handleGetSettings(request, env);
+    }
+
+    if (url.pathname === "/workspace/settings" && request.method === "PATCH") {
+      return handlePatchSettings(request, env);
     }
 
     if (url.pathname === "/upload" && request.method === "POST") {

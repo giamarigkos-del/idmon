@@ -289,6 +289,9 @@
         </div>
         <div id="contradictionList" class="contradiction-list" data-i18n="loading">Loading…</div>
       </div>
+      <div class="sidebar-section">
+        <button type="button" class="refresh-btn" id="settingsBtn" data-i18n="widgetSettings" style="width:100%;">⚙ Widget settings</button>
+      </div>
     </div>
 
     <div class="main" id="mainPanel">
@@ -889,7 +892,76 @@
     renderEditForm({ title: "", documentId: "", text: "", sourceUrl: "", isExisting: false });
   }
 
+  // Section G: πάνελ ρυθμίσεων widget (χρώμα, όνομα bot, λογότυπο, email
+  // ειδοποίησης). Ίδιο pattern με τα άλλα render* functions -- γράφει
+  // απευθείας στο mainPanel και ξαναδένει τα δικά του event listeners.
+  async function renderSettingsPanel() {
+    if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
+    currentSelectedId = null;
+    const main = el("mainPanel");
+    main.innerHTML = `<div class="main-placeholder">${escapeHtml(t("loading"))}</div>`;
+
+    let settings;
+    try {
+      const res = await fetch("/workspace/settings", { headers: HEADERS });
+      if (!res.ok) throw new Error("bad response");
+      settings = await res.json();
+    } catch (err) {
+      main.innerHTML = `<div class="main-placeholder">${escapeHtml(t("settingsLoadError"))}</div>`;
+      return;
+    }
+
+    main.innerHTML = `
+      <div class="edit-form" style="max-width:480px;">
+        <h2 style="margin:0 0 4px;font-size:16px;">${escapeHtml(t("widgetSettings"))}</h2>
+        <p style="margin:0 0 20px;font-size:13px;color:var(--text-soft);">${escapeHtml(t("widgetSettingsIntro"))}</p>
+
+        <div class="label" style="margin-top:0;">${escapeHtml(t("botNameLabel"))}</div>
+        <input type="text" id="settingsBotName" maxlength="60" value="${escapeHtml(settings.botName || "")}">
+
+        <div class="label">${escapeHtml(t("accentColorLabel"))}</div>
+        <input type="color" id="settingsAccentColor" value="${escapeHtml(settings.accentColor || "#6B7280")}" style="width:64px;height:32px;padding:2px;cursor:pointer;">
+
+        <div class="label">${escapeHtml(t("logoUrlLabel"))}</div>
+        <input type="text" id="settingsLogoUrl" placeholder="https://…" value="${escapeHtml(settings.logoUrl || "")}">
+
+        <div class="label">${escapeHtml(t("notifyEmailLabel"))}</div>
+        <input type="text" id="settingsNotifyEmail" placeholder="you@example.com" value="${escapeHtml(settings.notifyEmail || "")}">
+        <div style="font-size:12px;color:var(--text-soft);margin-top:6px;">${escapeHtml(t("notifyEmailHint"))}</div>
+
+        <button type="button" id="saveSettingsBtn" style="margin-top:20px;">${escapeHtml(t("saveSettingsBtn"))}</button>
+        <div class="upload-status" id="settingsStatus"></div>
+      </div>
+    `;
+
+    el("saveSettingsBtn").addEventListener("click", async () => {
+      const status = el("settingsStatus");
+      status.textContent = "";
+      const payload = {
+        botName: el("settingsBotName").value.trim(),
+        accentColor: el("settingsAccentColor").value,
+        logoUrl: el("settingsLogoUrl").value.trim() || null,
+        notifyEmail: el("settingsNotifyEmail").value.trim() || null,
+      };
+      try {
+        const res = await fetch("/workspace/settings", {
+          method: "PATCH",
+          headers: HEADERS,
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "unknown error");
+        status.textContent = t("settingsSaved");
+        status.style.color = "var(--ok)";
+      } catch (err) {
+        status.textContent = t("settingsSaveErrorPrefix") + err.message;
+        status.style.color = "var(--danger)";
+      }
+    });
+  }
+
   el("newDocBtn").addEventListener("click", enterNewDocumentMode);
+  el("settingsBtn").addEventListener("click", renderSettingsPanel);
 
   el("allDocsBtn").addEventListener("click", () => {
     if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
