@@ -1,0 +1,220 @@
+// widget.js -- embeddable chat widget (Section I: embed layer).
+//
+// Χρήση σε ξένο site:
+//   <script src="https://operations-portal-rag.giamarigkos.workers.dev/widget.js"
+//           data-embed-id="emb-xxxxxxxxxxxx"></script>
+//
+// Προαιρετικά data-* attributes: data-accent-color, data-bot-name, data-lang
+// ("el"/"en"), data-position ("bottom-right"/"bottom-left").
+//
+// ΣΚΟΠΙΜΑ ΔΕΝ χρησιμοποιεί iframe: αν το UI έτρεχε μέσα σε iframe που
+// δείχνει σε δικό μας domain, κάθε request προς το backend θα είχε ΠΑΝΤΑ
+// το δικό μας domain σαν Origin -- όχι το domain του πελάτη -- και όλο το
+// CORS/domain-allow-list middleware θα ήταν άχρηστο (θα δούλευε το ίδιο
+// από ΟΠΟΙΟΔΗΠΟΤΕ ξένο site). Με Shadow DOM το script τρέχει ΜΕΣΑ στη
+// σελίδα του πελάτη -- σωστό Origin, σωστός έλεγχος -- και ταυτόχρονα το
+// CSS του widget παραμένει πλήρως απομονωμένο από το CSS του site.
+(function () {
+  "use strict";
+
+  function findScriptTag() {
+    if (document.currentScript) return document.currentScript;
+    var all = document.querySelectorAll("script[data-embed-id]");
+    return all.length ? all[all.length - 1] : null;
+  }
+
+  var scriptTag = findScriptTag();
+  if (!scriptTag) {
+    console.error("[widget.js] Δεν βρέθηκε το <script> tag (χρειάζεται data-embed-id).");
+    return;
+  }
+
+  var embedId = scriptTag.getAttribute("data-embed-id");
+  if (!embedId) {
+    console.error("[widget.js] Λείπει το data-embed-id attribute στο <script> tag.");
+    return;
+  }
+
+  var BASE_URL = new URL(scriptTag.src).origin;
+  var accentColor = scriptTag.getAttribute("data-accent-color") || "#6B7280";
+  var botName = scriptTag.getAttribute("data-bot-name") || "Assistant";
+  var lang = (scriptTag.getAttribute("data-lang") || "el").toLowerCase();
+  var position = scriptTag.getAttribute("data-position") === "bottom-left" ? "bottom-left" : "bottom-right";
+
+  var STRINGS = {
+    el: {
+      disclosure: "Απαντήσεις από AI",
+      placeholder: "Γράψε την ερώτησή σου…",
+      send: "Αποστολή",
+      genericError: "Κάτι πήγε στραβά. Δοκίμασε ξανά σε λίγο.",
+      unavailable: "Ο βοηθός δεν είναι διαθέσιμος αυτή τη στιγμή.",
+      openLabel: "Άνοιγμα βοηθού",
+      closeLabel: "Κλείσιμο",
+    },
+    en: {
+      disclosure: "AI-generated answers",
+      placeholder: "Type your question…",
+      send: "Send",
+      genericError: "Something went wrong. Please try again shortly.",
+      unavailable: "This assistant is currently unavailable right now.",
+      openLabel: "Open assistant",
+      closeLabel: "Close",
+    },
+  };
+  var t = STRINGS[lang] || STRINGS.el;
+
+  // ---- Host element + Shadow DOM -------------------------------------
+  var host = document.createElement("div");
+  host.id = "rag-embed-widget-host";
+  host.style.all = "initial"; // απομόνωση ακόμα και από inherited στυλ του <body>
+  document.body.appendChild(host);
+  var root = host.attachShadow({ mode: "open" });
+
+  var sideProp = position === "bottom-left" ? "left" : "right";
+
+  var style = document.createElement("style");
+  style.textContent =
+    "*{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;}" +
+    ".bubble{position:fixed;bottom:20px;" + sideProp + ":20px;width:56px;height:56px;border-radius:50%;" +
+    "background:" + accentColor + ";color:#fff;border:none;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25);" +
+    "z-index:2147483647;display:flex;align-items:center;justify-content:center;font-size:26px;}" +
+    ".panel{position:fixed;bottom:88px;" + sideProp + ":20px;width:340px;max-width:calc(100vw - 40px);" +
+    "height:460px;max-height:calc(100vh - 120px);background:#fff;border-radius:12px;" +
+    "box-shadow:0 8px 30px rgba(0,0,0,.25);display:none;flex-direction:column;overflow:hidden;" +
+    "z-index:2147483647;}" +
+    ".panel.open{display:flex;}" +
+    ".header{background:" + accentColor + ";color:#fff;padding:14px 16px;display:flex;" +
+    "flex-direction:column;gap:2px;}" +
+    ".header-top{display:flex;align-items:center;justify-content:space-between;}" +
+    ".header-title{font-size:14.5px;font-weight:700;}" +
+    ".header-sub{font-size:11px;opacity:.85;}" +
+    ".close-btn{background:none;border:none;color:#fff;font-size:18px;cursor:pointer;line-height:1;padding:2px 4px;}" +
+    ".messages{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:#f7f7f8;}" +
+    ".msg{max-width:82%;padding:9px 12px;border-radius:10px;font-size:13.5px;line-height:1.45;word-wrap:break-word;}" +
+    ".msg.user{align-self:flex-end;background:" + accentColor + ";color:#fff;border-bottom-right-radius:2px;}" +
+    ".msg.bot{align-self:flex-start;background:#fff;color:#1a1a1a;border:1px solid #e3e3e6;border-bottom-left-radius:2px;}" +
+    ".input-row{display:flex;gap:8px;padding:10px;border-top:1px solid #e3e3e6;background:#fff;}" +
+    ".input-row input{flex:1;border:1px solid #d8d8dc;border-radius:8px;padding:9px 10px;font-size:13.5px;outline:none;}" +
+    ".input-row input:focus{border-color:" + accentColor + ";}" +
+    ".input-row button{background:" + accentColor + ";color:#fff;border:none;border-radius:8px;" +
+    "padding:0 14px;font-size:13px;font-weight:600;cursor:pointer;}" +
+    ".input-row button:disabled{opacity:.5;cursor:default;}";
+  root.appendChild(style);
+
+  var bubble = document.createElement("button");
+  bubble.className = "bubble";
+  bubble.type = "button";
+  bubble.setAttribute("aria-label", t.openLabel);
+  bubble.textContent = "💬";
+  root.appendChild(bubble);
+
+  var panel = document.createElement("div");
+  panel.className = "panel";
+  panel.innerHTML =
+    '<div class="header">' +
+    '  <div class="header-top">' +
+    '    <span class="header-title"></span>' +
+    '    <button type="button" class="close-btn" aria-label=""></button>' +
+    "  </div>" +
+    '  <span class="header-sub"></span>' +
+    "</div>" +
+    '<div class="messages"></div>' +
+    '<div class="input-row">' +
+    '  <input type="text" />' +
+    "  <button type=\"button\"></button>" +
+    "</div>";
+  root.appendChild(panel);
+
+  panel.querySelector(".header-title").textContent = botName;
+  panel.querySelector(".header-sub").textContent = "🤖 " + t.disclosure;
+  panel.querySelector(".close-btn").textContent = "✕";
+  panel.querySelector(".close-btn").setAttribute("aria-label", t.closeLabel);
+  var messagesEl = panel.querySelector(".messages");
+  var inputEl = panel.querySelector(".input-row input");
+  var sendBtn = panel.querySelector(".input-row button");
+  inputEl.placeholder = t.placeholder;
+  sendBtn.textContent = t.send;
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  // Ελάχιστη μορφοποίηση **bold** -> <strong>, ίδια λογική με το
+  // formatAnswer() του κύριου εργαλείου (shared.js), αντιγραμμένη εδώ
+  // επίτηδες -- το widget.js πρέπει να μείνει ένα αυτόνομο αρχείο, χωρίς
+  // εξωτερικές εξαρτήσεις (φορτώνεται σε ξένο site, όχι στο δικό μας).
+  function formatAnswer(text) {
+    return escapeHtml(text)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\n/g, "<br>");
+  }
+
+  function addMessage(role, html) {
+    var el = document.createElement("div");
+    el.className = "msg " + role;
+    el.innerHTML = html;
+    messagesEl.appendChild(el);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return el;
+  }
+
+  function setOpen(open) {
+    panel.classList.toggle("open", open);
+    if (open) inputEl.focus();
+  }
+
+  bubble.addEventListener("click", function () {
+    setOpen(!panel.classList.contains("open"));
+  });
+  panel.querySelector(".close-btn").addEventListener("click", function () {
+    setOpen(false);
+  });
+
+  async function sendQuestion() {
+    var question = inputEl.value.trim();
+    if (!question) return;
+    inputEl.value = "";
+    inputEl.disabled = true;
+    sendBtn.disabled = true;
+
+    addMessage("user", escapeHtml(question));
+    var loadingEl = addMessage("bot", "…");
+
+    try {
+      var res = await fetch(BASE_URL + "/embed/" + encodeURIComponent(embedId) + "/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: question }),
+      });
+      var data = null;
+      try {
+        data = await res.json();
+      } catch (parseErr) {
+        data = null;
+      }
+      loadingEl.remove();
+      if (!res.ok || !data || typeof data.answer !== "string") {
+        addMessage("bot", escapeHtml(t.unavailable));
+      } else {
+        addMessage("bot", formatAnswer(data.answer));
+      }
+    } catch (err) {
+      loadingEl.remove();
+      addMessage("bot", escapeHtml(t.genericError));
+    } finally {
+      inputEl.disabled = false;
+      sendBtn.disabled = false;
+      inputEl.focus();
+    }
+  }
+
+  sendBtn.addEventListener("click", sendQuestion);
+  inputEl.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") sendQuestion();
+  });
+})();

@@ -40,9 +40,18 @@
   .account-tabs button{flex:1;border:none;background:none;color:var(--text-soft);font-size:12.5px;
     font-weight:700;padding:7px 0;border-radius:4px;cursor:pointer;font-family:inherit;}
   .account-tabs button.active{background:var(--accent);color:var(--on-accent);}
+
+  /* Ίδιο .back-link στυλ με article.html/editor.html, αλλά fixed πάνω-
+     αριστερά (συμμετρικό με το ήδη υπάρχον lang-toggle-fixed δεξιά) --
+     αυτή η σελίδα δεν έχει top-bar, οπότε δεν υπάρχει έτοιμο container. */
+  .back-link-fixed{position:fixed;top:16px;left:16px;font-size:11.5px;font-weight:700;
+    color:var(--text);text-decoration:none;background:var(--surface-2);
+    border:1px solid var(--border);border-radius:4px;padding:5px 10px;z-index:10;}
+  .back-link-fixed:hover{background:var(--accent-soft);border-color:var(--accent);}
 </style>
 </head>
 <body>
+  <a class="back-link-fixed" href="/">←Portal</a>
   <div class="lang-toggle lang-toggle-fixed" id="langToggle">
     <button type="button" class="lang-btn" data-lang="en">EN</button>
     <button type="button" class="lang-btn" data-lang="el">GR</button>
@@ -101,6 +110,14 @@
 
   applyTranslations();
   initLangToggle("langToggle");
+
+  // Το "←Portal" έχει νόημα ΜΟΝΟ αν υπάρχει ήδη αποθηκευμένο workspace --
+  // αλλιώς το "/" θα έστελνε τον χρήστη πάλι εδώ (index.html δεν βρίσκει
+  // workspaceId, redirect πίσω στο landing). Χωρίς αποθηκευμένο workspace
+  // (π.χ. αμέσως μετά από "Αλλαγή λειτουργίας"), το κουμπί κρύβεται.
+  if (!localStorage.getItem("workspaceId")) {
+    document.querySelector(".back-link-fixed").style.display = "none";
+  }
 
   el("guestBtn").addEventListener("click", () => {
     // Νέο, τυχαίο, απομονωμένο workspace -- κανείς άλλος δεν το βλέπει.
