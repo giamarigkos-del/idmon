@@ -22,8 +22,22 @@ const DEFAULT_WIDGET_SETTINGS = {
   botName: "Assistant",
   logoUrl: null,
   notifyEmail: null,
+  // Section J: human handoff -- ελεύθερο link (WhatsApp/email/ό,τι θέλει ο
+  // πελάτης) ΚΑΙ ξεχωριστό τηλέφωνο, γιατί το τηλέφωνο είναι το πιο
+  // καθολικά κατανοητό κανάλι (δεν χρειάζεται WhatsApp/email εγκατεστημένο).
+  contactLabel: null,
+  contactUrl: null,
+  contactPhone: null,
 };
-const SETTINGS_ALLOWED_FIELDS = ["accentColor", "botName", "logoUrl", "notifyEmail"];
+const SETTINGS_ALLOWED_FIELDS = [
+  "accentColor",
+  "botName",
+  "logoUrl",
+  "notifyEmail",
+  "contactLabel",
+  "contactUrl",
+  "contactPhone",
+];
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -364,6 +378,27 @@ async function handlePatchSettings(request, env) {
   if (current.botName && current.botName.length > 60) {
     return new Response(
       JSON.stringify({ error: "botName is too long (max 60 characters)" }),
+      { status: 400, headers: JSON_HEADERS }
+    );
+  }
+  if (current.contactLabel && current.contactLabel.length > 40) {
+    return new Response(
+      JSON.stringify({ error: "contactLabel is too long (max 40 characters)" }),
+      { status: 400, headers: JSON_HEADERS }
+    );
+  }
+  if (current.contactUrl && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(current.contactUrl)) {
+    // Χαλαρός έλεγχος -- απλά ζητάμε ένα κανονικό URI scheme (https:,
+    // mailto:, tel:, whatsapp: κλπ), όχι αυστηρή επαλήθευση domain. Ο
+    // πελάτης μπορεί να βάλει ό,τι link χρησιμοποιεί πραγματικά.
+    return new Response(
+      JSON.stringify({ error: "contactUrl must start with a scheme, e.g. https:// or mailto:" }),
+      { status: 400, headers: JSON_HEADERS }
+    );
+  }
+  if (current.contactPhone && current.contactPhone.length > 30) {
+    return new Response(
+      JSON.stringify({ error: "contactPhone is too long (max 30 characters)" }),
       { status: 400, headers: JSON_HEADERS }
     );
   }

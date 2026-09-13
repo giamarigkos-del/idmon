@@ -260,6 +260,17 @@ const TRANSLATIONS = {
     settingsLoadError: "Could not load settings.",
     widgetSettingsTooltip: "Widget settings",
 
+    // human handoff (Section J)
+    contactSectionTitle: "Human contact",
+    contactSectionIntro: "Shown to visitors when the assistant can't answer, so they always have a way to reach you.",
+    contactLabelLabel: "Button text",
+    contactLabelPlaceholder: "e.g. Chat with us on WhatsApp",
+    contactUrlLabel: "Contact link (optional)",
+    contactUrlPlaceholder: "https://wa.me/30... or mailto:you@example.com",
+    contactUrlHint: "Any link works: WhatsApp, email, Messenger, your contact page.",
+    contactPhoneLabel: "Phone number (optional)",
+    contactPhonePlaceholder: "+30 210 1234567",
+
     // embed layer (Section I)
     embedTooltip: "Embed on your site",
     embedTitle: "🔗 Embed on your site",
@@ -274,6 +285,7 @@ const TRANSLATIONS = {
     embedLoadError: "Could not load embed settings.",
     embedSaveErrorPrefix: "Save error: ",
     embedDomainEmptyError: "Enter a domain first.",
+    embedScriptRefreshHint: "If you change the assistant's name, color, or contact info later, copy this script again to update it on your site.",
   },
   el: {
     loading: "Φόρτωση…",
@@ -402,6 +414,17 @@ const TRANSLATIONS = {
     settingsLoadError: "Δεν ήταν δυνατή η φόρτωση ρυθμίσεων.",
     widgetSettingsTooltip: "Ρυθμίσεις widget",
 
+    // human handoff (Section J)
+    contactSectionTitle: "Επικοινωνία με άνθρωπο",
+    contactSectionIntro: "Εμφανίζεται στους επισκέπτες όταν ο βοηθός δεν μπορεί να απαντήσει, ώστε να έχουν πάντα τρόπο να σε βρουν.",
+    contactLabelLabel: "Κείμενο κουμπιού",
+    contactLabelPlaceholder: "π.χ. Μίλα μαζί μας στο WhatsApp",
+    contactUrlLabel: "Link επικοινωνίας (προαιρετικό)",
+    contactUrlPlaceholder: "https://wa.me/30... ή mailto:you@example.com",
+    contactUrlHint: "Οποιοδήποτε link δουλεύει: WhatsApp, email, Messenger, η σελίδα επικοινωνίας σου.",
+    contactPhoneLabel: "Τηλέφωνο (προαιρετικό)",
+    contactPhonePlaceholder: "+30 210 1234567",
+
     // embed layer (Section I)
     embedTooltip: "Embed στο site σου",
     embedTitle: "🔗 Embed στο site σου",
@@ -416,6 +439,7 @@ const TRANSLATIONS = {
     embedLoadError: "Δεν ήταν δυνατή η φόρτωση ρυθμίσεων embed.",
     embedSaveErrorPrefix: "Σφάλμα αποθήκευσης: ",
     embedDomainEmptyError: "Γράψε πρώτα ένα domain.",
+    embedScriptRefreshHint: "Αν αλλάξεις το όνομα, το χρώμα, ή τα στοιχεία επικοινωνίας του βοηθού αργότερα, αντίγραψε ξανά αυτό το script για να ενημερωθεί στο site σου.",
   },
 };
 

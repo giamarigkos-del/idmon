@@ -152,6 +152,97 @@ async function testForbiddenResponseShowsUnavailableMessage() {
   assert(botMessage.length > 0, "εμφανίζεται κάποιο γενικό μήνυμα αντ' αυτού");
 }
 
+async function testNoContactBarByDefault() {
+  console.log("\n[Χωρίς κανένα data-contact-* -- ΔΕΝ εμφανίζεται contact bar]");
+  const window = await withDom('data-embed-id="emb-test123"');
+  const host = window.document.getElementById("rag-embed-widget-host");
+  assert(!host.shadowRoot.querySelector(".contact-bar"), "κανένα contact-bar χωρίς ρυθμισμένη επικοινωνία");
+}
+
+async function testPersistentContactBarShown() {
+  console.log("\n[Με data-contact-label/url/phone -- persistent contact bar πάντα ορατό]");
+  const window = await withDom(
+    'data-embed-id="emb-test123" data-contact-label="Μίλα μαζί μας" ' +
+      'data-contact-url="https://wa.me/306912345678" data-contact-phone="+30 210 1234567"'
+  );
+  const host = window.document.getElementById("rag-embed-widget-host");
+  const bar = host.shadowRoot.querySelector(".contact-bar");
+  assert(!!bar, "εμφανίζεται το contact-bar όταν υπάρχει ρυθμισμένη επικοινωνία");
+  const links = bar.querySelectorAll(".contact-link");
+  assert(links.length === 2, "δύο links μέσα στο bar (link + τηλέφωνο)");
+  assert(links[0].getAttribute("href") === "https://wa.me/306912345678", "το πρώτο link δείχνει στο σωστό contactUrl");
+  assert(links[0].getAttribute("target") === "_blank", "το link ανοίγει σε νέο tab");
+  assert(links[1].getAttribute("href") === "tel:+30 210 1234567", "το δεύτερο link είναι tel: με το σωστό τηλέφωνο");
+}
+
+async function testFallbackShowsContactPrompt() {
+  console.log("\n[isFallback:true ΚΑΙ ρυθμισμένη επικοινωνία -- εμφανίζεται το fallback CTA μήνυμα]");
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () => ({ answer: "Δεν βρέθηκαν σχετικά έγγραφα.", isFallback: true }),
+  });
+  const window = await withDom(
+    'data-embed-id="emb-test123" data-contact-label="Μίλα μαζί μας" data-contact-url="https://wa.me/306912345678"',
+    fetchImpl
+  );
+  const host = window.document.getElementById("rag-embed-widget-host");
+  const input = host.shadowRoot.querySelector(".input-row input");
+  const sendBtn = host.shadowRoot.querySelector(".input-row button");
+  input.value = "κάτι που δεν ξέρει";
+  sendBtn.dispatchEvent(new window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 0));
+
+  const fallbackMsg = host.shadowRoot.querySelector(".msg.fallback-contact");
+  assert(!!fallbackMsg, "εμφανίζεται ξεχωριστό fallback-contact μήνυμα");
+  assert(fallbackMsg.textContent.includes("Δεν βρήκες"), "δείχνει το σωστό (ελληνικό, default lang) κείμενο προτροπής");
+  assert(!!fallbackMsg.querySelector(".contact-link"), "περιέχει το contact link");
+}
+
+async function testFallbackWithoutContactConfiguredShowsNothingExtra() {
+  console.log("\n[isFallback:true ΧΩΡΙΣ ρυθμισμένη επικοινωνία -- ΚΑΝΕΝΑ επιπλέον μήνυμα]");
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () => ({ answer: "Δεν βρέθηκαν σχετικά έγγραφα.", isFallback: true }),
+  });
+  const window = await withDom('data-embed-id="emb-test123"', fetchImpl);
+  const host = window.document.getElementById("rag-embed-widget-host");
+  const input = host.shadowRoot.querySelector(".input-row input");
+  const sendBtn = host.shadowRoot.querySelector(".input-row button");
+  input.value = "κάτι που δεν ξέρει";
+  sendBtn.dispatchEvent(new window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert(
+    !host.shadowRoot.querySelector(".msg.fallback-contact"),
+    "καμία fallback-contact προτροπή χωρίς ρυθμισμένη επικοινωνία (τίποτα να δείξει)"
+  );
+  const messages = host.shadowRoot.querySelectorAll(".msg");
+  assert(messages.length === 2, "μόνο τα 2 κανονικά μηνύματα (χρήστης + bot απάντηση)");
+}
+
+async function testNormalAnswerNeverShowsContactPrompt() {
+  console.log("\n[isFallback:false ΜΕ ρυθμισμένη επικοινωνία -- ΔΕΝ εμφανίζεται το CTA σε κανονική απάντηση]");
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () => ({ answer: "Είμαστε ανοιχτά 9-17.", isFallback: false }),
+  });
+  const window = await withDom(
+    'data-embed-id="emb-test123" data-contact-label="Μίλα μαζί μας" data-contact-url="https://wa.me/306912345678"',
+    fetchImpl
+  );
+  const host = window.document.getElementById("rag-embed-widget-host");
+  const input = host.shadowRoot.querySelector(".input-row input");
+  const sendBtn = host.shadowRoot.querySelector(".input-row button");
+  input.value = "τι ώρες είστε ανοιχτά";
+  sendBtn.dispatchEvent(new window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert(
+    !host.shadowRoot.querySelector(".msg.fallback-contact"),
+    "καμία fallback-contact προτροπή όταν η απάντηση δεν είναι fallback (η persistent bar αρκεί)"
+  );
+}
+
 async function run() {
   await testCreatesHostAndShadowRoot();
   await testMissingEmbedIdDoesNothing();
@@ -160,6 +251,11 @@ async function run() {
   await testSendQuestionCallsCorrectUrl();
   await testNetworkErrorShowsFallbackMessage();
   await testForbiddenResponseShowsUnavailableMessage();
+  await testNoContactBarByDefault();
+  await testPersistentContactBarShown();
+  await testFallbackShowsContactPrompt();
+  await testFallbackWithoutContactConfiguredShowsNothingExtra();
+  await testNormalAnswerNeverShowsContactPrompt();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);

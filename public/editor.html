@@ -938,6 +938,19 @@
         <input type="text" id="settingsNotifyEmail" placeholder="you@example.com" value="${escapeHtml(settings.notifyEmail || "")}">
         <div style="font-size:12px;color:var(--text-soft);margin-top:6px;">${escapeHtml(t("notifyEmailHint"))}</div>
 
+        <div class="label" style="margin-top:18px;">${escapeHtml(t("contactSectionTitle"))}</div>
+        <p style="margin:0 0 10px;font-size:12px;color:var(--text-soft);">${escapeHtml(t("contactSectionIntro"))}</p>
+
+        <div class="label">${escapeHtml(t("contactLabelLabel"))}</div>
+        <input type="text" id="settingsContactLabel" maxlength="40" placeholder="${escapeHtml(t("contactLabelPlaceholder"))}" value="${escapeHtml(settings.contactLabel || "")}">
+
+        <div class="label">${escapeHtml(t("contactUrlLabel"))}</div>
+        <input type="text" id="settingsContactUrl" placeholder="${escapeHtml(t("contactUrlPlaceholder"))}" value="${escapeHtml(settings.contactUrl || "")}">
+        <div style="font-size:12px;color:var(--text-soft);margin-top:6px;">${escapeHtml(t("contactUrlHint"))}</div>
+
+        <div class="label">${escapeHtml(t("contactPhoneLabel"))}</div>
+        <input type="text" id="settingsContactPhone" maxlength="30" placeholder="${escapeHtml(t("contactPhonePlaceholder"))}" value="${escapeHtml(settings.contactPhone || "")}">
+
         <button type="button" id="saveSettingsBtn" style="margin-top:20px;">${escapeHtml(t("saveSettingsBtn"))}</button>
         <div class="upload-status" id="settingsStatus"></div>
       </div>
@@ -951,6 +964,9 @@
         accentColor: el("settingsAccentColor").value,
         logoUrl: el("settingsLogoUrl").value.trim() || null,
         notifyEmail: el("settingsNotifyEmail").value.trim() || null,
+        contactLabel: el("settingsContactLabel").value.trim() || null,
+        contactUrl: el("settingsContactUrl").value.trim() || null,
+        contactPhone: el("settingsContactPhone").value.trim() || null,
       };
       try {
         const res = await fetch("/workspace/settings", {
@@ -976,8 +992,16 @@
   // Χωρίς ΚΑΝΕΝΑ καταχωρημένο domain, δεν εμφανίζεται καν το script tag --
   // αυτό είναι η ίδια η ασφάλεια που χτίσαμε στο backend (CORS middleware),
   // απλά αντανακλασμένη στο UI ώστε ο χρήστης να καταλαβαίνει γιατί λείπει.
-  function embedScriptTag(embedId) {
-    return `<script src="${window.location.origin}/widget.js" data-embed-id="${embedId}"></` + `script>`;
+  function embedScriptTag(embedId, settings) {
+    const attrs = [`src="${window.location.origin}/widget.js"`, `data-embed-id="${embedId}"`];
+    if (settings.accentColor) attrs.push(`data-accent-color="${escapeHtml(settings.accentColor)}"`);
+    if (settings.botName) attrs.push(`data-bot-name="${escapeHtml(settings.botName)}"`);
+    if (settings.contactLabel && settings.contactUrl) {
+      attrs.push(`data-contact-label="${escapeHtml(settings.contactLabel)}"`);
+      attrs.push(`data-contact-url="${escapeHtml(settings.contactUrl)}"`);
+    }
+    if (settings.contactPhone) attrs.push(`data-contact-phone="${escapeHtml(settings.contactPhone)}"`);
+    return `<script ${attrs.join(" ")}></` + `script>`;
   }
 
   async function patchEmbedDomains(domains) {
@@ -991,7 +1015,7 @@
     return data;
   }
 
-  function renderEmbedContent(data) {
+  function renderEmbedContent(data, settings) {
     const domainsListHtml = data.domains.length
       ? data.domains
           .map(
@@ -1014,8 +1038,9 @@
         <div class="label">${escapeHtml(t("embedScriptLabel"))}</div>
         <pre style="background:var(--surface-2);border:1px solid var(--border);border-radius:6px;
                      padding:10px 12px;font-size:12px;overflow-x:auto;white-space:pre-wrap;
-                     word-break:break-all;"><code id="embedScriptCode">${escapeHtml(embedScriptTag(data.embedId))}</code></pre>
+                     word-break:break-all;"><code id="embedScriptCode">${escapeHtml(embedScriptTag(data.embedId, settings))}</code></pre>
         <button type="button" id="embedCopyBtn">${escapeHtml(t("embedCopyBtn"))}</button>
+        <div style="font-size:11.5px;color:var(--text-soft);margin-top:8px;">${escapeHtml(t("embedScriptRefreshHint"))}</div>
       `
       : "";
 
@@ -1038,7 +1063,7 @@
     `;
   }
 
-  function wireEmbedEvents(data) {
+  function wireEmbedEvents(data, settings) {
     const main = el("mainPanel");
     const status = el("embedStatus");
 
@@ -1048,8 +1073,8 @@
         const remaining = data.domains.filter((d) => d !== btn.dataset.domain);
         try {
           const updated = await patchEmbedDomains(remaining);
-          main.innerHTML = renderEmbedContent(updated);
-          wireEmbedEvents(updated);
+          main.innerHTML = renderEmbedContent(updated, settings);
+          wireEmbedEvents(updated, settings);
         } catch (err) {
           status.textContent = t("embedSaveErrorPrefix") + err.message;
           status.style.color = "var(--danger)";
@@ -1068,8 +1093,8 @@
       }
       try {
         const updated = await patchEmbedDomains([...data.domains, value]);
-        main.innerHTML = renderEmbedContent(updated);
-        wireEmbedEvents(updated);
+        main.innerHTML = renderEmbedContent(updated, settings);
+        wireEmbedEvents(updated, settings);
       } catch (err) {
         status.textContent = t("embedSaveErrorPrefix") + err.message;
         status.style.color = "var(--danger)";
@@ -1079,7 +1104,7 @@
     const copyBtn = el("embedCopyBtn");
     if (copyBtn) {
       copyBtn.addEventListener("click", async () => {
-        await navigator.clipboard.writeText(embedScriptTag(data.embedId));
+        await navigator.clipboard.writeText(embedScriptTag(data.embedId, settings));
         status.textContent = t("embedCopiedMsg");
         status.style.color = "var(--ok)";
       });
@@ -1092,18 +1117,22 @@
     const main = el("mainPanel");
     main.innerHTML = `<div class="main-placeholder">${escapeHtml(t("loading"))}</div>`;
 
-    let data;
+    let data, settings;
     try {
-      const res = await fetch("/embed/domains", { headers: HEADERS });
-      if (!res.ok) throw new Error("bad response");
-      data = await res.json();
+      const [domainsRes, settingsRes] = await Promise.all([
+        fetch("/embed/domains", { headers: HEADERS }),
+        fetch("/workspace/settings", { headers: HEADERS }),
+      ]);
+      if (!domainsRes.ok || !settingsRes.ok) throw new Error("bad response");
+      data = await domainsRes.json();
+      settings = await settingsRes.json();
     } catch (err) {
       main.innerHTML = `<div class="main-placeholder">${escapeHtml(t("embedLoadError"))}</div>`;
       return;
     }
 
-    main.innerHTML = renderEmbedContent(data);
-    wireEmbedEvents(data);
+    main.innerHTML = renderEmbedContent(data, settings);
+    wireEmbedEvents(data, settings);
   }
 
   el("embedBtn").addEventListener("click", renderEmbedPanel);

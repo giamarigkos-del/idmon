@@ -41,6 +41,15 @@
   var lang = (scriptTag.getAttribute("data-lang") || "el").toLowerCase();
   var position = scriptTag.getAttribute("data-position") === "bottom-left" ? "bottom-left" : "bottom-right";
 
+  // Section J: human handoff -- προαιρετικά, ο πελάτης μπορεί να μην έχει
+  // ρυθμίσει τίποτα από αυτά ακόμα (backward compatible, καμία αλλαγή UI
+  // αν λείπουν).
+  var contactLabel = scriptTag.getAttribute("data-contact-label");
+  var contactUrl = scriptTag.getAttribute("data-contact-url");
+  var contactPhone = scriptTag.getAttribute("data-contact-phone");
+  var hasContactLink = !!(contactLabel && contactUrl);
+  var hasContact = hasContactLink || !!contactPhone;
+
   var STRINGS = {
     el: {
       disclosure: "Απαντήσεις από AI",
@@ -50,6 +59,7 @@
       unavailable: "Ο βοηθός δεν είναι διαθέσιμος αυτή τη στιγμή.",
       openLabel: "Άνοιγμα βοηθού",
       closeLabel: "Κλείσιμο",
+      fallbackContactPrompt: "Δεν βρήκες αυτό που ήθελες;",
     },
     en: {
       disclosure: "AI-generated answers",
@@ -59,6 +69,7 @@
       unavailable: "This assistant is currently unavailable right now.",
       openLabel: "Open assistant",
       closeLabel: "Close",
+      fallbackContactPrompt: "Didn't find what you needed?",
     },
   };
   var t = STRINGS[lang] || STRINGS.el;
@@ -93,6 +104,13 @@
     ".msg{max-width:82%;padding:9px 12px;border-radius:10px;font-size:13.5px;line-height:1.45;word-wrap:break-word;}" +
     ".msg.user{align-self:flex-end;background:" + accentColor + ";color:#fff;border-bottom-right-radius:2px;}" +
     ".msg.bot{align-self:flex-start;background:#fff;color:#1a1a1a;border:1px solid #e3e3e6;border-bottom-left-radius:2px;}" +
+    ".msg.fallback-contact{align-self:flex-start;max-width:92%;background:#fff;color:#1a1a1a;" +
+    "border:1px solid #e3e3e6;border-left:3px solid " + accentColor + ";border-bottom-left-radius:2px;}" +
+    ".fallback-contact-text{margin-bottom:6px;}" +
+    ".contact-bar{display:flex;flex-wrap:wrap;gap:6px;padding:8px 14px;background:#fff;border-bottom:1px solid #e3e3e6;}" +
+    ".contact-link{display:inline-block;font-size:11.5px;font-weight:700;color:#fff;background:" + accentColor + ";" +
+    "padding:4px 10px;border-radius:12px;text-decoration:none;white-space:nowrap;}" +
+    ".contact-link:hover{opacity:.85;}" +
     ".input-row{display:flex;gap:8px;padding:10px;border-top:1px solid #e3e3e6;background:#fff;}" +
     ".input-row input{flex:1;border:1px solid #d8d8dc;border-radius:8px;padding:9px 10px;font-size:13.5px;outline:none;}" +
     ".input-row input:focus{border-color:" + accentColor + ";}" +
@@ -100,6 +118,28 @@
     "padding:0 14px;font-size:13px;font-weight:600;cursor:pointer;}" +
     ".input-row button:disabled{opacity:.5;cursor:default;}";
   root.appendChild(style);
+
+  function escapeAttr(str) {
+    return String(str).replace(/"/g, "&quot;");
+  }
+
+  // Χρησιμοποιείται ΚΑΙ στο πάντα-ορατό contact-bar κάτω από τον τίτλο, ΚΑΙ
+  // στο πιο έντονο μήνυμα που εμφανίζεται κάτω από κάθε "δεν γνωρίζω"
+  // απάντηση -- ίδιο HTML, δύο σημεία εμφάνισης (πάντα-ορατό + πιο έντονο
+  // σε fallback, σύμφωνα με τις βέλτιστες πρακτικές human handoff).
+  function contactLinksHtml() {
+    var parts = [];
+    if (hasContactLink) {
+      parts.push(
+        '<a class="contact-link" href="' + escapeAttr(contactUrl) + '" target="_blank" rel="noopener noreferrer">' +
+        escapeHtml(contactLabel) + "</a>"
+      );
+    }
+    if (contactPhone) {
+      parts.push('<a class="contact-link" href="tel:' + escapeAttr(contactPhone) + '">📞 ' + escapeHtml(contactPhone) + "</a>");
+    }
+    return parts.join(" ");
+  }
 
   var bubble = document.createElement("button");
   bubble.className = "bubble";
@@ -118,6 +158,7 @@
     "  </div>" +
     '  <span class="header-sub"></span>' +
     "</div>" +
+    (hasContact ? '<div class="contact-bar">' + contactLinksHtml() + "</div>" : "") +
     '<div class="messages"></div>' +
     '<div class="input-row">' +
     '  <input type="text" />' +
@@ -163,6 +204,20 @@
     return el;
   }
 
+  // Ξεχωριστό, πιο έντονο "μήνυμα" (όχι σκέτο bot bubble) που εμφανίζεται
+  // ΜΟΝΟ κάτω από μια "δεν γνωρίζω" απάντηση -- σύμφωνα με τις βέλτιστες
+  // πρακτικές human handoff: πάντα ορατή επιλογή επικοινωνίας, αλλά πιο
+  // επιτακτική/εμφανής ακριβώς εκεί που το bot αποτυγχάνει.
+  function addFallbackContactPrompt() {
+    var el = document.createElement("div");
+    el.className = "msg fallback-contact";
+    el.innerHTML =
+      '<div class="fallback-contact-text">' + escapeHtml(t.fallbackContactPrompt) + "</div>" + contactLinksHtml();
+    messagesEl.appendChild(el);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return el;
+  }
+
   function setOpen(open) {
     panel.classList.toggle("open", open);
     if (open) inputEl.focus();
@@ -202,6 +257,9 @@
         addMessage("bot", escapeHtml(t.unavailable));
       } else {
         addMessage("bot", formatAnswer(data.answer));
+        if (data.isFallback && hasContact) {
+          addFallbackContactPrompt();
+        }
       }
     } catch (err) {
       loadingEl.remove();

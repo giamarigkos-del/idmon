@@ -52,7 +52,37 @@ const STRINGS = {
   embedLoadError: "Could not load embed settings.",
   embedSaveErrorPrefix: "Save error: ",
   embedDomainEmptyError: "Enter a domain first.",
+  embedScriptRefreshHint: "If you change settings later, copy this script again.",
 };
+
+const DEFAULT_SETTINGS = {
+  accentColor: "#6B7280",
+  botName: "Assistant",
+  logoUrl: null,
+  notifyEmail: null,
+  contactLabel: null,
+  contactUrl: null,
+  contactPhone: null,
+};
+
+// renderEmbedPanel κάνει ΔΥΟ παράλληλα fetch (Promise.all): /embed/domains
+// και /workspace/settings. Αυτό το helper δρομολογεί κάθε mock fetch στη
+// σωστή απάντηση ανάλογα με το URL, ώστε κάθε test να ορίζει μόνο ό,τι
+// πραγματικά χρειάζεται.
+function makeFetchImpl({ domains, settings, onPatch } = {}) {
+  return async (url, options) => {
+    if (url.includes("/workspace/settings")) {
+      return { ok: true, json: async () => settings || DEFAULT_SETTINGS };
+    }
+    if (url.includes("/embed/domains")) {
+      if (options && options.method === "PATCH") {
+        return onPatch(JSON.parse(options.body));
+      }
+      return domains || { ok: true, json: async () => ({ embedId: "emb-abc123", domains: [] }) };
+    }
+    throw new Error("Απρόσμενο URL στο mock fetch: " + url);
+  };
+}
 
 function buildHarness(fetchImpl) {
   const preamble = `
@@ -89,7 +119,9 @@ function buildHarness(fetchImpl) {
 
 async function testRendersHintWhenNoDomains() {
   console.log("\n[renderEmbedPanel -- κανένα domain ακόμα]");
-  const fetchImpl = async () => ({ ok: true, json: async () => ({ embedId: "emb-abc123", domains: [] }) });
+  const fetchImpl = makeFetchImpl({
+    domains: { ok: true, json: async () => ({ embedId: "emb-abc123", domains: [] }) },
+  });
   const window = buildHarness(fetchImpl);
   await window.renderEmbedPanel();
   const main = window.document.getElementById("mainPanel");
@@ -99,9 +131,8 @@ async function testRendersHintWhenNoDomains() {
 
 async function testRendersScriptWhenDomainExists() {
   console.log("\n[renderEmbedPanel -- υπάρχει ήδη domain]");
-  const fetchImpl = async () => ({
-    ok: true,
-    json: async () => ({ embedId: "emb-abc123", domains: ["pelatis.gr"] }),
+  const fetchImpl = makeFetchImpl({
+    domains: { ok: true, json: async () => ({ embedId: "emb-abc123", domains: ["pelatis.gr"] }) },
   });
   const window = buildHarness(fetchImpl);
   await window.renderEmbedPanel();
@@ -114,16 +145,50 @@ async function testRendersScriptWhenDomainExists() {
   assert(!!main.querySelector('[data-domain="pelatis.gr"]'), "το domain εμφανίζεται στη λίστα");
 }
 
+async function testScriptTagIncludesSettings() {
+  console.log("\n[renderEmbedPanel -- το script tag κουβαλάει branding + επικοινωνία]");
+  const fetchImpl = makeFetchImpl({
+    domains: { ok: true, json: async () => ({ embedId: "emb-abc123", domains: ["pelatis.gr"] }) },
+    settings: {
+      accentColor: "#123ABC",
+      botName: "Βοηθός Πωλήσεων",
+      contactLabel: "Μίλα μαζί μας",
+      contactUrl: "https://wa.me/306912345678",
+      contactPhone: "+30 210 1234567",
+    },
+  });
+  const window = buildHarness(fetchImpl);
+  await window.renderEmbedPanel();
+  const codeText = window.document.getElementById("embedScriptCode").textContent;
+  assert(codeText.includes('data-accent-color="#123ABC"'), "το script tag περιέχει το ρυθμισμένο χρώμα");
+  assert(codeText.includes('data-bot-name="Βοηθός Πωλήσεων"'), "το script tag περιέχει το ρυθμισμένο όνομα bot");
+  assert(codeText.includes('data-contact-label="Μίλα μαζί μας"'), "το script tag περιέχει το contact label");
+  assert(codeText.includes('data-contact-url="https://wa.me/306912345678"'), "το script tag περιέχει το contact url");
+  assert(codeText.includes('data-contact-phone="+30 210 1234567"'), "το script tag περιέχει το τηλέφωνο");
+}
+
+async function testScriptTagOmitsEmptyContactFields() {
+  console.log("\n[renderEmbedPanel -- χωρίς ρυθμισμένη επικοινωνία, το script tag ΔΕΝ έχει data-contact-*]");
+  const fetchImpl = makeFetchImpl({
+    domains: { ok: true, json: async () => ({ embedId: "emb-abc123", domains: ["pelatis.gr"] }) },
+    settings: DEFAULT_SETTINGS,
+  });
+  const window = buildHarness(fetchImpl);
+  await window.renderEmbedPanel();
+  const codeText = window.document.getElementById("embedScriptCode").textContent;
+  assert(!codeText.includes("data-contact-"), "κανένα data-contact-* attribute όταν δεν έχει ρυθμιστεί επικοινωνία");
+}
+
 async function testAddDomainSendsCorrectPatch() {
   console.log("\n[Προσθήκη domain -- σωστό PATCH body]");
   let patchBody = null;
-  const fetchImpl = async (url, options) => {
-    if (!options || options.method !== "PATCH") {
-      return { ok: true, json: async () => ({ embedId: "emb-abc123", domains: [] }) };
-    }
-    patchBody = JSON.parse(options.body);
-    return { ok: true, json: async () => ({ embedId: "emb-abc123", domains: ["newsite.gr"] }) };
-  };
+  const fetchImpl = makeFetchImpl({
+    domains: { ok: true, json: async () => ({ embedId: "emb-abc123", domains: [] }) },
+    onPatch: (body) => {
+      patchBody = body;
+      return { ok: true, json: async () => ({ embedId: "emb-abc123", domains: ["newsite.gr"] }) };
+    },
+  });
   const window = buildHarness(fetchImpl);
   await window.renderEmbedPanel();
   window.document.getElementById("embedNewDomainInput").value = "newsite.gr";
@@ -138,10 +203,13 @@ async function testAddDomainSendsCorrectPatch() {
 async function testEmptyDomainShowsError() {
   console.log("\n[Προσθήκη κενού domain -- εμφανίζει σφάλμα, ΔΕΝ στέλνει PATCH]");
   let patchCalled = false;
-  const fetchImpl = async (url, options) => {
-    if (options && options.method === "PATCH") patchCalled = true;
-    return { ok: true, json: async () => ({ embedId: "emb-abc123", domains: [] }) };
-  };
+  const fetchImpl = makeFetchImpl({
+    domains: { ok: true, json: async () => ({ embedId: "emb-abc123", domains: [] }) },
+    onPatch: (body) => {
+      patchCalled = true;
+      return { ok: true, json: async () => ({ embedId: "emb-abc123", domains: [] }) };
+    },
+  });
   const window = buildHarness(fetchImpl);
   await window.renderEmbedPanel();
   window.document.getElementById("embedNewDomainInput").value = "   ";
@@ -155,13 +223,13 @@ async function testEmptyDomainShowsError() {
 async function testRemoveDomain() {
   console.log("\n[Αφαίρεση domain -- σωστό PATCH body χωρίς το αφαιρεμένο]");
   let patchBody = null;
-  let callCount = 0;
-  const fetchImpl = async (url, options) => {
-    callCount++;
-    if (callCount === 1) return { ok: true, json: async () => ({ embedId: "emb-abc123", domains: ["a.gr", "b.gr"] }) };
-    patchBody = JSON.parse(options.body);
-    return { ok: true, json: async () => ({ embedId: "emb-abc123", domains: ["b.gr"] }) };
-  };
+  const fetchImpl = makeFetchImpl({
+    domains: { ok: true, json: async () => ({ embedId: "emb-abc123", domains: ["a.gr", "b.gr"] }) },
+    onPatch: (body) => {
+      patchBody = body;
+      return { ok: true, json: async () => ({ embedId: "emb-abc123", domains: ["b.gr"] }) };
+    },
+  });
   const window = buildHarness(fetchImpl);
   await window.renderEmbedPanel();
   window.document.querySelector('.embed-remove-domain-btn[data-domain="a.gr"]').dispatchEvent(
@@ -176,7 +244,9 @@ async function testRemoveDomain() {
 
 async function testLoadErrorShowsMessage() {
   console.log("\n[GET /embed/domains αποτυγχάνει -- δείχνει μήνυμα λάθους, όχι crash]");
-  const fetchImpl = async () => ({ ok: false, json: async () => ({ error: "server error" }) });
+  const fetchImpl = makeFetchImpl({
+    domains: { ok: false, json: async () => ({ error: "server error" }) },
+  });
   const window = buildHarness(fetchImpl);
   await window.renderEmbedPanel();
   const main = window.document.getElementById("mainPanel");
@@ -186,6 +256,8 @@ async function testLoadErrorShowsMessage() {
 async function run() {
   await testRendersHintWhenNoDomains();
   await testRendersScriptWhenDomainExists();
+  await testScriptTagIncludesSettings();
+  await testScriptTagOmitsEmptyContactFields();
   await testAddDomainSendsCorrectPatch();
   await testEmptyDomainShowsError();
   await testRemoveDomain();

@@ -41,6 +41,9 @@ async function testDefaults() {
   assert(data.botName === "Assistant", "default botName = Assistant");
   assert(data.logoUrl === null, "default logoUrl = null");
   assert(data.notifyEmail === null, "default notifyEmail = null");
+  assert(data.contactLabel === null, "default contactLabel = null");
+  assert(data.contactUrl === null, "default contactUrl = null");
+  assert(data.contactPhone === null, "default contactPhone = null");
 }
 
 async function testPatchAndReread() {
@@ -50,6 +53,9 @@ async function testPatchAndReread() {
     botName: "Βοηθός Πωλήσεων",
     logoUrl: "https://example.com/logo.png",
     notifyEmail: "owner@example.com",
+    contactLabel: "Μίλα μαζί μας στο WhatsApp",
+    contactUrl: "https://wa.me/306912345678",
+    contactPhone: "+30 210 1234567",
   };
   const patchRes = await fetch(`${BASE_URL}/workspace/settings`, {
     method: "PATCH",
@@ -64,6 +70,9 @@ async function testPatchAndReread() {
   const reread = await getRes.json();
   assert(reread.botName === "Βοηθός Πωλήσεων", "GET μετά το PATCH βλέπει το νέο botName (persist σε KV)");
   assert(reread.notifyEmail === "owner@example.com", "GET μετά το PATCH βλέπει το νέο notifyEmail");
+  assert(reread.contactLabel === "Μίλα μαζί μας στο WhatsApp", "GET μετά το PATCH βλέπει το νέο contactLabel");
+  assert(reread.contactUrl === "https://wa.me/306912345678", "GET μετά το PATCH βλέπει το νέο contactUrl");
+  assert(reread.contactPhone === "+30 210 1234567", "GET μετά το PATCH βλέπει το νέο contactPhone");
 }
 
 async function testWhitelistIgnoresUnknownFields() {
@@ -99,6 +108,38 @@ async function testInvalidEmail() {
   assert(res.status === 400, "status 400 για άκυρο email");
 }
 
+async function testInvalidContactUrl() {
+  console.log("\n[PATCH /workspace/settings -- contactUrl χωρίς scheme]");
+  const res = await fetch(`${BASE_URL}/workspace/settings`, {
+    method: "PATCH",
+    headers: HEADERS,
+    body: JSON.stringify({ contactUrl: "wa.me/306912345678" }),
+  });
+  assert(res.status === 400, "status 400 όταν λείπει το scheme (π.χ. https://, mailto:, tel:)");
+}
+
+async function testValidContactUrlSchemes() {
+  console.log("\n[PATCH /workspace/settings -- διάφορα έγκυρα contactUrl schemes]");
+  for (const url of ["mailto:owner@example.com", "tel:+306912345678", "https://wa.me/306912345678"]) {
+    const res = await fetch(`${BASE_URL}/workspace/settings`, {
+      method: "PATCH",
+      headers: HEADERS,
+      body: JSON.stringify({ contactUrl: url }),
+    });
+    assert(res.status === 200, `status 200 για ${url}`);
+  }
+}
+
+async function testContactLabelTooLong() {
+  console.log("\n[PATCH /workspace/settings -- πολύ μακρύ contactLabel]");
+  const res = await fetch(`${BASE_URL}/workspace/settings`, {
+    method: "PATCH",
+    headers: HEADERS,
+    body: JSON.stringify({ contactLabel: "x".repeat(41) }),
+  });
+  assert(res.status === 400, "status 400 (όριο 40 χαρακτήρων)");
+}
+
 async function run() {
   console.log(`Test workspace: ${TEST_WORKSPACE_ID}`);
   await testMissingWorkspaceHeader();
@@ -107,6 +148,9 @@ async function run() {
   await testWhitelistIgnoresUnknownFields();
   await testInvalidAccentColor();
   await testInvalidEmail();
+  await testInvalidContactUrl();
+  await testValidContactUrlSchemes();
+  await testContactLabelTooLong();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
