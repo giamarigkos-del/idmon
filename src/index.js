@@ -142,16 +142,19 @@ async function handleSignup(request, env) {
   const salt = randomHex(16);
   const passwordHash = await hashPassword(password, salt);
   const workspaceId = `ws-${randomHex(12)}`;
+  // Ξεχωριστό από το workspaceId ρητά -- αυτό είναι το ΜΟΝΟ αναγνωριστικό
+  // που επιτρέπεται να εμφανίζεται σε δημόσιο <script> tag (βλ. Section I).
+  const embedId = `emb-${randomHex(12)}`;
   const createdAt = new Date().toISOString();
 
   const result = await env.DB.prepare(
-    "INSERT INTO users (email, password_hash, password_salt, workspace_id, created_at) VALUES (?, ?, ?, ?, ?)"
-  ).bind(email, passwordHash, salt, workspaceId, createdAt).run();
+    "INSERT INTO users (email, password_hash, password_salt, workspace_id, embed_id, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+  ).bind(email, passwordHash, salt, workspaceId, embedId, createdAt).run();
 
   const session = await createSession(env, result.meta.last_row_id, workspaceId);
 
   return new Response(
-    JSON.stringify({ ok: true, sessionToken: session.token, workspaceId }),
+    JSON.stringify({ ok: true, sessionToken: session.token, workspaceId, embedId }),
     { headers: JSON_HEADERS }
   );
 }
@@ -169,7 +172,7 @@ async function handleLogin(request, env) {
   if (!email || !password) return jsonError(400, "Email and password are required");
 
   const user = await env.DB.prepare(
-    "SELECT id, password_hash, password_salt, workspace_id FROM users WHERE email = ?"
+    "SELECT id, password_hash, password_salt, workspace_id, embed_id FROM users WHERE email = ?"
   ).bind(email).first();
 
   // Το ΙΔΙΟ γενικό μήνυμα λάθους είτε δεν υπάρχει το email είτε το password
@@ -183,7 +186,7 @@ async function handleLogin(request, env) {
   const session = await createSession(env, user.id, user.workspace_id);
 
   return new Response(
-    JSON.stringify({ ok: true, sessionToken: session.token, workspaceId: user.workspace_id }),
+    JSON.stringify({ ok: true, sessionToken: session.token, workspaceId: user.workspace_id, embedId: user.embed_id }),
     { headers: JSON_HEADERS }
   );
 }

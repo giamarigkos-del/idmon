@@ -37,6 +37,7 @@ async function testSignup() {
   assert(data.ok === true, "ok === true");
   assert(typeof data.sessionToken === "string" && data.sessionToken.length === 64, "sessionToken είναι 64-char hex (32 bytes)");
   assert(typeof data.workspaceId === "string" && data.workspaceId.startsWith("ws-"), "workspaceId έχει το σωστό prefix");
+  assert(typeof data.embedId === "string" && data.embedId.startsWith("emb-"), "embedId έχει το σωστό prefix");
   return data;
 }
 
@@ -80,7 +81,7 @@ async function testLoginUnknownEmail() {
   assert(res.status === 401, "status 401 (ίδιο μήνυμα με λάθος password -- δεν αποκαλύπτουμε ποιο emails υπάρχουν)");
 }
 
-async function testLoginCorrect(expectedWorkspaceId) {
+async function testLoginCorrect(expectedWorkspaceId, expectedEmbedId) {
   console.log("\n[POST /account/login -- σωστά στοιχεία]");
   const res = await fetch(`${BASE_URL}/account/login`, {
     method: "POST",
@@ -90,6 +91,7 @@ async function testLoginCorrect(expectedWorkspaceId) {
   const data = await res.json();
   assert(res.status === 200, "status 200");
   assert(data.workspaceId === expectedWorkspaceId, "επιστρέφει το ΙΔΙΟ workspaceId με το signup");
+  assert(data.embedId === expectedEmbedId, "επιστρέφει το ΙΔΙΟ embedId με το signup");
   assert(typeof data.sessionToken === "string", "νέο sessionToken δημιουργήθηκε");
   return data.sessionToken;
 }
@@ -151,7 +153,7 @@ async function run() {
   await testWeakPassword();
   await testLoginWrongPassword();
   await testLoginUnknownEmail();
-  const loginToken = await testLoginCorrect(signupData.workspaceId);
+  const loginToken = await testLoginCorrect(signupData.workspaceId, signupData.embedId);
   await testSessionResolvesWorkspace(loginToken, signupData.workspaceId);
   await testForgedWorkspaceIdIgnoredWhenSessionPresent(loginToken);
   await testLogoutInvalidatesSession(loginToken);
