@@ -234,6 +234,23 @@
   .slug-hint{font-size:11.5px;color:var(--text-soft);margin-top:-2px;}
   .upload-limit-hint{font-size:11.5px;color:var(--text-soft);margin-top:-2px;}
 
+  /* Section K: analytics bar chart -- σκόπιμα plain CSS, καμία εξωτερική
+     βιβλιοθήκη γραφημάτων. Κάθε bar είναι δύο-χρωμο (κόκκινο πάνω μέρος =
+     fallback, accent-χρώμα κάτω μέρος = απαντημένες), ώστε να φαίνεται ΚΑΙ
+     ο όγκος ΚΑΙ η αναλογία fallback με μια ματιά. */
+  .analytics-chart{display:flex;align-items:flex-end;gap:2px;height:140px;
+    margin:16px 0 4px;background:var(--surface-2);border:1px solid var(--border);
+    border-radius:6px;padding:8px;}
+  .analytics-bar-col{flex:1;height:100%;display:flex;align-items:flex-end;min-width:2px;}
+  .analytics-bar{width:100%;display:flex;flex-direction:column;border-radius:2px 2px 0 0;
+    overflow:hidden;min-height:2px;}
+  .analytics-bar-fallback{background:var(--danger);width:100%;}
+  .analytics-bar-answered{background:var(--accent);width:100%;}
+  .analytics-range-btn{border:1px solid var(--border);background:var(--surface-2);
+    color:var(--text-soft);border-radius:6px;padding:6px 14px;font-size:12.5px;
+    cursor:pointer;font-family:inherit;}
+  .analytics-range-btn.active{background:var(--accent);color:var(--on-accent);border-color:var(--accent);}
+
   /* Σε στενές οθόνες, το sidebar (σταθερό πλάτος) σπρώχνει το main panel
      εκτός οθόνης -- εδώ το κύριο panel πάει ΚΑΤΩ από το sidebar αντί
      να εξαφανίζεται. */
@@ -255,6 +272,7 @@
       <a class="back-link" href="/">←Portal</a>
       <button type="button" class="icon-btn" id="settingsBtn" data-i18n-title="widgetSettingsTooltip" title="Widget settings">⚙</button>
       <button type="button" class="icon-btn" id="embedBtn" data-i18n-title="embedTooltip" title="Embed on your site">🔗</button>
+      <button type="button" class="icon-btn" id="analyticsBtn" data-i18n-title="analyticsTooltip" title="Analytics">📊</button>
       <div class="lang-toggle" id="langToggle">
         <button type="button" class="lang-btn" data-lang="en">EN</button>
         <button type="button" class="lang-btn" data-lang="el">GR</button>
@@ -1136,6 +1154,106 @@
   }
 
   el("embedBtn").addEventListener("click", renderEmbedPanel);
+
+  // Section K: πάνελ analytics -- μεγάλοι αριθμοί + απλό CSS bar chart
+  // (χωρίς εξωτερική βιβλιοθήκη γραφημάτων, το ίδιο πνεύμα με το widget.js:
+  // λιγότερες εξαρτήσεις, μικρότερο ρίσκο). Δύο-χρωμα bars: το κόκκινο
+  // κομμάτι δείχνει το ποσοστό fallback μέσα στη συνολική ερωτήσεις της
+  // ημέρας, ώστε να φαίνεται ΚΑΙ ο όγκος ΚΑΙ η αναλογία με μια ματιά.
+  let currentAnalyticsDays = 30;
+
+  function renderAnalyticsChart(daily) {
+    if (daily.every((d) => d.total === 0)) {
+      return `<p style="font-size:12.5px;color:var(--text-soft);">${escapeHtml(t("analyticsNoData"))}</p>`;
+    }
+    const maxTotal = Math.max(1, ...daily.map((d) => d.total));
+    const bars = daily
+      .map((d) => {
+        const totalPct = (d.total / maxTotal) * 100;
+        const fallbackPct = d.total > 0 ? (d.fallback / d.total) * 100 : 0;
+        const answeredPct = 100 - fallbackPct;
+        const tooltip = `${d.date}: ${d.total} ${t("totalQuestionsLabel")}, ${d.fallback} ${t("totalFallbackLabel")}`;
+        return `
+          <div class="analytics-bar-col" title="${escapeHtml(tooltip)}">
+            <div class="analytics-bar" style="height:${totalPct}%;">
+              <div class="analytics-bar-fallback" style="height:${fallbackPct}%;"></div>
+              <div class="analytics-bar-answered" style="height:${answeredPct}%;"></div>
+            </div>
+          </div>`;
+      })
+      .join("");
+    return `<div class="analytics-chart">${bars}</div>`;
+  }
+
+  function renderAnalyticsContent(data) {
+    const rangeBtn = (days, label) => `
+      <button type="button" class="analytics-range-btn${days === currentAnalyticsDays ? " active" : ""}" data-days="${days}">
+        ${escapeHtml(label)}
+      </button>`;
+
+    return `
+      <div class="edit-form" style="max-width:640px;">
+        <h2 style="margin:0 0 4px;font-size:16px;">${escapeHtml(t("analyticsTitle"))}</h2>
+        <p style="margin:0 0 16px;font-size:13px;color:var(--text-soft);">${escapeHtml(t("analyticsIntro"))}</p>
+
+        <div style="display:flex;gap:24px;margin-bottom:16px;flex-wrap:wrap;">
+          <div>
+            <div style="font-size:24px;font-weight:700;">${data.totalQuestions}</div>
+            <div style="font-size:12px;color:var(--text-soft);">${escapeHtml(t("totalQuestionsLabel"))}</div>
+          </div>
+          <div>
+            <div style="font-size:24px;font-weight:700;color:var(--danger);">${data.totalFallback}</div>
+            <div style="font-size:12px;color:var(--text-soft);">${escapeHtml(t("totalFallbackLabel"))}</div>
+          </div>
+          <div>
+            <div style="font-size:24px;font-weight:700;">${data.fallbackRate}%</div>
+            <div style="font-size:12px;color:var(--text-soft);">${escapeHtml(t("fallbackRateLabel"))}</div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:6px;">
+          ${rangeBtn(7, t("analytics7Days"))}
+          ${rangeBtn(30, t("analytics30Days"))}
+          ${rangeBtn(90, t("analytics90Days"))}
+        </div>
+
+        ${renderAnalyticsChart(data.daily)}
+        <p style="font-size:11.5px;color:var(--text-soft);margin-top:6px;">${escapeHtml(t("analyticsChartCaption"))}</p>
+      </div>
+    `;
+  }
+
+  function wireAnalyticsEvents() {
+    const main = el("mainPanel");
+    main.querySelectorAll(".analytics-range-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        currentAnalyticsDays = parseInt(btn.dataset.days, 10);
+        renderAnalyticsPanel();
+      });
+    });
+  }
+
+  async function renderAnalyticsPanel() {
+    if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
+    currentSelectedId = null;
+    const main = el("mainPanel");
+    main.innerHTML = `<div class="main-placeholder">${escapeHtml(t("loading"))}</div>`;
+
+    let data;
+    try {
+      const res = await fetch(`/analytics/summary?days=${currentAnalyticsDays}`, { headers: HEADERS });
+      if (!res.ok) throw new Error("bad response");
+      data = await res.json();
+    } catch (err) {
+      main.innerHTML = `<div class="main-placeholder">${escapeHtml(t("analyticsLoadError"))}</div>`;
+      return;
+    }
+
+    main.innerHTML = renderAnalyticsContent(data);
+    wireAnalyticsEvents();
+  }
+
+  el("analyticsBtn").addEventListener("click", renderAnalyticsPanel);
 
   el("allDocsBtn").addEventListener("click", () => {
     if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }

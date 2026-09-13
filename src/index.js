@@ -6,6 +6,13 @@ const MAX_UPLOAD_WORDS = 8000;
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 const FALLBACK_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 ημέρες
 
+// Section K: analytics -- ελαφριά ημερήσια καταγραφή (ΧΩΡΙΣ το ίδιο το
+// κείμενο της ερώτησης, μόνο μετρητές). 90 ημέρες αρκούν για trend chart,
+// αυτο-καθαρίζεται μέσω TTL όπως και το fallback log, καμία cron διαδικασία.
+const ANALYTICS_TTL_SECONDS = 60 * 60 * 24 * 90; // 90 ημέρες
+const DEFAULT_ANALYTICS_DAYS = 30;
+const MAX_ANALYTICS_DAYS = 90;
+
 // Το πραγματικό workspace του διαχειριστή -- ΠΟΤΕ καμία λήξη σε τίποτα εδώ
 // (draft, deleted, ή δημοσιευμένο). Κάθε άλλο workspace (τυχαίοι επισκέπτες
 // με το δικό τους αυτόματο, τοπικά-αποθηκευμένο ID) παίρνει ενιαία λήξη
@@ -568,6 +575,69 @@ async function logFallbackQuestion(env, workspaceId, question) {
   }
 }
 
+// Section K: analytics.
+//
+// "YYYY-MM-DD" σε UTC -- σταθερό, χωρίς εξάρτηση από timezone του server ή
+// του χρήστη. Το offsetDays=0 είναι σήμερα, offsetDays=1 είναι χθες, κλπ.
+function dateKeyFor(offsetDays) {
+  const d = new Date(Date.now() - offsetDays * 24 * 60 * 60 * 1000);
+  return d.toISOString().slice(0, 10);
+}
+
+// Best-effort, ΠΟΤΕ δεν πρέπει να μπλοκάρει ή να σπάσει την απάντηση προς
+// τον χρήστη -- ίδια φιλοσοφία με το logFallbackQuestion. ΔΕΝ αποθηκεύεται
+// το ίδιο το κείμενο της ερώτησης εδώ, μόνο μετρητές ανά ημέρα.
+//
+// KV δεν έχει atomic increment -- get+put με πιθανό race condition σε πολύ
+// σπάνια ταυτόχρονα requests. Αποδεκτό ρίσκο για αυτή την κλίμακα (demo/
+// μικρή επιχείρηση), ίδιο επίπεδο συνέπειας με άλλα σημεία του κώδικα.
+async function recordAnalytics(env, workspaceId, isFallback) {
+  try {
+    const key = `analytics:${workspaceId}:${dateKeyFor(0)}`;
+    const raw = await env.DOCUMENT_REGISTRY.get(key);
+    const current = raw ? JSON.parse(raw) : { total: 0, fallback: 0 };
+    current.total += 1;
+    if (isFallback) current.fallback += 1;
+    await env.DOCUMENT_REGISTRY.put(key, JSON.stringify(current), { expirationTtl: ANALYTICS_TTL_SECONDS });
+  } catch (err) {
+    // Σκόπιμα καταπίνουμε το error -- τα analytics ΠΟΤΕ δεν πρέπει να
+    // σπάσουν μια πραγματική απάντηση προς τον χρήστη.
+  }
+}
+
+// Διαβάζει τις τελευταίες `days` ημέρες (πιο παλιά→πιο πρόσφατη, βολικό για
+// γράφημα), γεμίζει με {total:0, fallback:0} τις ημέρες χωρίς καμία
+// ερώτηση, και υπολογίζει τα συνολικά νούμερα.
+async function readAnalyticsSummary(env, workspaceId, days) {
+  const daily = [];
+  for (let offset = days - 1; offset >= 0; offset--) {
+    const date = dateKeyFor(offset);
+    const raw = await env.DOCUMENT_REGISTRY.get(`analytics:${workspaceId}:${date}`);
+    const entry = raw ? JSON.parse(raw) : { total: 0, fallback: 0 };
+    daily.push({ date, total: entry.total, fallback: entry.fallback });
+  }
+
+  const totalQuestions = daily.reduce((sum, d) => sum + d.total, 0);
+  const totalFallback = daily.reduce((sum, d) => sum + d.fallback, 0);
+  const fallbackRate = totalQuestions > 0 ? Math.round((totalFallback / totalQuestions) * 100) : 0;
+
+  return { totalQuestions, totalFallback, fallbackRate, daily };
+}
+
+async function handleGetAnalyticsSummary(request, env) {
+  const workspaceId = await resolveWorkspaceId(request, env);
+  if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
+
+  const url = new URL(request.url);
+  const requestedDays = parseInt(url.searchParams.get("days"), 10);
+  const days = Number.isFinite(requestedDays)
+    ? Math.min(Math.max(requestedDays, 1), MAX_ANALYTICS_DAYS)
+    : DEFAULT_ANALYTICS_DAYS;
+
+  const summary = await readAnalyticsSummary(env, workspaceId, days);
+  return new Response(JSON.stringify(summary), { headers: JSON_HEADERS });
+}
+
 // Χειροκίνητος έλεγχος αντιφάσεων: ο editor επιλέγει 2-3 έγγραφα, ΕΝΑ ΜΟΝΟ
 // Gemini call τα συγκρίνει όλα μαζί (όχι ζευγάρι-ζευγάρι -- πιο φθηνό, και ο
 // agent βλέπει όλο το context μαζί, οπότε μπορεί να πιάσει και αντιφάσεις
@@ -1113,6 +1183,7 @@ async function runQuery(env, workspaceId, question) {
 
   if (!matches.matches || matches.matches.length === 0) {
     await logFallbackQuestion(env, workspaceId, question);
+    await recordAnalytics(env, workspaceId, true);
     return {
       status: 200,
       body: {
@@ -1145,6 +1216,7 @@ async function runQuery(env, workspaceId, question) {
   if (isFallback) {
     await logFallbackQuestion(env, workspaceId, question);
   }
+  await recordAnalytics(env, workspaceId, isFallback);
 
   // Βήμα 6: ταξινόμηση κατά score (το Vectorize συνήθως το κάνει ήδη, αλλά το εξασφαλίζουμε)
   const sortedMatches = [...matches.matches].sort((a, b) => b.score - a.score);
@@ -1511,6 +1583,10 @@ export default {
 
     if (url.pathname === "/embed/domains" && request.method === "PATCH") {
       return handlePatchEmbedDomains(request, env);
+    }
+
+    if (url.pathname === "/analytics/summary" && request.method === "GET") {
+      return handleGetAnalyticsSummary(request, env);
     }
 
     // Public embed endpoint -- ΔΕΝ χρησιμοποιεί resolveWorkspaceId (session/

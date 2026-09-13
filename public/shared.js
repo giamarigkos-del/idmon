@@ -286,6 +286,20 @@ const TRANSLATIONS = {
     embedSaveErrorPrefix: "Save error: ",
     embedDomainEmptyError: "Enter a domain first.",
     embedScriptRefreshHint: "If you change the assistant's name, color, or contact info later, copy this script again to update it on your site.",
+
+    // analytics (Section K)
+    analyticsTooltip: "Analytics",
+    analyticsTitle: "📊 Analytics",
+    analyticsIntro: "See how many questions your assistant answers, and how many it couldn't.",
+    totalQuestionsLabel: "Total questions",
+    totalFallbackLabel: "Unanswered",
+    fallbackRateLabel: "Unanswered rate",
+    analytics7Days: "7 days",
+    analytics30Days: "30 days",
+    analytics90Days: "90 days",
+    analyticsLoadError: "Could not load analytics.",
+    analyticsNoData: "No questions yet in this period.",
+    analyticsChartCaption: "Daily questions (red = unanswered)",
   },
   el: {
     loading: "Φόρτωση…",
@@ -440,6 +454,20 @@ const TRANSLATIONS = {
     embedSaveErrorPrefix: "Σφάλμα αποθήκευσης: ",
     embedDomainEmptyError: "Γράψε πρώτα ένα domain.",
     embedScriptRefreshHint: "Αν αλλάξεις το όνομα, το χρώμα, ή τα στοιχεία επικοινωνίας του βοηθού αργότερα, αντίγραψε ξανά αυτό το script για να ενημερωθεί στο site σου.",
+
+    // analytics (Section K)
+    analyticsTooltip: "Analytics",
+    analyticsTitle: "📊 Analytics",
+    analyticsIntro: "Δες πόσες ερωτήσεις απαντάει ο βοηθός σου, και πόσες όχι.",
+    totalQuestionsLabel: "Σύνολο ερωτήσεων",
+    totalFallbackLabel: "Χωρίς απάντηση",
+    fallbackRateLabel: "Ποσοστό χωρίς απάντηση",
+    analytics7Days: "7 ημέρες",
+    analytics30Days: "30 ημέρες",
+    analytics90Days: "90 ημέρες",
+    analyticsLoadError: "Δεν ήταν δυνατή η φόρτωση στατιστικών.",
+    analyticsNoData: "Καμία ερώτηση ακόμα σε αυτή την περίοδο.",
+    analyticsChartCaption: "Ερωτήσεις ανά ημέρα (κόκκινο = χωρίς απάντηση)",
   },
 };
 
