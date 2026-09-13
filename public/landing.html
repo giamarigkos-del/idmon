@@ -32,6 +32,14 @@
   .dev-form .cancel-btn{background:none;border:1px solid var(--border);color:var(--text);}
   .dev-error{font-size:12.5px;color:var(--danger);margin-top:10px;display:none;}
   .dev-error.show{display:block;}
+
+  /* Section H: tabs Sign up / Log in μέσα στο account-form -- ίδια χρωματική
+     λογική με το lang-toggle (ενεργό tab = accent background). */
+  .account-tabs{display:flex;gap:2px;background:var(--surface-2);border:1px solid var(--border);
+    border-radius:6px;padding:2px;margin-bottom:16px;}
+  .account-tabs button{flex:1;border:none;background:none;color:var(--text-soft);font-size:12.5px;
+    font-weight:700;padding:7px 0;border-radius:4px;cursor:pointer;font-family:inherit;}
+  .account-tabs button.active{background:var(--accent);color:var(--on-accent);}
 </style>
 </head>
 <body>
@@ -53,6 +61,26 @@
         <div class="choice-title" data-i18n="guestTitle">Guest</div>
         <div class="choice-desc" data-i18n="guestDesc">Freely try the tool in your own separate space. Nobody else sees what you upload, and it's automatically deleted after 7 days.</div>
       </button>
+      <button type="button" class="choice-btn" id="accountBtn">
+        <div class="choice-title" data-i18n="accountTitle">Account</div>
+        <div class="choice-desc" data-i18n="accountDesc">Sign up or log in to your own permanent workspace, from any device.</div>
+      </button>
+    </div>
+
+    <div class="dev-form" id="accountForm">
+      <div class="account-tabs">
+        <button type="button" class="active" id="signupTabBtn" data-i18n="signupTab">Sign up</button>
+        <button type="button" id="loginTabBtn" data-i18n="loginTab">Log in</button>
+      </div>
+      <label for="accountEmail" data-i18n="emailLabel">Email</label>
+      <input type="email" id="accountEmail" placeholder="you@example.com" autocomplete="email">
+      <label for="accountPassword" style="margin-top:10px;" data-i18n="passwordLabel">Password</label>
+      <input type="password" id="accountPassword" placeholder="••••••••" autocomplete="current-password">
+      <div class="dev-form-actions">
+        <button type="button" class="submit-btn" id="accountSubmitBtn" data-i18n="signupBtn">Sign up</button>
+        <button type="button" class="cancel-btn" id="accountCancelBtn" data-i18n="cancel">Cancel</button>
+      </div>
+      <div class="dev-error" id="accountError"></div>
     </div>
 
     <div class="dev-form" id="devForm">
@@ -128,6 +156,76 @@
   el("devSubmitBtn").addEventListener("click", submitDevLogin);
   el("devPassword").addEventListener("keydown", (e) => {
     if (e.key === "Enter") submitDevLogin();
+  });
+
+  // Section H: λογαριασμοί πελατών -- ίδιο pattern με τη φόρμα Developer,
+  // απλά με δύο tabs (sign up / log in) που καλούν διαφορετικό endpoint.
+  let accountMode = "signup";
+
+  function setAccountMode(mode) {
+    accountMode = mode;
+    el("signupTabBtn").classList.toggle("active", mode === "signup");
+    el("loginTabBtn").classList.toggle("active", mode === "login");
+    el("accountSubmitBtn").textContent = mode === "signup" ? t("signupBtn") : t("login");
+    el("accountError").classList.remove("show");
+  }
+
+  el("accountBtn").addEventListener("click", () => {
+    el("choiceGrid").style.display = "none";
+    el("accountForm").classList.add("show");
+    el("accountEmail").focus();
+  });
+
+  el("accountCancelBtn").addEventListener("click", () => {
+    el("accountForm").classList.remove("show");
+    el("choiceGrid").style.display = "flex";
+    el("accountError").classList.remove("show");
+    el("accountEmail").value = "";
+    el("accountPassword").value = "";
+  });
+
+  el("signupTabBtn").addEventListener("click", () => setAccountMode("signup"));
+  el("loginTabBtn").addEventListener("click", () => setAccountMode("login"));
+
+  async function submitAccountForm() {
+    const email = el("accountEmail").value.trim();
+    const password = el("accountPassword").value;
+    const btn = el("accountSubmitBtn");
+    const errorEl = el("accountError");
+    errorEl.classList.remove("show");
+    btn.disabled = true;
+    btn.textContent = t("checking");
+
+    const endpoint = accountMode === "signup" ? "/account/signup" : "/account/login";
+
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        errorEl.textContent = data.error || t("connectionErrorPrefix");
+        errorEl.classList.add("show");
+        btn.disabled = false;
+        btn.textContent = accountMode === "signup" ? t("signupBtn") : t("login");
+        return;
+      }
+      localStorage.setItem("workspaceId", data.workspaceId);
+      localStorage.setItem("sessionToken", data.sessionToken);
+      window.location.href = "/";
+    } catch (err) {
+      errorEl.textContent = t("connectionErrorPrefix") + err.message;
+      errorEl.classList.add("show");
+      btn.disabled = false;
+      btn.textContent = accountMode === "signup" ? t("signupBtn") : t("login");
+    }
+  }
+
+  el("accountSubmitBtn").addEventListener("click", submitAccountForm);
+  el("accountPassword").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submitAccountForm();
   });
 </script>
 </body>

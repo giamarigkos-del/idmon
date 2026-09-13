@@ -27,6 +27,174 @@ const SETTINGS_ALLOWED_FIELDS = ["accentColor", "botName", "logoUrl", "notifyEma
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Section H: λογαριασμοί πελατών + sessions (D1).
+//
+// PBKDF2 μέσω του ενσωματωμένου Web Crypto του Workers -- καμία εξωτερική
+// βιβλιοθήκη δεν χρειάζεται. 100.000 iterations είναι ένα λογικό,
+// αναγνωρισμένο standard (NIST recommends >=10.000, εδώ είμαστε πιο
+// συντηρητικοί).
+const PBKDF2_ITERATIONS = 100000;
+const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 ημέρες
+
+function bufferToHex(buffer) {
+  return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function hexToBuffer(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return bytes.buffer;
+}
+
+// crypto.getRandomValues -- κρυπτογραφικά ασφαλές RNG, διαθέσιμο native στο
+// Workers runtime. Χρησιμοποιείται ΚΑΙ για salts ΚΑΙ για session tokens.
+function randomHex(byteLength) {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return bufferToHex(bytes.buffer);
+}
+
+async function hashPassword(password, saltHex) {
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const derivedBits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: hexToBuffer(saltHex), iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    keyMaterial,
+    256
+  );
+  return bufferToHex(derivedBits);
+}
+
+// Σύγκριση σταθερού χρόνου -- ένα απλό "===" θα μπορούσε θεωρητικά να
+// διαρρεύσει πληροφορία μέσω του πόσο γρήγορα επιστρέφει false (timing
+// attack). Εδώ ελέγχουμε ΟΛΟΥΣ τους χαρακτήρες πάντα, ό,τι κι αν βρεθεί.
+function timingSafeEqual(a, b) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+async function verifyPassword(password, saltHex, expectedHashHex) {
+  const actualHashHex = await hashPassword(password, saltHex);
+  return timingSafeEqual(actualHashHex, expectedHashHex);
+}
+
+function jsonError(status, message) {
+  return new Response(JSON.stringify({ error: message }), { status, headers: JSON_HEADERS });
+}
+
+async function createSession(env, userId, workspaceId) {
+  const token = randomHex(32); // 256-bit, αδύνατο να μαντευτεί
+  const createdAt = new Date();
+  const expiresAt = new Date(createdAt.getTime() + SESSION_DURATION_MS);
+  await env.DB.prepare(
+    "INSERT INTO sessions (token, user_id, workspace_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?)"
+  ).bind(token, userId, workspaceId, createdAt.toISOString(), expiresAt.toISOString()).run();
+  return { token, expiresAt };
+}
+
+// Η ΜΟΝΗ πύλη προς το workspaceId ενός request. Αν υπάρχει X-Session-Token,
+// ΔΕΝ το εμπιστευόμαστε απευθείας -- κάνουμε lookup στη D1 να δούμε σε ποιο
+// workspace αντιστοιχεί ΠΡΑΓΜΑΤΙΚΑ αυτό το token αυτή τη στιγμή (και αν έχει
+// λήξει). Αν το session είναι άκυρο/ληγμένο, επιστρέφουμε null -- ΔΕΝ
+// πέφτουμε πίσω σε ό,τι X-Workspace-Id έστειλε ο client, γιατί αυτό θα
+// ακύρωνε τελείως το νόημα του session (ο client θα μπορούσε να προσποιηθεί
+// οποιοδήποτε workspace απλά γράφοντας το header).
+//
+// Χωρίς κανένα X-Session-Token (Developer password / Guest flow, όπως πριν
+// τα accounts), συνεχίζουμε να εμπιστευόμαστε το X-Workspace-Id header --
+// backward compatible, δεν σπάει τίποτα από το προηγούμενο demo/guest flow.
+async function resolveWorkspaceId(request, env) {
+  const sessionToken = request.headers.get("X-Session-Token");
+  if (!sessionToken) {
+    return request.headers.get("X-Workspace-Id");
+  }
+  const row = await env.DB.prepare(
+    "SELECT workspace_id, expires_at FROM sessions WHERE token = ?"
+  ).bind(sessionToken).first();
+  if (!row) return null;
+  if (new Date(row.expires_at) <= new Date()) return null;
+  return row.workspace_id;
+}
+
+async function handleSignup(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonError(400, "Invalid JSON body");
+  }
+  const email = (body.email || "").trim().toLowerCase();
+  const { password } = body;
+
+  if (!email || !EMAIL_RE.test(email)) return jsonError(400, "Valid email is required");
+  if (!password || password.length < 8) return jsonError(400, "Password must be at least 8 characters");
+
+  const existing = await env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
+  if (existing) return jsonError(409, "An account with this email already exists");
+
+  const salt = randomHex(16);
+  const passwordHash = await hashPassword(password, salt);
+  const workspaceId = `ws-${randomHex(12)}`;
+  const createdAt = new Date().toISOString();
+
+  const result = await env.DB.prepare(
+    "INSERT INTO users (email, password_hash, password_salt, workspace_id, created_at) VALUES (?, ?, ?, ?, ?)"
+  ).bind(email, passwordHash, salt, workspaceId, createdAt).run();
+
+  const session = await createSession(env, result.meta.last_row_id, workspaceId);
+
+  return new Response(
+    JSON.stringify({ ok: true, sessionToken: session.token, workspaceId }),
+    { headers: JSON_HEADERS }
+  );
+}
+
+async function handleLogin(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonError(400, "Invalid JSON body");
+  }
+  const email = (body.email || "").trim().toLowerCase();
+  const { password } = body;
+
+  if (!email || !password) return jsonError(400, "Email and password are required");
+
+  const user = await env.DB.prepare(
+    "SELECT id, password_hash, password_salt, workspace_id FROM users WHERE email = ?"
+  ).bind(email).first();
+
+  // Το ΙΔΙΟ γενικό μήνυμα λάθους είτε δεν υπάρχει το email είτε το password
+  // είναι λάθος -- ΠΟΤΕ δεν αποκαλύπτουμε ποιο από τα δύο ίσχυε (θα βοηθούσε
+  // κάποιον να μαντέψει ποια emails είναι ήδη εγγεγραμμένα).
+  if (!user) return jsonError(401, "Invalid email or password");
+
+  const valid = await verifyPassword(password, user.password_salt, user.password_hash);
+  if (!valid) return jsonError(401, "Invalid email or password");
+
+  const session = await createSession(env, user.id, user.workspace_id);
+
+  return new Response(
+    JSON.stringify({ ok: true, sessionToken: session.token, workspaceId: user.workspace_id }),
+    { headers: JSON_HEADERS }
+  );
+}
+
+async function handleLogout(request, env) {
+  const sessionToken = request.headers.get("X-Session-Token");
+  if (!sessionToken) return jsonError(400, "Missing X-Session-Token header");
+  await env.DB.prepare("DELETE FROM sessions WHERE token = ?").bind(sessionToken).run();
+  return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
+}
+
 // Ειδοποίηση email όταν το bot απαντάει "δεν γνωρίζω" -- ΤΟ ΠΟΛΥ μία φορά
 // την ώρα ανά workspace, ώστε μια σειρά αναπάντητων ερωτήσεων να μη γεμίσει
 // το inbox του πελάτη με ένα email ανά ερώτηση.
@@ -55,7 +223,7 @@ async function getWorkspaceSettings(env, workspaceId) {
 }
 
 async function handleGetSettings(request, env) {
-  const workspaceId = request.headers.get("X-Workspace-Id");
+  const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
     return new Response(
       JSON.stringify({ error: "Missing X-Workspace-Id header" }),
@@ -67,7 +235,7 @@ async function handleGetSettings(request, env) {
 }
 
 async function handlePatchSettings(request, env) {
-  const workspaceId = request.headers.get("X-Workspace-Id");
+  const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
     return new Response(
       JSON.stringify({ error: "Missing X-Workspace-Id header" }),
@@ -366,7 +534,7 @@ async function getDocumentForCompare(env, workspaceId, documentId) {
 }
 
 async function handleCompareDocuments(request, env) {
-  const workspaceId = request.headers.get("X-Workspace-Id");
+  const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
     return new Response(
       JSON.stringify({ error: "Missing X-Workspace-Id header" }),
@@ -449,7 +617,7 @@ async function handleCompareDocuments(request, env) {
 }
 
 async function handleGetContradictions(request, env) {
-  const workspaceId = request.headers.get("X-Workspace-Id");
+  const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
     return new Response(
       JSON.stringify({ error: "Missing X-Workspace-Id header" }),
@@ -477,7 +645,7 @@ async function handleGetContradictions(request, env) {
 }
 
 async function handleDeleteContradiction(request, env, id) {
-  const workspaceId = request.headers.get("X-Workspace-Id");
+  const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
     return new Response(
       JSON.stringify({ error: "Missing X-Workspace-Id header" }),
@@ -492,7 +660,7 @@ async function handleDeleteContradiction(request, env, id) {
 }
 
 async function handleUpload(request, env) {
-  const workspaceId = request.headers.get("X-Workspace-Id");
+  const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
     return new Response(
       JSON.stringify({ error: "Missing X-Workspace-Id header" }),
@@ -597,7 +765,7 @@ async function handleUpload(request, env) {
 }
 
 async function handleGetDocument(request, env, documentId) {
-  const workspaceId = request.headers.get("X-Workspace-Id");
+  const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
     return new Response(
       JSON.stringify({ error: "Missing X-Workspace-Id header" }),
@@ -652,7 +820,7 @@ async function handleGetDocument(request, env, documentId) {
 }
 
 async function handleListDocuments(request, env) {
-  const workspaceId = request.headers.get("X-Workspace-Id");
+  const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
     return new Response(
       JSON.stringify({ error: "Missing X-Workspace-Id header" }),
@@ -696,7 +864,7 @@ async function handleListDocuments(request, env) {
 }
 
 async function handleSearchDocuments(request, env) {
-  const workspaceId = request.headers.get("X-Workspace-Id");
+  const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
     return new Response(
       JSON.stringify({ error: "Missing X-Workspace-Id header" }),
@@ -773,7 +941,7 @@ function createDocMetaCache(env, workspaceId) {
 }
 
 async function handleQuery(request, env) {
-  const workspaceId = request.headers.get("X-Workspace-Id");
+  const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
     return new Response(
       JSON.stringify({ error: "Missing X-Workspace-Id header" }),
@@ -870,7 +1038,7 @@ async function handleQuery(request, env) {
 }
 
 async function handleGetFallbackQuestions(request, env) {
-  const workspaceId = request.headers.get("X-Workspace-Id");
+  const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
     return new Response(
       JSON.stringify({ error: "Missing X-Workspace-Id header" }),
@@ -906,7 +1074,7 @@ async function handleGetFallbackQuestions(request, env) {
 // περιεχόμενο γι' αυτήν) -- τη διαγράφει από τη λίστα χειροκίνητα, χωρίς
 // να περιμένει το 7ήμερο TTL να τη σβήσει μόνο του.
 async function handleDeleteFallbackQuestion(request, env, id) {
-  const workspaceId = request.headers.get("X-Workspace-Id");
+  const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
     return new Response(
       JSON.stringify({ error: "Missing X-Workspace-Id header" }),
@@ -925,7 +1093,7 @@ async function handleDeleteFallbackQuestion(request, env, id) {
 // upsert στο Vectorize. Ίδιο ακριβώς μοτίβο με το /upload, απλά χωρίς νέο
 // κείμενο -- ο χρήστης απλά εγκρίνει αυτό που ήδη έγραψε.
 async function handlePublishDocument(request, env, documentId) {
-  const workspaceId = request.headers.get("X-Workspace-Id");
+  const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
     return new Response(
       JSON.stringify({ error: "Missing X-Workspace-Id header" }),
@@ -982,7 +1150,7 @@ async function handlePublishDocument(request, env, documentId) {
 // Section D: "Διαγραφή" (soft-delete) -- σβήνει τα vectors (το bot σταματάει
 // αμέσως να το ξέρει) αλλά ΔΕΝ σβήνει το KV record, ώστε να υπάρχει "Undo".
 async function handleDeleteDocument(request, env, documentId) {
-  const workspaceId = request.headers.get("X-Workspace-Id");
+  const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
     return new Response(
       JSON.stringify({ error: "Missing X-Workspace-Id header" }),
@@ -1024,7 +1192,7 @@ async function handleDeleteDocument(request, env, documentId) {
 // Σκόπιμα ΔΕΝ το ξαναδημοσιεύει αυτόματα -- ο χρήστης πρέπει να πατήσει
 // ρητά "Δημοσίευση" ξανά, ώστε να μην ξαναγίνει κάτι ζωντανό χωρίς έλεγχο.
 async function handleRestoreDocument(request, env, documentId) {
-  const workspaceId = request.headers.get("X-Workspace-Id");
+  const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
     return new Response(
       JSON.stringify({ error: "Missing X-Workspace-Id header" }),
@@ -1087,6 +1255,18 @@ export default {
 
     if (url.pathname === "/developer-login" && request.method === "POST") {
       return handleDeveloperLogin(request, env);
+    }
+
+    if (url.pathname === "/account/signup" && request.method === "POST") {
+      return handleSignup(request, env);
+    }
+
+    if (url.pathname === "/account/login" && request.method === "POST") {
+      return handleLogin(request, env);
+    }
+
+    if (url.pathname === "/account/logout" && request.method === "POST") {
+      return handleLogout(request, env);
     }
 
     if (url.pathname === "/workspace/settings" && request.method === "GET") {

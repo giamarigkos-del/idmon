@@ -32,7 +32,37 @@ function resolveWorkspaceId() {
 }
 
 const WORKSPACE_ID = resolveWorkspaceId();
-const HEADERS = { "Content-Type": "application/json; charset=utf-8", "X-Workspace-Id": WORKSPACE_ID };
+const SESSION_TOKEN = localStorage.getItem("sessionToken");
+const HEADERS = {
+  "Content-Type": "application/json; charset=utf-8",
+  "X-Workspace-Id": WORKSPACE_ID,
+  // Section H: αν υπάρχει session (login μέσω account, όχι Developer/Guest),
+  // το backend το προτιμάει ΠΑΝΤΑ έναντι του X-Workspace-Id -- το τελευταίο
+  // μένει μόνο για συμβατότητα με το Developer/Guest flow.
+  ...(SESSION_TOKEN ? { "X-Session-Token": SESSION_TOKEN } : {}),
+};
+
+// Section H: κοινό logout -- ακυρώνει το session στο backend (best-effort,
+// δεν μπλοκάρει ποτέ την πλοήγηση αν αποτύχει το request), καθαρίζει το
+// localStorage, και γυρνάει στη landing page. Χρησιμοποιείται από το
+// "switch mode" link σε index.html/editor.html -- μία υλοποίηση, όχι δύο
+// αντίγραφα.
+async function logoutAndSwitchMode() {
+  if (SESSION_TOKEN) {
+    try {
+      await fetch("/account/logout", {
+        method: "POST",
+        headers: { "X-Session-Token": SESSION_TOKEN },
+      });
+    } catch (err) {
+      // best-effort -- ακόμα κι αν αποτύχει το logout call, συνεχίζουμε να
+      // καθαρίσουμε το τοπικό state και να φύγουμε από τη σελίδα.
+    }
+  }
+  localStorage.removeItem("workspaceId");
+  localStorage.removeItem("sessionToken");
+  window.location.href = "/landing.html";
+}
 
 function escapeHtml(str) {
   return String(str)
@@ -125,6 +155,13 @@ const TRANSLATIONS = {
     devDesc: "Access to the real content workspace (requires a password).",
     guestTitle: "Guest",
     guestDesc: "Freely try the tool in your own separate space. Nobody else sees what you upload, and it's automatically deleted after 7 days.",
+    accountTitle: "Account",
+    accountDesc: "Sign up or log in to your own permanent workspace, from any device.",
+    signupTab: "Sign up",
+    loginTab: "Log in",
+    emailLabel: "Email",
+    passwordLabel: "Password",
+    signupBtn: "Sign up",
     devPasswordLabel: "Developer password",
     login: "Log in",
     checking: "Checking…",
@@ -248,6 +285,13 @@ const TRANSLATIONS = {
     devDesc: "Πρόσβαση στο πραγματικό workspace περιεχομένου (χρειάζεται κωδικό).",
     guestTitle: "Επισκέπτης / Guest",
     guestDesc: "Δοκίμασε ελεύθερα το εργαλείο σε έναν δικό σου, ξεχωριστό χώρο. Ό,τι ανεβάσεις δεν το βλέπει κανείς άλλος, και σβήνεται μόνο του μετά από 7 μέρες.",
+    accountTitle: "Λογαριασμός",
+    accountDesc: "Κάνε εγγραφή ή σύνδεση στον δικό σου μόνιμο χώρο εργασίας, από οποιαδήποτε συσκευή.",
+    signupTab: "Εγγραφή",
+    loginTab: "Σύνδεση",
+    emailLabel: "Email",
+    passwordLabel: "Κωδικός",
+    signupBtn: "Εγγραφή",
     devPasswordLabel: "Κωδικός Developer",
     login: "Είσοδος",
     checking: "Έλεγχος…",

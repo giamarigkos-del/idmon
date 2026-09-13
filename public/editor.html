@@ -1237,8 +1237,7 @@
 
   el("switchModeLink").addEventListener("click", (e) => {
     e.preventDefault();
-    localStorage.removeItem("workspaceId");
-    window.location.href = "/landing.html";
+    logoutAndSwitchMode();
   });
 </script>
 </body>

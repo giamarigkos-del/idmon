@@ -10,6 +10,11 @@ index_name = "operations-portal-rag-index"
 binding = "DOCUMENT_REGISTRY"
 id = "e6ea2213cca7424b988d24d5307ee1ca"
 
+[[d1_databases]]
+binding = "DB"
+database_name = "rag-demo-tool-accounts"
+database_id = "240959e8-e3b3-48e5-937e-846f109454ca"
+
 [assets]
 directory = "./public"
 not_found_handling = "none"
@@ -19,4 +24,4 @@ not_found_handling = "none"
 # domain που έχεις επαληθεύσει στο Resend (https://resend.com/domains).
 # Το ίδιο το API key ΔΕΝ μπαίνει εδώ -- είναι secret:
 #   wrangler secret put RESEND_API_KEY
-NOTIFY_FROM_EMAIL = "onboarding@resend.dev"
+NOTIFY_FROM_EMAIL = "notifications@yourdomain.gr"
