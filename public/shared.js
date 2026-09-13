@@ -259,6 +259,21 @@ const TRANSLATIONS = {
     settingsSaveErrorPrefix: "Save error: ",
     settingsLoadError: "Could not load settings.",
     widgetSettingsTooltip: "Widget settings",
+
+    // embed layer (Section I)
+    embedTooltip: "Embed on your site",
+    embedTitle: "🔗 Embed on your site",
+    embedIntro: "Add your website's domain, and you'll get a ready-to-paste script tag for your bot.",
+    embedDomainPlaceholder: "yourdomain.gr",
+    embedAddDomainBtn: "Add",
+    embedRemoveDomainAria: "Remove domain",
+    embedNoDomainsHint: "Add at least one domain to get your embed script.",
+    embedScriptLabel: "Paste this in your site's HTML:",
+    embedCopyBtn: "Copy",
+    embedCopiedMsg: "✓ Copied.",
+    embedLoadError: "Could not load embed settings.",
+    embedSaveErrorPrefix: "Save error: ",
+    embedDomainEmptyError: "Enter a domain first.",
   },
   el: {
     loading: "Φόρτωση…",
@@ -386,6 +401,21 @@ const TRANSLATIONS = {
     settingsSaveErrorPrefix: "Σφάλμα αποθήκευσης: ",
     settingsLoadError: "Δεν ήταν δυνατή η φόρτωση ρυθμίσεων.",
     widgetSettingsTooltip: "Ρυθμίσεις widget",
+
+    // embed layer (Section I)
+    embedTooltip: "Embed στο site σου",
+    embedTitle: "🔗 Embed στο site σου",
+    embedIntro: "Πρόσθεσε το domain του site σου, και θα πάρεις ένα έτοιμο script tag για τον βοηθό σου.",
+    embedDomainPlaceholder: "yourdomain.gr",
+    embedAddDomainBtn: "Προσθήκη",
+    embedRemoveDomainAria: "Αφαίρεση domain",
+    embedNoDomainsHint: "Πρόσθεσε τουλάχιστον ένα domain για να πάρεις το embed script.",
+    embedScriptLabel: "Επικόλλησε αυτό στο HTML του site σου:",
+    embedCopyBtn: "Αντιγραφή",
+    embedCopiedMsg: "✓ Αντιγράφηκε.",
+    embedLoadError: "Δεν ήταν δυνατή η φόρτωση ρυθμίσεων embed.",
+    embedSaveErrorPrefix: "Σφάλμα αποθήκευσης: ",
+    embedDomainEmptyError: "Γράψε πρώτα ένα domain.",
   },
 };
 

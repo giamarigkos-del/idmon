@@ -254,6 +254,7 @@
       <a class="back-link" id="switchModeLink" href="#" data-i18n="switchMode">Switch mode</a>
       <a class="back-link" href="/">←Portal</a>
       <button type="button" class="icon-btn" id="settingsBtn" data-i18n-title="widgetSettingsTooltip" title="Widget settings">⚙</button>
+      <button type="button" class="icon-btn" id="embedBtn" data-i18n-title="embedTooltip" title="Embed on your site">🔗</button>
       <div class="lang-toggle" id="langToggle">
         <button type="button" class="lang-btn" data-lang="en">EN</button>
         <button type="button" class="lang-btn" data-lang="el">GR</button>
@@ -970,6 +971,142 @@
 
   el("newDocBtn").addEventListener("click", enterNewDocumentMode);
   el("settingsBtn").addEventListener("click", renderSettingsPanel);
+
+  // Section I: πάνελ embed layer -- λίστα domains + έτοιμο script tag.
+  // Χωρίς ΚΑΝΕΝΑ καταχωρημένο domain, δεν εμφανίζεται καν το script tag --
+  // αυτό είναι η ίδια η ασφάλεια που χτίσαμε στο backend (CORS middleware),
+  // απλά αντανακλασμένη στο UI ώστε ο χρήστης να καταλαβαίνει γιατί λείπει.
+  function embedScriptTag(embedId) {
+    return `<script src="${window.location.origin}/widget.js" data-embed-id="${embedId}"></` + `script>`;
+  }
+
+  async function patchEmbedDomains(domains) {
+    const res = await fetch("/embed/domains", {
+      method: "PATCH",
+      headers: HEADERS,
+      body: JSON.stringify({ domains }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "unknown error");
+    return data;
+  }
+
+  function renderEmbedContent(data) {
+    const domainsListHtml = data.domains.length
+      ? data.domains
+          .map(
+            (domain) => `
+        <div class="embed-domain-row" data-domain="${escapeHtml(domain)}"
+             style="display:flex;align-items:center;justify-content:space-between;
+                    background:var(--surface-2);border:1px solid var(--border);
+                    border-radius:6px;padding:7px 10px;margin-bottom:6px;font-size:13px;">
+          <span>${escapeHtml(domain)}</span>
+          <button type="button" class="embed-remove-domain-btn" data-domain="${escapeHtml(domain)}"
+                  aria-label="${escapeHtml(t("embedRemoveDomainAria"))}"
+                  style="background:none;border:none;color:var(--text-soft);cursor:pointer;font-size:14px;">✕</button>
+        </div>`
+          )
+          .join("")
+      : `<p style="font-size:12.5px;color:var(--text-soft);margin:0 0 10px;">${escapeHtml(t("embedNoDomainsHint"))}</p>`;
+
+    const scriptHtml = data.domains.length
+      ? `
+        <div class="label">${escapeHtml(t("embedScriptLabel"))}</div>
+        <pre style="background:var(--surface-2);border:1px solid var(--border);border-radius:6px;
+                     padding:10px 12px;font-size:12px;overflow-x:auto;white-space:pre-wrap;
+                     word-break:break-all;"><code id="embedScriptCode">${escapeHtml(embedScriptTag(data.embedId))}</code></pre>
+        <button type="button" id="embedCopyBtn">${escapeHtml(t("embedCopyBtn"))}</button>
+      `
+      : "";
+
+    return `
+      <div class="edit-form" style="max-width:480px;">
+        <h2 style="margin:0 0 4px;font-size:16px;">${escapeHtml(t("embedTitle"))}</h2>
+        <p style="margin:0 0 20px;font-size:13px;color:var(--text-soft);">${escapeHtml(t("embedIntro"))}</p>
+
+        <div class="label" style="margin-top:0;">Domains</div>
+        <div id="embedDomainsList">${domainsListHtml}</div>
+        <div style="display:flex;gap:8px;margin-top:4px;">
+          <input type="text" id="embedNewDomainInput" placeholder="${escapeHtml(t("embedDomainPlaceholder"))}" style="flex:1;">
+          <button type="button" id="embedAddDomainBtn">${escapeHtml(t("embedAddDomainBtn"))}</button>
+        </div>
+
+        <div id="embedScriptSection" style="margin-top:20px;">${scriptHtml}</div>
+
+        <div class="upload-status" id="embedStatus"></div>
+      </div>
+    `;
+  }
+
+  function wireEmbedEvents(data) {
+    const main = el("mainPanel");
+    const status = el("embedStatus");
+
+    main.querySelectorAll(".embed-remove-domain-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        status.textContent = "";
+        const remaining = data.domains.filter((d) => d !== btn.dataset.domain);
+        try {
+          const updated = await patchEmbedDomains(remaining);
+          main.innerHTML = renderEmbedContent(updated);
+          wireEmbedEvents(updated);
+        } catch (err) {
+          status.textContent = t("embedSaveErrorPrefix") + err.message;
+          status.style.color = "var(--danger)";
+        }
+      });
+    });
+
+    el("embedAddDomainBtn").addEventListener("click", async () => {
+      status.textContent = "";
+      const input = el("embedNewDomainInput");
+      const value = input.value.trim();
+      if (!value) {
+        status.textContent = t("embedDomainEmptyError");
+        status.style.color = "var(--danger)";
+        return;
+      }
+      try {
+        const updated = await patchEmbedDomains([...data.domains, value]);
+        main.innerHTML = renderEmbedContent(updated);
+        wireEmbedEvents(updated);
+      } catch (err) {
+        status.textContent = t("embedSaveErrorPrefix") + err.message;
+        status.style.color = "var(--danger)";
+      }
+    });
+
+    const copyBtn = el("embedCopyBtn");
+    if (copyBtn) {
+      copyBtn.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(embedScriptTag(data.embedId));
+        status.textContent = t("embedCopiedMsg");
+        status.style.color = "var(--ok)";
+      });
+    }
+  }
+
+  async function renderEmbedPanel() {
+    if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
+    currentSelectedId = null;
+    const main = el("mainPanel");
+    main.innerHTML = `<div class="main-placeholder">${escapeHtml(t("loading"))}</div>`;
+
+    let data;
+    try {
+      const res = await fetch("/embed/domains", { headers: HEADERS });
+      if (!res.ok) throw new Error("bad response");
+      data = await res.json();
+    } catch (err) {
+      main.innerHTML = `<div class="main-placeholder">${escapeHtml(t("embedLoadError"))}</div>`;
+      return;
+    }
+
+    main.innerHTML = renderEmbedContent(data);
+    wireEmbedEvents(data);
+  }
+
+  el("embedBtn").addEventListener("click", renderEmbedPanel);
 
   el("allDocsBtn").addEventListener("click", () => {
     if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
