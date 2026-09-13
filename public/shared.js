@@ -333,6 +333,21 @@ const TRANSLATIONS = {
     analyticsLoadError: "Could not load analytics.",
     analyticsNoData: "No questions yet in this period.",
     analyticsChartCaption: "Daily questions (red = unanswered)",
+
+    // URL sync (Section M)
+    addFromUrlBtn: "🔗 Add from URL",
+    addFromUrlTitle: "🔗 Add document from URL",
+    addFromUrlIntro: "Paste a link to a public page (e.g. your FAQ or policies page), and we'll read it for you -- no need to copy-paste the text yourself.",
+    urlLabel: "Page URL",
+    titleOptionalLabel: "Title (optional)",
+    titleOptionalPlaceholder: "Leave empty to use the page's own title",
+    addFromUrlSubmitBtn: "Fetch page",
+    addingFromUrl: "Fetching…",
+    urlRequiredError: "Enter a URL first.",
+    addFromUrlErrorPrefix: "Could not add from URL: ",
+    refreshFromUrl: "↻ Refresh from URL",
+    refreshingFromUrl: "Refreshing…",
+    refreshFromUrlErrorPrefix: "Refresh error: ",
   },
   el: {
     loading: "Φόρτωση…",
@@ -501,6 +516,21 @@ const TRANSLATIONS = {
     analyticsLoadError: "Δεν ήταν δυνατή η φόρτωση στατιστικών.",
     analyticsNoData: "Καμία ερώτηση ακόμα σε αυτή την περίοδο.",
     analyticsChartCaption: "Ερωτήσεις ανά ημέρα (κόκκινο = χωρίς απάντηση)",
+
+    // URL sync (Section M)
+    addFromUrlBtn: "🔗 Πρόσθεσε από URL",
+    addFromUrlTitle: "🔗 Πρόσθεσε έγγραφο από URL",
+    addFromUrlIntro: "Επικόλλησε ένα link σε δημόσια σελίδα (π.χ. τις Συχνές Ερωτήσεις ή τους Όρους σου), και θα τη διαβάσουμε εμείς -- δεν χρειάζεται να κάνεις copy-paste το κείμενο.",
+    urlLabel: "URL σελίδας",
+    titleOptionalLabel: "Τίτλος (προαιρετικό)",
+    titleOptionalPlaceholder: "Άφησέ το κενό για να χρησιμοποιηθεί ο τίτλος της σελίδας",
+    addFromUrlSubmitBtn: "Διάβασε τη σελίδα",
+    addingFromUrl: "Διαβάζεται…",
+    urlRequiredError: "Γράψε πρώτα ένα URL.",
+    addFromUrlErrorPrefix: "Δεν προστέθηκε από URL: ",
+    refreshFromUrl: "↻ Ανανέωση από URL",
+    refreshingFromUrl: "Ανανεώνεται…",
+    refreshFromUrlErrorPrefix: "Σφάλμα ανανέωσης: ",
   },
 };
 

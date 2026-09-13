@@ -284,6 +284,7 @@
     <div class="sidebar">
       <div class="sidebar-section">
         <button class="new-doc-btn" id="newDocBtn" data-i18n="newDoc">+ New document</button>
+        <button class="new-doc-btn" id="addFromUrlBtn" style="margin-top:6px;background:var(--surface-2);" data-i18n="addFromUrlBtn">🔗 Add from URL</button>
         <input type="text" class="filter-input" id="docFilterInput" data-i18n-placeholder="filterByTitle" placeholder="Filter by title…">
       </div>
       <div class="sidebar-section grow">
@@ -830,6 +831,7 @@
       <div class="preview-actions">
         <button type="button" id="editFromPreviewBtn">${t("edit")}</button>
         ${isDraft ? `<button type="button" id="publishBtn">${t("publish")}</button>` : ""}
+        ${data.sourceUrl ? `<button type="button" id="refreshFromUrlBtn">${t("refreshFromUrl")}</button>` : ""}
         <button type="button" class="btn-danger" id="deleteBtn">${t("delete")}</button>
       </div>
     `;
@@ -854,6 +856,28 @@
     }
 
     el("editFromPreviewBtn").addEventListener("click", () => enterEditMode(data));
+
+    if (data.sourceUrl) {
+      el("refreshFromUrlBtn").addEventListener("click", async () => {
+        const btn = el("refreshFromUrlBtn");
+        btn.disabled = true;
+        btn.textContent = t("refreshingFromUrl");
+        try {
+          const res = await fetch(`/document/${encodeURIComponent(data.documentId)}/refresh-from-url`, {
+            method: "POST",
+            headers: HEADERS,
+          });
+          const result = await res.json();
+          if (!res.ok) throw new Error(result.error || t("notFoundDefault"));
+          await loadDocuments();
+          openPreview(data.documentId);
+        } catch (err) {
+          alert(t("refreshFromUrlErrorPrefix") + err.message);
+          btn.disabled = false;
+          btn.textContent = t("refreshFromUrl");
+        }
+      });
+    }
 
     if (isDraft) {
       el("publishBtn").addEventListener("click", async () => {
@@ -918,6 +942,66 @@
     renderDocList();
     renderEditForm({ title: "", documentId: "", text: "", sourceUrl: "", isExisting: false });
   }
+
+  // Section M: "Πρόσθεσε από URL" -- διαβάζει μια δημόσια σελίδα αντί για
+  // copy-paste. Νέο έγγραφο πάντα ως draft (ίδια πολιτική με τα κανονικά
+  // uploads) -- ο χρήστης βλέπει το preview και δημοσιεύει ρητά όποτε θέλει.
+  function renderAddFromUrlPanel() {
+    if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
+    currentSelectedId = null;
+    const main = el("mainPanel");
+    main.innerHTML = `
+      <div class="edit-form" style="max-width:480px;">
+        <h2 style="margin:0 0 4px;font-size:16px;">${escapeHtml(t("addFromUrlTitle"))}</h2>
+        <p style="margin:0 0 20px;font-size:13px;color:var(--text-soft);">${escapeHtml(t("addFromUrlIntro"))}</p>
+
+        <div class="label" style="margin-top:0;">${escapeHtml(t("urlLabel"))}</div>
+        <input type="text" id="syncUrlInput" placeholder="https://...">
+
+        <div class="label">${escapeHtml(t("titleOptionalLabel"))}</div>
+        <input type="text" id="syncTitleInput" placeholder="${escapeHtml(t("titleOptionalPlaceholder"))}">
+
+        <button type="button" id="syncUrlSubmitBtn" style="margin-top:20px;">${escapeHtml(t("addFromUrlSubmitBtn"))}</button>
+        <div class="upload-status" id="syncUrlStatus"></div>
+      </div>
+    `;
+
+    el("syncUrlSubmitBtn").addEventListener("click", async () => {
+      const urlValue = el("syncUrlInput").value.trim();
+      const titleValue = el("syncTitleInput").value.trim();
+      const status = el("syncUrlStatus");
+      status.textContent = "";
+
+      if (!urlValue) {
+        status.textContent = t("urlRequiredError");
+        status.style.color = "var(--danger)";
+        return;
+      }
+
+      const btn = el("syncUrlSubmitBtn");
+      btn.disabled = true;
+      btn.textContent = t("addingFromUrl");
+
+      try {
+        const res = await fetch("/upload-from-url", {
+          method: "POST",
+          headers: HEADERS,
+          body: JSON.stringify({ url: urlValue, title: titleValue || undefined }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "unknown error");
+        await loadDocuments();
+        openPreview(data.documentId);
+      } catch (err) {
+        status.textContent = t("addFromUrlErrorPrefix") + err.message;
+        status.style.color = "var(--danger)";
+        btn.disabled = false;
+        btn.textContent = t("addFromUrlSubmitBtn");
+      }
+    });
+  }
+
+  el("addFromUrlBtn").addEventListener("click", renderAddFromUrlPanel);
 
   // Section G: πάνελ ρυθμίσεων widget (χρώμα, όνομα bot, λογότυπο, email
   // ειδοποίησης). Ίδιο pattern με τα άλλα render* functions -- γράφει

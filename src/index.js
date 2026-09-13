@@ -448,6 +448,54 @@ async function sendFallbackNotificationEmail(env, toEmail, question, workspaceId
   }
 }
 
+// Section M: URL sync -- προσθήκη εγγράφου διαβάζοντας μια δημόσια σελίδα
+// αντί για copy-paste. Απλή, "αρκετά καλή" εξαγωγή κειμένου από HTML: όχι
+// πλήρης parser, μόνο αφαίρεση script/style/σχολίων + βασικών tags,
+// μετατροπή block-level στοιχείων σε νέες γραμμές πριν αφαιρεθούν οι
+// υπόλοιπες ετικέτες, αποκωδικοποίηση των πιο κοινών HTML entities.
+function extractTitleFromHtml(html) {
+  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return match ? match[1].replace(/\s+/g, " ").trim() : null;
+}
+
+function extractTextFromHtml(html) {
+  let text = html;
+  text = text.replace(/<head[^>]*>[\s\S]*?<\/head>/gi, " ");
+  text = text.replace(/<script[\s\S]*?<\/script>/gi, " ");
+  text = text.replace(/<style[\s\S]*?<\/style>/gi, " ");
+  text = text.replace(/<!--[\s\S]*?-->/g, " ");
+  // Ευριστική αφαίρεση nav/header/footer -- συχνά κουβαλάνε μενού/copyright,
+  // όχι πραγματικό περιεχόμενο. Δεν πιάνει 100% τις περιπτώσεις, αλλά
+  // βελτιώνει σημαντικά την ποιότητα σε τυπικές σελίδες.
+  text = text.replace(/<(nav|header|footer)[^>]*>[\s\S]*?<\/\1>/gi, " ");
+  text = text.replace(/<\/(p|div|li|h[1-6]|tr)>/gi, "\n");
+  text = text.replace(/<br\s*\/?>/gi, "\n");
+  text = text.replace(/<[^>]+>/g, " ");
+  text = text
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;/gi, "'");
+  text = text.replace(/[ \t]+/g, " ");
+  text = text.replace(/\n[ \t]*\n[ \t]*\n+/g, "\n\n");
+  return text.trim();
+}
+
+// Ελαφρύ slug (λατινικοί χαρακτήρες μόνο) + τυχαία κατάληξη, ώστε το
+// documentId να είναι πάντα μη-κενό και μοναδικό ακόμα κι αν ο τίτλος
+// είναι εξ ολοκλήρου στα ελληνικά (τα ελληνικά γράμματα δεν περνάνε το
+// φίλτρο a-z0-9, οπότε μένει μόνο η τυχαία κατάληξη -- αποδεκτό, το
+// documentId είναι εσωτερικό κλειδί, δεν το βλέπει ποτέ ο χρήστης).
+function slugifyForDocId(str) {
+  const base = String(str || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return (base || "page") + "-" + randomHex(4);
+}
+
 function chunkText(text) {
   const words = text.trim().split(/\s+/);
   const chunks = [];
@@ -926,6 +974,98 @@ async function handleDeleteContradiction(request, env, id) {
   await env.DOCUMENT_REGISTRY.delete(kvKey);
 
   return new Response(JSON.stringify({ id, deleted: true }), { headers: JSON_HEADERS });
+}
+
+// Section M: φτιάχνει ΝΕΟ έγγραφο διαβάζοντας μια δημόσια σελίδα. Πάντα
+// ξεκινάει ως "draft" -- ΙΔΙΑ πολιτική με τα χειροκίνητα uploads (Section
+// D), ώστε ο πελάτης να μπορεί να ελέγξει το αυτόματα εξαγμένο κείμενο
+// πριν το δημοσιεύσει. Καμία κλήση Gemini/Vectorize εδώ -- αυτές γίνονται
+// μόνο στο ρητό "Δημοσίευση", όπως και στα κανονικά uploads.
+async function handleUploadFromUrl(request, env) {
+  const workspaceId = await resolveWorkspaceId(request, env);
+  if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonError(400, "Invalid JSON body");
+  }
+
+  const rawUrl = (body.url || "").trim();
+  if (!rawUrl) return jsonError(400, "url is required");
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(rawUrl);
+  } catch (err) {
+    return jsonError(400, "Invalid URL");
+  }
+  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+    return jsonError(400, "Only http/https URLs are supported");
+  }
+
+  let pageResponse;
+  try {
+    pageResponse = await fetch(parsedUrl.toString(), {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; RAGDemoBot/1.0; +url-sync)" },
+    });
+  } catch (err) {
+    return jsonError(400, "Could not fetch the URL");
+  }
+  if (!pageResponse.ok) {
+    return jsonError(400, `The URL returned an error (status ${pageResponse.status})`);
+  }
+
+  const contentType = pageResponse.headers.get("Content-Type") || "";
+  if (!contentType.includes("html") && !contentType.includes("text/plain")) {
+    return jsonError(400, "The URL must point to an HTML page");
+  }
+
+  const html = await pageResponse.text();
+  const text = extractTextFromHtml(html);
+
+  // 10 λέξεις είναι αρκετές για να ξεχωρίσουμε μια πραγματική σελίδα από
+  // μια άδεια/σπασμένη (π.χ. SPA που δεν αποδίδει τίποτα server-side).
+  // ΔΕΝ απαιτούμε "μεγάλο" περιεχόμενο -- πολλές πραγματικές σελίδες
+  // (π.χ. ένα σύντομο FAQ) είναι νόμιμα σύντομες.
+  if (!text || text.split(/\s+/).filter(Boolean).length < 10) {
+    return jsonError(400, "Could not extract enough readable text from this page");
+  }
+
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  const byteSize = new TextEncoder().encode(text).length;
+  if (wordCount > MAX_UPLOAD_WORDS || byteSize > MAX_UPLOAD_BYTES) {
+    return jsonError(
+      400,
+      `Η σελίδα έχει πολύ περιεχόμενο (μέγιστο ${MAX_UPLOAD_WORDS} λέξεις ή 2MB). Έχει ${wordCount} λέξεις.`
+    );
+  }
+
+  const title = (body.title || "").trim() || extractTitleFromHtml(html) || parsedUrl.hostname;
+  const documentId = slugifyForDocId(title);
+
+  const { putOptions, expiresAt } = docTtlFor(workspaceId);
+  const kvKey = `session:${workspaceId}:doc:${documentId}`;
+  await env.DOCUMENT_REGISTRY.put(
+    kvKey,
+    JSON.stringify({
+      title,
+      chunkCount: 0,
+      updatedAt: new Date().toISOString(),
+      volatility: null,
+      sourceUrl: parsedUrl.toString(),
+      fullText: text,
+      status: "draft",
+      expiresAt,
+    }),
+    putOptions
+  );
+
+  return new Response(
+    JSON.stringify({ ok: true, documentId, title, wordCount }),
+    { headers: JSON_HEADERS }
+  );
 }
 
 async function handleUpload(request, env) {
@@ -1623,6 +1763,76 @@ async function handleDeleteFallbackQuestion(request, env, id) {
 // πρόχειρου εγγράφου και κάνει (τώρα πρώτη φορά) chunking + embeddings +
 // upsert στο Vectorize. Ίδιο ακριβώς μοτίβο με το /upload, απλά χωρίς νέο
 // κείμενο -- ο χρήστης απλά εγκρίνει αυτό που ήδη έγραψε.
+// Section M: ξαναδιαβάζει το ΗΔΗ αποθηκευμένο sourceUrl ενός εγγράφου (π.χ.
+// η σελίδα του πελάτη άλλαξε μετά το αρχικό sync). Αν το έγγραφο ήταν ήδη
+// δημοσιευμένο, ξανακάνει chunking/embedding ώστε το bot να βλέπει αμέσως
+// το νέο περιεχόμενο -- ΙΔΙΑ λογική με το handlePublishDocument. Αν είναι
+// ακόμα draft, απλά ενημερώνει το fullText, χωρίς καμία κλήση Gemini.
+async function handleRefreshFromUrl(request, env, documentId) {
+  const workspaceId = await resolveWorkspaceId(request, env);
+  if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
+
+  const kvKey = `session:${workspaceId}:doc:${documentId}`;
+  const raw = await env.DOCUMENT_REGISTRY.get(kvKey);
+  if (!raw) return jsonError(404, "Document not found");
+
+  const doc = JSON.parse(raw);
+  if (!doc.sourceUrl) {
+    return jsonError(400, "This document has no source URL to refresh from");
+  }
+
+  let pageResponse;
+  try {
+    pageResponse = await fetch(doc.sourceUrl, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; RAGDemoBot/1.0; +url-sync)" },
+    });
+  } catch (err) {
+    return jsonError(400, "Could not fetch the URL");
+  }
+  if (!pageResponse.ok) {
+    return jsonError(400, `The URL returned an error (status ${pageResponse.status})`);
+  }
+
+  const html = await pageResponse.text();
+  const text = extractTextFromHtml(html);
+  if (!text || text.split(/\s+/).filter(Boolean).length < 10) {
+    return jsonError(400, "Could not extract enough readable text from this page");
+  }
+
+  doc.fullText = text;
+  doc.updatedAt = new Date().toISOString();
+
+  if (doc.status === "published") {
+    if (doc.chunkCount) {
+      const idsToDelete = [];
+      for (let i = 0; i < doc.chunkCount; i++) idsToDelete.push(`${documentId}-chunk-${i}`);
+      await env.VECTORIZE.deleteByIds(idsToDelete);
+    }
+    const chunks = chunkText(text);
+    const vectors = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const embedding = await getEmbedding(chunks[i], env.GEMINI_API_KEY);
+      vectors.push({
+        id: `${documentId}-chunk-${i}`,
+        values: embedding,
+        namespace: workspaceId,
+        metadata: { documentId, chunkIndex: i, text: chunks[i] },
+      });
+    }
+    await env.VECTORIZE.upsert(vectors);
+    doc.chunkCount = chunks.length;
+  }
+
+  const { putOptions, expiresAt } = docTtlFor(workspaceId);
+  doc.expiresAt = expiresAt;
+  await env.DOCUMENT_REGISTRY.put(kvKey, JSON.stringify(doc), putOptions);
+
+  return new Response(
+    JSON.stringify({ ok: true, documentId, status: doc.status, chunkCount: doc.chunkCount, updatedAt: doc.updatedAt }),
+    { headers: JSON_HEADERS }
+  );
+}
+
 async function handlePublishDocument(request, env, documentId) {
   const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
@@ -1844,6 +2054,10 @@ export default {
       return handleUpload(request, env);
     }
 
+    if (url.pathname === "/upload-from-url" && request.method === "POST") {
+      return handleUploadFromUrl(request, env);
+    }
+
     if (url.pathname === "/documents" && request.method === "GET") {
       return handleListDocuments(request, env);
     }
@@ -1862,6 +2076,7 @@ export default {
         if (action === "publish") return handlePublishDocument(request, env, documentId);
         if (action === "delete") return handleDeleteDocument(request, env, documentId);
         if (action === "restore") return handleRestoreDocument(request, env, documentId);
+        if (action === "refresh-from-url") return handleRefreshFromUrl(request, env, documentId);
       }
     }
 
