@@ -47,6 +47,39 @@ const HEADERS = {
 // localStorage, και γυρνάει στη landing page. Χρησιμοποιείται από το
 // "switch mode" link σε index.html/editor.html -- μία υλοποίηση, όχι δύο
 // αντίγραφα.
+// Section L: streaming. Διαβάζει ένα SSE response (Response.body είναι
+// ReadableStream) και καλεί onEvent(parsedJson) για κάθε "data: {...}"
+// γραμμή. Το ΙΔΙΟ πρωτόκολλο ορίζεται και στο backend (buildStreamingQueryResponse
+// στο index.js) και ξανα-υλοποιείται (σκόπιμα, αντιγραμμένο) μέσα στο
+// widget.js, που πρέπει να μείνει αυτόνομο αρχείο χωρίς εξάρτηση σε αυτό.
+async function streamSSE(response, onEvent) {
+  if (!response.body) return;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary;
+    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+      const rawEvent = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const line = rawEvent.trim();
+      if (!line.startsWith("data:")) continue;
+      const jsonStr = line.slice(5).trim();
+      if (!jsonStr) continue;
+      try {
+        onEvent(JSON.parse(jsonStr));
+      } catch (err) {
+        // αγνόησε γραμμές που δεν είναι έγκυρο JSON
+      }
+    }
+  }
+}
+
 async function logoutAndSwitchMode() {
   if (SESSION_TOKEN) {
     try {

@@ -218,19 +218,42 @@
     input.value = "";
     el("askBtn").disabled = true;
 
+    const botDiv = addMessage("…", "bot");
+    let accumulatedText = "";
+
     try {
-      const res = await fetch("/query", {
+      const res = await fetch("/query/stream", {
         method: "POST",
         headers: HEADERS,
         body: JSON.stringify({ question }),
       });
-      const data = await res.json();
 
-      const botDiv = addMessage(data.answer, "bot", data.isFallback);
-      if (!data.isFallback) addSourceLink(botDiv, data.primarySource);
-      renderSource(data.primarySource);
+      if (!res.ok || !res.body) {
+        throw new Error("bad response");
+      }
+
+      let finalEvent = null;
+      await streamSSE(res, (evt) => {
+        if (evt.type === "chunk") {
+          accumulatedText += evt.text;
+          botDiv.innerHTML = formatAnswer(accumulatedText);
+          thread.scrollTop = thread.scrollHeight;
+        } else if (evt.type === "done" || evt.type === "error") {
+          finalEvent = evt;
+        }
+      });
+
+      if (!finalEvent || finalEvent.type === "error") {
+        botDiv.classList.add("fallback");
+        renderSource(null);
+      } else {
+        if (finalEvent.isFallback) botDiv.classList.add("fallback");
+        if (!finalEvent.isFallback) addSourceLink(botDiv, finalEvent.primarySource);
+        renderSource(finalEvent.primarySource);
+      }
     } catch (err) {
-      addMessage(t("connectionErrorPrefix") + err.message, "bot", true);
+      botDiv.innerHTML = formatAnswer(t("connectionErrorPrefix") + err.message);
+      botDiv.classList.add("fallback");
     } finally {
       el("askBtn").disabled = false;
     }

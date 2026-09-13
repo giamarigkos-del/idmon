@@ -515,6 +515,79 @@ ${context}
   return answer;
 }
 
+// Section L: streaming.
+//
+// Ίδιο prompt/model με το askGemini(), αλλά καλεί το streamGenerateContent
+// endpoint (alt=sse) και επιστρέφει τα κομμάτια κειμένου ΚΑΘΩΣ φτάνουν, όχι
+// όλα μαζί στο τέλος. async generator -- ο καλών κάνει "for await (const
+// piece of ...)" για να τα διαβάσει ένα-ένα.
+async function* streamGeminiChunks(context, question, apiKey) {
+  const prompt = `Απάντησε στην ερώτηση χρησιμοποιώντας ΜΟΝΟ τις παρακάτω πληροφορίες. Αν η απάντηση δεν βρίσκεται στις πληροφορίες, πες ότι δεν γνωρίζεις. Απάντησε στην ίδια γλώσσα με την ερώτηση.
+
+Πληροφορίες:
+${context}
+
+Ερώτηση: ${question}`;
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:streamGenerateContent?alt=sse&key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+    }
+  );
+
+  if (!response.ok || !response.body) {
+    const errText = await response.text().catch(() => "");
+    throw new Error("Gemini streaming failed: " + errText);
+  }
+
+  // Το Google SSE format είναι ίδιο με το δικό μας: γραμμές "data: {...}",
+  // χωρισμένες με κενή γραμμή. Κάθε JSON κομμάτι κουβαλάει ΝΕΟ κείμενο
+  // (incremental), όχι το σωρευμένο μέχρι τώρα -- ο καλών είναι υπεύθυνος
+  // να τα ενώσει. ΣΗΜΑΝΤΙΚΟ: κανονικοποιούμε \r\n σε \n πριν το boundary
+  // detection -- το Google στέλνει CRLF, όχι σκέτο \n (βρέθηκε live, μετά
+  // από debugging: χωρίς αυτό ο parser δεν έβρισκε ΠΟΤΕ πλήρες "data:"
+  // event, οπότε ΚΑΝΕΝΑ κομμάτι κειμένου δεν έβγαινε ποτέ).
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let yieldedAny = false;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+
+    let boundary;
+    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+      const rawEvent = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const line = rawEvent.trim();
+      if (!line.startsWith("data:")) continue;
+      const jsonStr = line.slice(5).trim();
+      if (!jsonStr) continue;
+
+      let parsed;
+      try {
+        parsed = JSON.parse(jsonStr);
+      } catch (err) {
+        continue;
+      }
+      const textPiece = parsed?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (textPiece) {
+        yieldedAny = true;
+        yield textPiece;
+      }
+    }
+  }
+
+  if (!yieldedAny) {
+    throw new Error("Gemini streaming returned no text chunks");
+  }
+}
+
 // Αφαιρεί τα σύμβολα markdown (#, **, _, [](), κλπ) ώστε τα σύντομα
 // αποσπάσματα (preview) στις κάρτες λίστας να δείχνουν καθαρό κείμενο,
 // όχι raw σύνταξη. Χρησιμοποιείται ΜΟΝΟ για preview -- το πλήρες κείμενο
@@ -1248,6 +1321,133 @@ async function runQuery(env, workspaceId, question) {
   return { status: 200, body: { answer, isFallback, primarySource, relatedSections } };
 }
 
+// Section L: streaming version του runQuery(). ΙΔΙΟ pipeline (embedding →
+// semantic search → Gemini), αλλά το βήμα Gemini στέλνει το κείμενο
+// σταδιακά αντί να περιμένουμε ολόκληρη την απάντηση. Χρησιμοποιεί δικό
+// του, απλό SSE πρωτόκολλο (ΟΧΙ το raw format του Google) ώστε το frontend
+// να μη χρειάζεται να ξέρει τίποτα για τα εσωτερικά του Gemini:
+//   {type:"chunk", text} -- ένα νέο κομμάτι κειμένου προς προσθήκη
+//   {type:"done", isFallback, primarySource, relatedSections} -- τέλος
+//   {type:"error", message} -- κάτι πήγε στραβά, το frontend δείχνει γενικό μήνυμα
+function encodeSSE(obj) {
+  return new TextEncoder().encode(`data: ${JSON.stringify(obj)}\n\n`);
+}
+
+function buildStreamingQueryResponse(env, workspaceId, question) {
+  return new ReadableStream({
+    async start(controller) {
+      try {
+        if (!question) {
+          controller.enqueue(encodeSSE({ type: "error", message: "question is required" }));
+          controller.close();
+          return;
+        }
+
+        const questionEmbedding = await getEmbedding(question, env.GEMINI_API_KEY);
+
+        let matches;
+        try {
+          matches = await env.VECTORIZE.query(questionEmbedding, {
+            topK: TOP_K,
+            namespace: workspaceId,
+            returnMetadata: "all",
+          });
+        } catch (err) {
+          matches = { matches: [] };
+        }
+
+        if (!matches.matches || matches.matches.length === 0) {
+          const fallbackAnswer = "Δεν βρέθηκαν σχετικά έγγραφα σε αυτόν τον χώρο εργασίας.";
+          controller.enqueue(encodeSSE({ type: "chunk", text: fallbackAnswer }));
+          await logFallbackQuestion(env, workspaceId, question);
+          await recordAnalytics(env, workspaceId, true);
+          controller.enqueue(encodeSSE({ type: "done", isFallback: true, primarySource: null, relatedSections: [] }));
+          controller.close();
+          return;
+        }
+
+        const context = matches.matches.map((m) => m.metadata.text).join("\n\n---\n\n");
+
+        // Δοκιμάζουμε πρώτα το πραγματικό streaming. Αν για οποιονδήποτε
+        // λόγο δεν αποδώσει ΚΑΝΕΝΑ κομμάτι κειμένου (π.χ. προσωρινό
+        // πρόβλημα δικτύου στο ενδιάμεσο fetch προς το Gemini), κάνουμε
+        // fallback στο ήδη δοκιμασμένο, μη-streaming askGemini() -- ο
+        // επισκέπτης παίρνει ΟΠΩΣΔΗΠΟΤΕ απάντηση, έστω μονομιάς αντί για
+        // σταδιακά.
+        let fullAnswer = "";
+        try {
+          for await (const piece of streamGeminiChunks(context, question, env.GEMINI_API_KEY)) {
+            if (!piece) continue;
+            fullAnswer += piece;
+            controller.enqueue(encodeSSE({ type: "chunk", text: piece }));
+          }
+        } catch (streamErr) {
+          fullAnswer = "";
+        }
+
+        if (!fullAnswer) {
+          fullAnswer = await askGemini(context, question, env.GEMINI_API_KEY);
+          controller.enqueue(encodeSSE({ type: "chunk", text: fullAnswer }));
+        }
+
+        const normalizedAnswer = fullAnswer.toLowerCase();
+        const isFallback =
+          normalizedAnswer.includes("δεν γνωρίζω") ||
+          normalizedAnswer.includes("δε γνωρίζω") ||
+          normalizedAnswer.includes("don't know") ||
+          normalizedAnswer.includes("do not know");
+
+        const sortedMatches = [...matches.matches].sort((a, b) => b.score - a.score);
+        const topMatch = sortedMatches[0];
+
+        let primarySource = null;
+        if (!isFallback) {
+          const getDocMeta = createDocMetaCache(env, workspaceId);
+          const docMeta = await getDocMeta(topMatch.metadata.documentId);
+          primarySource = {
+            documentId: topMatch.metadata.documentId,
+            title: docMeta.title || null,
+            chunkIndex: topMatch.metadata.chunkIndex,
+            score: topMatch.score,
+            text: topMatch.metadata.text,
+            sourceUrl: docMeta.sourceUrl || null,
+          };
+        }
+
+        if (isFallback) await logFallbackQuestion(env, workspaceId, question);
+        await recordAnalytics(env, workspaceId, isFallback);
+
+        controller.enqueue(encodeSSE({ type: "done", isFallback, primarySource, relatedSections: [] }));
+        controller.close();
+      } catch (err) {
+        try {
+          controller.enqueue(encodeSSE({ type: "error", message: "Κάτι πήγε στραβά." }));
+        } catch (enqueueErr) {
+          // το stream μπορεί να έχει ήδη κλείσει/σπάσει -- αγνόησέ το
+        }
+        controller.close();
+      }
+    },
+  });
+}
+
+async function handleQueryStream(request, env) {
+  const workspaceId = await resolveWorkspaceId(request, env);
+  if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonError(400, "Invalid JSON body");
+  }
+
+  const stream = buildStreamingQueryResponse(env, workspaceId, body.question);
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache" },
+  });
+}
+
 // Section I: CORS + embed-id → workspaceId, για το δημόσιο embed endpoint.
 //
 // Το Origin header έχει μορφή "https://www.site.gr" (ΧΩΡΙΣ path) -- το
@@ -1335,6 +1535,37 @@ async function handleEmbedQuery(request, env, embedId) {
     JSON.stringify(result.body),
     { status: result.status, headers: { ...JSON_HEADERS, ...corsHeaders(origin) } }
   );
+}
+
+// Streaming εκδοχή του παραπάνω -- ΙΔΙΑ CORS/embed-id λογική, διαφορετικό
+// pipeline (buildStreamingQueryResponse αντί για runQuery) και response
+// (SSE stream αντί για ένα JSON σώμα).
+async function handleEmbedQueryStream(request, env, embedId) {
+  const origin = request.headers.get("Origin");
+
+  const workspaceId = await resolveWorkspaceIdFromEmbedId(env, embedId);
+  if (!workspaceId) return jsonError(404, "Unknown embed id");
+
+  if (!origin) return jsonError(403, "Missing Origin header");
+
+  const allowed = await isOriginAllowedForWorkspace(env, workspaceId, origin);
+  if (!allowed) return jsonError(403, "This domain is not authorized for this embed");
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonError(400, "Invalid JSON body");
+  }
+
+  const stream = buildStreamingQueryResponse(env, workspaceId, body.question);
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache",
+      ...corsHeaders(origin),
+    },
+  });
 }
 
 async function handleGetFallbackQuestions(request, env) {
@@ -1599,6 +1830,16 @@ export default {
       if (request.method === "POST") return handleEmbedQuery(request, env, embedId);
     }
 
+    // Section L: streaming -- ίδιο path pattern, /stream στο τέλος. Το
+    // preflight είναι το ΙΔΙΟ (ελέγχει μόνο Origin/embedId, δεν διαφέρει
+    // ανάλογα με streaming ή όχι), απλά καλείται και για τα δύο paths.
+    const embedQueryStreamMatch = url.pathname.match(/^\/embed\/([^/]+)\/query\/stream$/);
+    if (embedQueryStreamMatch) {
+      const embedId = embedQueryStreamMatch[1];
+      if (request.method === "OPTIONS") return handleEmbedQueryPreflight(request, env, embedId);
+      if (request.method === "POST") return handleEmbedQueryStream(request, env, embedId);
+    }
+
     if (url.pathname === "/upload" && request.method === "POST") {
       return handleUpload(request, env);
     }
@@ -1646,6 +1887,10 @@ export default {
 
     if (url.pathname === "/query" && request.method === "POST") {
       return handleQuery(request, env);
+    }
+
+    if (url.pathname === "/query/stream" && request.method === "POST") {
+      return handleQueryStream(request, env);
     }
 
     if (url.pathname === "/fallback-questions" && request.method === "GET") {

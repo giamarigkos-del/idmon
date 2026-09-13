@@ -238,32 +238,68 @@
     sendBtn.disabled = true;
 
     addMessage("user", escapeHtml(question));
-    var loadingEl = addMessage("bot", "…");
+    var botEl = addMessage("bot", "…");
+    var accumulatedText = "";
 
     try {
-      var res = await fetch(BASE_URL + "/embed/" + encodeURIComponent(embedId) + "/query", {
+      var res = await fetch(BASE_URL + "/embed/" + encodeURIComponent(embedId) + "/query/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: question }),
       });
-      var data = null;
-      try {
-        data = await res.json();
-      } catch (parseErr) {
-        data = null;
+
+      if (!res.ok || !res.body) {
+        botEl.innerHTML = escapeHtml(t.unavailable);
+        return;
       }
-      loadingEl.remove();
-      if (!res.ok || !data || typeof data.answer !== "string") {
-        addMessage("bot", escapeHtml(t.unavailable));
-      } else {
-        addMessage("bot", formatAnswer(data.answer));
-        if (data.isFallback && hasContact) {
-          addFallbackContactPrompt();
+
+      // Αυτόνομος SSE parser -- ΙΔΙΟ πρωτόκολλο με το backend
+      // (buildStreamingQueryResponse στο index.js) και με το streamSSE()
+      // του shared.js, αλλά αντιγραμμένο εδώ επίτηδες. Το widget.js πρέπει
+      // να μείνει ένα αυτόνομο αρχείο, χωρίς εξωτερικές εξαρτήσεις.
+      var reader = res.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = "";
+      var finalEvent = null;
+
+      while (true) {
+        var chunk = await reader.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+
+        var boundary;
+        while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+          var rawEvent = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          var line = rawEvent.trim();
+          if (line.indexOf("data:") !== 0) continue;
+          var jsonStr = line.slice(5).trim();
+          if (!jsonStr) continue;
+
+          var evt;
+          try {
+            evt = JSON.parse(jsonStr);
+          } catch (parseErr) {
+            continue;
+          }
+
+          if (evt.type === "chunk") {
+            accumulatedText += evt.text;
+            botEl.innerHTML = formatAnswer(accumulatedText);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+          } else if (evt.type === "done" || evt.type === "error") {
+            finalEvent = evt;
+          }
         }
       }
+
+      if (!finalEvent || finalEvent.type === "error") {
+        if (!accumulatedText) botEl.innerHTML = escapeHtml(t.unavailable);
+      } else if (finalEvent.isFallback && hasContact) {
+        addFallbackContactPrompt();
+      }
     } catch (err) {
-      loadingEl.remove();
-      addMessage("bot", escapeHtml(t.genericError));
+      botEl.innerHTML = escapeHtml(t.genericError);
     } finally {
       inputEl.disabled = false;
       sendBtn.disabled = false;

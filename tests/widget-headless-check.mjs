@@ -25,6 +25,27 @@ function assert(condition, message) {
 
 const widgetSource = readFileSync(new URL("../public/widget.js", import.meta.url), "utf8");
 
+// Προσομοιώνει ένα streaming Response.body: events (array από objects) γίνονται
+// "data: {...}\n\n" κείμενο, κωδικοποιείται μία φορά σε bytes, και επιστρέφεται
+// ΟΛΟΚΛΗΡΟ στην πρώτη κλήση read() (το widget.js parser χειρίζεται σωστά
+// πολλαπλά events μέσα στο ίδιο chunk, δεν χρειάζεται τεχνητό split σε test).
+function makeSSEBody(events) {
+  const text = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+  const bytes = new TextEncoder().encode(text);
+  let sent = false;
+  return {
+    getReader() {
+      return {
+        async read() {
+          if (sent) return { done: true, value: undefined };
+          sent = true;
+          return { done: false, value: bytes };
+        },
+      };
+    },
+  };
+}
+
 async function withDom(scriptAttrs, fetchImpl) {
   const dom = new JSDOM(
     `<!DOCTYPE html><html><body>
@@ -33,7 +54,11 @@ async function withDom(scriptAttrs, fetchImpl) {
     { runScripts: "outside-only", url: "https://customer-site.gr/" }
   );
   const { window } = dom;
-  window.fetch = fetchImpl || (async () => ({ ok: true, json: async () => ({ answer: "OK" }) }));
+  window.fetch = fetchImpl || (async () => ({ ok: true, body: makeSSEBody([{ type: "chunk", text: "OK" }, { type: "done", isFallback: false }]) }));
+  // jsdom δεν εγγυάται πάντα TextDecoder στο window -- το δίνουμε ρητά από
+  // το Node global scope (το widget.js το χρησιμοποιεί για να διαβάσει το
+  // streaming response σώμα).
+  window.TextDecoder = TextDecoder;
   // document.currentScript δεν λειτουργεί με runScripts:"outside-only" +
   // εξωτερικό eval, οπότε δίνουμε το ίδιο αντικείμενο σαν fallback --
   // ΤΟ ΙΔΙΟ fallback path (querySelectorAll) που το widget.js ήδη έχει
@@ -91,7 +116,14 @@ async function testSendQuestionCallsCorrectUrl() {
   const fetchImpl = async (url, options) => {
     capturedUrl = url;
     capturedBody = JSON.parse(options.body);
-    return { ok: true, json: async () => ({ answer: "Η απάντηση **έντονη**." }) };
+    return {
+      ok: true,
+      body: makeSSEBody([
+        { type: "chunk", text: "Η απάντηση " },
+        { type: "chunk", text: "**έντονη**." },
+        { type: "done", isFallback: false, primarySource: null, relatedSections: [] },
+      ]),
+    };
   };
   const window = await withDom('data-embed-id="emb-test123"', fetchImpl);
   const host = window.document.getElementById("rag-embed-widget-host");
@@ -102,8 +134,8 @@ async function testSendQuestionCallsCorrectUrl() {
   await new Promise((r) => setTimeout(r, 0));
 
   assert(
-    capturedUrl === "https://operations-portal-rag.giamarigkos.workers.dev/embed/emb-test123/query",
-    "καλεί το σωστό, πλήρες URL (βασισμένο στο src του ίδιου του script tag)"
+    capturedUrl === "https://operations-portal-rag.giamarigkos.workers.dev/embed/emb-test123/query/stream",
+    "καλεί το σωστό, πλήρες streaming URL (βασισμένο στο src του ίδιου του script tag)"
   );
   assert(capturedBody.question === "Τι ώρες είστε ανοιχτά;", "στέλνει το σωστό ερώτημα στο body");
 
@@ -111,7 +143,7 @@ async function testSendQuestionCallsCorrectUrl() {
   assert(messages.length === 2, "εμφανίζονται 2 μηνύματα (χρήστης + bot)");
   assert(messages[0].classList.contains("user"), "το πρώτο μήνυμα είναι του χρήστη");
   assert(messages[1].classList.contains("bot"), "το δεύτερο μήνυμα είναι του bot");
-  assert(messages[1].innerHTML.includes("<strong>έντονη</strong>"), "το **markdown bold** μετατράπηκε σε <strong>");
+  assert(messages[1].innerHTML.includes("<strong>έντονη</strong>"), "το **markdown bold** μετατράπηκε σε <strong> (μετά τη συνένωση των streamed κομματιών)");
 }
 
 async function testNetworkErrorShowsFallbackMessage() {
@@ -137,7 +169,7 @@ async function testNetworkErrorShowsFallbackMessage() {
 
 async function testForbiddenResponseShowsUnavailableMessage() {
   console.log("\n[403 από τον server (μη επιτρεπόμενο domain) -- γενικό μήνυμα, καμία διαρροή λεπτομερειών]");
-  const fetchImpl = async () => ({ ok: false, status: 403, json: async () => ({ error: "This domain is not authorized for this embed" }) });
+  const fetchImpl = async () => ({ ok: false, status: 403 });
   const window = await withDom('data-embed-id="emb-test123"', fetchImpl);
   const host = window.document.getElementById("rag-embed-widget-host");
   const input = host.shadowRoot.querySelector(".input-row input");
@@ -179,7 +211,10 @@ async function testFallbackShowsContactPrompt() {
   console.log("\n[isFallback:true ΚΑΙ ρυθμισμένη επικοινωνία -- εμφανίζεται το fallback CTA μήνυμα]");
   const fetchImpl = async () => ({
     ok: true,
-    json: async () => ({ answer: "Δεν βρέθηκαν σχετικά έγγραφα.", isFallback: true }),
+    body: makeSSEBody([
+      { type: "chunk", text: "Δεν βρέθηκαν σχετικά έγγραφα." },
+      { type: "done", isFallback: true, primarySource: null, relatedSections: [] },
+    ]),
   });
   const window = await withDom(
     'data-embed-id="emb-test123" data-contact-label="Μίλα μαζί μας" data-contact-url="https://wa.me/306912345678"',
@@ -202,7 +237,10 @@ async function testFallbackWithoutContactConfiguredShowsNothingExtra() {
   console.log("\n[isFallback:true ΧΩΡΙΣ ρυθμισμένη επικοινωνία -- ΚΑΝΕΝΑ επιπλέον μήνυμα]");
   const fetchImpl = async () => ({
     ok: true,
-    json: async () => ({ answer: "Δεν βρέθηκαν σχετικά έγγραφα.", isFallback: true }),
+    body: makeSSEBody([
+      { type: "chunk", text: "Δεν βρέθηκαν σχετικά έγγραφα." },
+      { type: "done", isFallback: true, primarySource: null, relatedSections: [] },
+    ]),
   });
   const window = await withDom('data-embed-id="emb-test123"', fetchImpl);
   const host = window.document.getElementById("rag-embed-widget-host");
@@ -224,7 +262,10 @@ async function testNormalAnswerNeverShowsContactPrompt() {
   console.log("\n[isFallback:false ΜΕ ρυθμισμένη επικοινωνία -- ΔΕΝ εμφανίζεται το CTA σε κανονική απάντηση]");
   const fetchImpl = async () => ({
     ok: true,
-    json: async () => ({ answer: "Είμαστε ανοιχτά 9-17.", isFallback: false }),
+    body: makeSSEBody([
+      { type: "chunk", text: "Είμαστε ανοιχτά 9-17." },
+      { type: "done", isFallback: false, primarySource: null, relatedSections: [] },
+    ]),
   });
   const window = await withDom(
     'data-embed-id="emb-test123" data-contact-label="Μίλα μαζί μας" data-contact-url="https://wa.me/306912345678"',
