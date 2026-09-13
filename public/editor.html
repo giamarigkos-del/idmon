@@ -24,6 +24,16 @@
   .top-bar-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
   .top-bar-right .lang-toggle{margin-left:0;}
 
+  /* Section G: γρανάζι ρυθμίσεων widget -- ίδια χρωματική λογική με το
+     .back-link (ίδιο background/border/hover), απλά τετράγωνο μέγεθος για
+     ένα μόνο glyph αντί για κείμενο. Το tooltip έρχεται από το native
+     title="" attribute (μεταφράζεται μέσω data-i18n-title). */
+  .icon-btn{font-size:15px;line-height:1;color:var(--text);text-decoration:none;
+    background:var(--surface-2);border:1px solid var(--border);border-radius:4px;
+    width:30px;height:30px;display:flex;align-items:center;justify-content:center;
+    cursor:pointer;}
+  .icon-btn:hover{background:var(--accent-soft);border-color:var(--accent);}
+
   .layout{flex:1;display:flex;min-height:0;}
 
   .sidebar{width:340px;flex-shrink:0;border-left:1px solid var(--border);background:var(--surface);
@@ -243,6 +253,7 @@
     <div class="top-bar-right">
       <a class="back-link" id="switchModeLink" href="#" data-i18n="switchMode">Switch mode</a>
       <a class="back-link" href="/">←Portal</a>
+      <button type="button" class="icon-btn" id="settingsBtn" data-i18n-title="widgetSettingsTooltip" title="Widget settings">⚙</button>
       <div class="lang-toggle" id="langToggle">
         <button type="button" class="lang-btn" data-lang="en">EN</button>
         <button type="button" class="lang-btn" data-lang="el">GR</button>
@@ -288,9 +299,6 @@
           <button type="button" class="refresh-btn" id="refreshContradictionsBtn" data-i18n="refresh">↻ Refresh</button>
         </div>
         <div id="contradictionList" class="contradiction-list" data-i18n="loading">Loading…</div>
-      </div>
-      <div class="sidebar-section">
-        <button type="button" class="refresh-btn" id="settingsBtn" data-i18n="widgetSettings" style="width:100%;">⚙ Widget settings</button>
       </div>
     </div>
 

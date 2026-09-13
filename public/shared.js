@@ -221,6 +221,7 @@ const TRANSLATIONS = {
     settingsSaved: "✓ Settings saved.",
     settingsSaveErrorPrefix: "Save error: ",
     settingsLoadError: "Could not load settings.",
+    widgetSettingsTooltip: "Widget settings",
   },
   el: {
     loading: "Φόρτωση…",
@@ -340,6 +341,7 @@ const TRANSLATIONS = {
     settingsSaved: "✓ Οι ρυθμίσεις αποθηκεύτηκαν.",
     settingsSaveErrorPrefix: "Σφάλμα αποθήκευσης: ",
     settingsLoadError: "Δεν ήταν δυνατή η φόρτωση ρυθμίσεων.",
+    widgetSettingsTooltip: "Ρυθμίσεις widget",
   },
 };
 
