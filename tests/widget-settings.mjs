@@ -140,6 +140,18 @@ async function testContactLabelTooLong() {
   assert(res.status === 400, "status 400 (όριο 40 χαρακτήρων)");
 }
 
+async function testDangerousContactUrlSchemesRejected() {
+  console.log("\n[PATCH /workspace/settings -- επικίνδυνα contactUrl schemes απορρίπτονται]");
+  for (const url of ["javascript:alert(1)", "JavaScript:alert(1)", "vbscript:msgbox(1)", "data:text/html,<script>alert(1)</script>"]) {
+    const res = await fetch(`${BASE_URL}/workspace/settings`, {
+      method: "PATCH",
+      headers: HEADERS,
+      body: JSON.stringify({ contactUrl: url }),
+    });
+    assert(res.status === 400, `status 400 για ${url}`);
+  }
+}
+
 async function run() {
   console.log(`Test workspace: ${TEST_WORKSPACE_ID}`);
   await testMissingWorkspaceHeader();
@@ -150,6 +162,7 @@ async function run() {
   await testInvalidEmail();
   await testInvalidContactUrl();
   await testValidContactUrlSchemes();
+  await testDangerousContactUrlSchemesRejected();
   await testContactLabelTooLong();
 
   console.log(`\n${passed} passed, ${failed} failed`);

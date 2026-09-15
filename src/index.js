@@ -211,6 +211,7 @@ async function handleSignup(request, env) {
   }
   const email = (body.email || "").trim().toLowerCase();
   const { password } = body;
+  const lang = body.lang === "el" ? "el" : "en";
 
   if (!email || !EMAIL_RE.test(email)) return jsonError(400, "Valid email is required");
   if (!password || password.length < 8) return jsonError(400, "Password must be at least 8 characters");
@@ -234,8 +235,13 @@ async function handleSignup(request, env) {
 
   const session = await createSession(env, result.meta.last_row_id, workspaceId);
 
+  // Best-effort, δεν μπλοκάρει ποτέ το signup αν αργήσει/αποτύχει το email
+  // (ίδια φιλοσοφία με sendEmailViaResend -- "soft" verification, ο
+  // λογαριασμός ήδη δουλεύει κανονικά).
+  await sendVerificationEmail(env, new URL(request.url).origin, result.meta.last_row_id, email, lang);
+
   return new Response(
-    JSON.stringify({ ok: true, sessionToken: session.token, workspaceId, embedId }),
+    JSON.stringify({ ok: true, sessionToken: session.token, workspaceId, embedId, emailVerified: false }),
     { headers: JSON_HEADERS }
   );
 }
@@ -258,7 +264,7 @@ async function handleLogin(request, env) {
   if (!email || !password) return jsonError(400, "Email and password are required");
 
   const user = await env.DB.prepare(
-    "SELECT id, password_hash, password_salt, workspace_id, embed_id FROM users WHERE email = ?"
+    "SELECT id, password_hash, password_salt, workspace_id, embed_id, email_verified FROM users WHERE email = ?"
   ).bind(email).first();
 
   // Το ΙΔΙΟ γενικό μήνυμα λάθους είτε δεν υπάρχει το email είτε το password
@@ -279,7 +285,13 @@ async function handleLogin(request, env) {
   const session = await createSession(env, user.id, user.workspace_id);
 
   return new Response(
-    JSON.stringify({ ok: true, sessionToken: session.token, workspaceId: user.workspace_id, embedId: user.embed_id }),
+    JSON.stringify({
+      ok: true,
+      sessionToken: session.token,
+      workspaceId: user.workspace_id,
+      embedId: user.embed_id,
+      emailVerified: !!user.email_verified,
+    }),
     { headers: JSON_HEADERS }
   );
 }
@@ -295,6 +307,26 @@ async function handleLogout(request, env) {
 // pattern με το OAuth state), αυτο-καθαρίζεται μέσω TTL, μιας χρήσης
 // (διαγράφεται αμέσως μόλις χρησιμοποιηθεί).
 const PASSWORD_RESET_TTL_SECONDS = 60 * 30; // 30 λεπτά
+
+// Section O follow-up: email verification. 24 ώρες -- πιο γενναιόδωρο από
+// το password reset (30 λεπτά) γιατί δεν είναι time-critical σαν αλλαγή
+// κωδικού, ο χρήστης μπορεί εύλογα να μην ανοίξει το email αμέσως.
+const EMAIL_VERIFICATION_TTL_SECONDS = 60 * 60 * 24;
+
+async function sendVerificationEmail(env, origin, userId, userEmail, lang) {
+  const token = randomHex(32);
+  await env.DOCUMENT_REGISTRY.put(
+    `email-verify:${token}`,
+    JSON.stringify({ userId }),
+    { expirationTtl: EMAIL_VERIFICATION_TTL_SECONDS }
+  );
+  const verifyUrl = `${origin}/landing.html?verifyToken=${token}`;
+  const subject = lang === "el" ? "Επιβεβαίωσε το email σου - Idmon" : "Verify your email - Idmon";
+  const text = lang === "el"
+    ? `Καλωσόρισες στο Idmon!\n\nΓια να επιβεβαιώσεις το email σου, άνοιξε αυτόν τον σύνδεσμο (ισχύει για 24 ώρες):\n${verifyUrl}\n\nΟ λογαριασμός σου ήδη δουλεύει κανονικά χωρίς επιβεβαίωση -- αυτό είναι απλά για επιπλέον ασφάλεια.`
+    : `Welcome to Idmon!\n\nTo verify your email, open this link (valid for 24 hours):\n${verifyUrl}\n\nYour account already works normally without verification -- this is just for extra security.`;
+  await sendEmailViaResend(env, userEmail, subject, text);
+}
 
 // ΠΑΝΤΑ το ΙΔΙΟ γενικό μήνυμα, ανεξάρτητα από το αν το email υπάρχει --
 // αλλιώς κάποιος θα μπορούσε να δοκιμάζει emails εδώ για να μάθει ποια
@@ -363,7 +395,7 @@ async function handleResetPassword(request, env) {
   }
   const { userId } = JSON.parse(raw);
 
-  const user = await env.DB.prepare("SELECT workspace_id, embed_id FROM users WHERE id = ?").bind(userId).first();
+  const user = await env.DB.prepare("SELECT workspace_id, embed_id, email_verified FROM users WHERE id = ?").bind(userId).first();
   if (!user) return jsonError(400, "This reset link is invalid or has expired.");
 
   const salt = randomHex(16);
@@ -381,9 +413,79 @@ async function handleResetPassword(request, env) {
 
   const session = await createSession(env, userId, user.workspace_id);
   return new Response(
-    JSON.stringify({ ok: true, sessionToken: session.token, workspaceId: user.workspace_id, embedId: user.embed_id }),
+    JSON.stringify({
+      ok: true,
+      sessionToken: session.token,
+      workspaceId: user.workspace_id,
+      embedId: user.embed_id,
+      emailVerified: !!user.email_verified,
+    }),
     { headers: JSON_HEADERS }
   );
+}
+
+async function handleVerifyEmail(request, env) {
+  const ip = clientIp(request);
+  if (await isRateLimited(env, "verify-email", ip)) {
+    return jsonError(429, "Too many attempts. Please try again in a few minutes.");
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonError(400, "Invalid JSON body");
+  }
+  const { token } = body;
+  if (!token) return jsonError(400, "Verification token is required");
+
+  const raw = await env.DOCUMENT_REGISTRY.get(`email-verify:${token}`);
+  if (!raw) {
+    await recordRateLimitAttempt(env, "verify-email", ip);
+    return jsonError(400, "This verification link is invalid or has expired.");
+  }
+  const { userId } = JSON.parse(raw);
+
+  await env.DB.prepare("UPDATE users SET email_verified = 1 WHERE id = ?").bind(userId).run();
+  // Token μιας χρήσης -- διαγράφεται αμέσως, όπως και το password-reset token.
+  await env.DOCUMENT_REGISTRY.delete(`email-verify:${token}`);
+
+  return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
+}
+
+// Απαιτεί ενεργό session (σε αντίθεση με forgot-password) -- το "resend"
+// είναι πάντα για τον ΔΙΚΟ σου λογαριασμό, όχι για οποιοδήποτε email δοθεί.
+async function handleResendVerification(request, env) {
+  const ip = clientIp(request);
+  if (await isRateLimited(env, "resend-verification", ip)) {
+    return jsonError(429, "Too many attempts. Please try again in a few minutes.");
+  }
+  await recordRateLimitAttempt(env, "resend-verification", ip);
+
+  const sessionToken = request.headers.get("X-Session-Token");
+  if (!sessionToken) return jsonError(401, "Not logged in");
+
+  const session = await env.DB.prepare(
+    "SELECT user_id, expires_at FROM sessions WHERE token = ?"
+  ).bind(sessionToken).first();
+  if (!session || new Date(session.expires_at) <= new Date()) return jsonError(401, "Session expired");
+
+  const user = await env.DB.prepare(
+    "SELECT email, email_verified FROM users WHERE id = ?"
+  ).bind(session.user_id).first();
+  if (!user) return jsonError(401, "Not logged in");
+  if (user.email_verified) return new Response(JSON.stringify({ ok: true, alreadyVerified: true }), { headers: JSON_HEADERS });
+
+  let body = {};
+  try {
+    body = await request.json();
+  } catch (err) {
+    // lang είναι προαιρετικό εδώ -- αν λείψει/είναι άκυρο, απλά default en.
+  }
+  const lang = body.lang === "el" ? "el" : "en";
+
+  await sendVerificationEmail(env, new URL(request.url).origin, session.user_id, user.email, lang);
+  return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
 }
 
 // Δέχεται είτε σκέτο domain ("pelatis.gr") είτε ολόκληρο URL
@@ -558,6 +660,16 @@ async function handlePatchSettings(request, env) {
     // πελάτης μπορεί να βάλει ό,τι link χρησιμοποιεί πραγματικά.
     return new Response(
       JSON.stringify({ error: "contactUrl must start with a scheme, e.g. https:// or mailto:" }),
+      { status: 400, headers: JSON_HEADERS }
+    );
+  }
+  if (current.contactUrl && /^\s*(javascript|vbscript|data):/i.test(current.contactUrl)) {
+    // Αυτά τα schemes δεν είναι ποτέ έγκυρα contact links -- μόνο τρόπος να
+    // τρέξει κώδικας στον browser του επισκέπτη του widget (XSS), αν το
+    // href γίνει click. Ο παραπάνω γενικός έλεγχος scheme τα αφήνει περνάνε
+    // (είναι έγκυρα URI schemes), γι' αυτό ξεχωριστός, ρητός αποκλεισμός.
+    return new Response(
+      JSON.stringify({ error: "contactUrl scheme not allowed" }),
       { status: 400, headers: JSON_HEADERS }
     );
   }
@@ -2632,6 +2744,14 @@ export default {
 
     if (url.pathname === "/account/reset-password" && request.method === "POST") {
       return handleResetPassword(request, env);
+    }
+
+    if (url.pathname === "/account/verify-email" && request.method === "POST") {
+      return handleVerifyEmail(request, env);
+    }
+
+    if (url.pathname === "/account/resend-verification" && request.method === "POST") {
+      return handleResendVerification(request, env);
     }
 
     if (url.pathname === "/oauth/google/start" && request.method === "GET") {

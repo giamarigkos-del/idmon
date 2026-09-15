@@ -216,6 +216,12 @@ const TRANSLATIONS = {
     passwordsDontMatch: "Passwords don't match.",
     termsLink: "Terms of Service",
     privacyLink: "Privacy Policy",
+    verifyingEmail: "Verifying your email…",
+    continueToApp: "Continue",
+    emailVerifiedSuccess: "Your email is verified! You can now continue.",
+    verifyBannerText: "Please verify your email address.",
+    resendVerificationLink: "Resend verification email",
+    verificationEmailSent: "Sent! Check your inbox.",
 
     // index.html
     indexDocTitle: "Idmon — Assistant",
@@ -436,6 +442,12 @@ const TRANSLATIONS = {
     passwordsDontMatch: "Οι κωδικοί δεν ταιριάζουν.",
     termsLink: "Όροι Χρήσης",
     privacyLink: "Πολιτική Απορρήτου",
+    verifyingEmail: "Επιβεβαίωση του email σου…",
+    continueToApp: "Συνέχεια",
+    emailVerifiedSuccess: "Το email σου επιβεβαιώθηκε! Μπορείς να συνεχίσεις.",
+    verifyBannerText: "Παρακαλούμε επιβεβαίωσε τη διεύθυνση email σου.",
+    resendVerificationLink: "Ξαναστείλε email επιβεβαίωσης",
+    verificationEmailSent: "Στάλθηκε! Έλεγξε τα εισερχόμενά σου.",
 
     indexDocTitle: "Idmon — Βοηθός",
     recentDocs: "Πρόσφατα έγγραφα",

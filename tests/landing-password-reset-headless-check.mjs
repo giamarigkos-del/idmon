@@ -180,6 +180,36 @@ async function test2b_forgotPasswordSendsGreekLang() {
   assert(fetchImpl.calls[0].body.lang === "el", "στέλνει lang: \"el\" όταν έχει επιλεγεί ελληνικά");
 }
 
+async function test7_verifyEmailSuccess() {
+  console.log("\n[?verifyToken=... -- αυτόματα καλεί /account/verify-email, δείχνει επιτυχία]");
+  const fetchImpl = fetchQueue([{ status: 200, body: { ok: true } }]);
+  const window = loadLandingPage({ url: "http://localhost/landing.html?verifyToken=the-verify-token", fetchImpl });
+  const doc = window.document;
+
+  assert(doc.getElementById("verifyForm").classList.contains("show"), "το verify panel εμφανίζεται αυτόματα");
+  assert(doc.getElementById("choiceGrid").style.display === "none", "το κανονικό choiceGrid κρύβεται");
+
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert(fetchImpl.calls.length === 1, "έγινε ένα fetch call");
+  assert(fetchImpl.calls[0].url === "/account/verify-email", "σωστό endpoint");
+  assert(fetchImpl.calls[0].body.token === "the-verify-token", "στέλνει το ΣΩΣΤΟ token από το URL");
+  assert(doc.getElementById("verifyStatusMessage").textContent === "Your email is verified! You can now continue.", "δείχνει το μήνυμα επιτυχίας");
+  assert(doc.getElementById("verifyContinueWrap").style.display === "block", "εμφανίζεται το κουμπί \"Continue\"");
+}
+
+async function test8_verifyEmailFailure() {
+  console.log("\n[?verifyToken=... -- άκυρο/ληγμένο token, δείχνει το μήνυμα λάθους του backend]");
+  const fetchImpl = fetchQueue([{ status: 400, body: { error: "This verification link is invalid or has expired." } }]);
+  const window = loadLandingPage({ url: "http://localhost/landing.html?verifyToken=bad-token", fetchImpl });
+  const doc = window.document;
+
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert(doc.getElementById("verifyStatusMessage").textContent === "This verification link is invalid or has expired.", "δείχνει το μήνυμα λάθους από το backend");
+  assert(doc.getElementById("verifyContinueWrap").style.display === "block", "το κουμπί \"Continue\" εμφανίζεται ούτως ή άλλως (δεν κολλάει ο χρήστης)");
+}
+
 async function run() {
   test1_forgotLinkVisibility();
   await test2_forgotPasswordSubmit();
@@ -188,6 +218,8 @@ async function run() {
   await test4_resetPasswordSuccess();
   test5_developerFormHiddenByDefault();
   test6_developerFormViaHiddenUrl();
+  await test7_verifyEmailSuccess();
+  await test8_verifyEmailFailure();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);

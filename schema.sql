@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_salt TEXT NOT NULL,
   workspace_id TEXT UNIQUE NOT NULL,
   embed_id TEXT UNIQUE NOT NULL,
+  email_verified INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 

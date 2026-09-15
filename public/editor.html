@@ -24,6 +24,14 @@
   .top-bar-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
   .top-bar-right .lang-toggle{margin-left:0;}
 
+  .verify-banner{flex-shrink:0;background:var(--accent-soft);border-bottom:1px solid var(--accent);
+    display:flex;align-items:center;gap:14px;padding:8px 24px;font-size:12.5px;}
+  .verify-banner #resendVerificationBtn{border:none;background:none;color:var(--accent);font-weight:700;
+    cursor:pointer;padding:0;font-family:inherit;font-size:12.5px;text-decoration:underline;}
+  .verify-banner-dismiss{margin-left:auto;border:none;background:none;color:var(--text-soft);
+    cursor:pointer;padding:0;font-size:13px;}
+  .verify-banner-dismiss:hover{color:var(--text);}
+
   /* Section G: γρανάζι ρυθμίσεων widget -- ίδια χρωματική λογική με το
      .back-link (ίδιο background/border/hover), απλά τετράγωνο μέγεθος για
      ένα μόνο glyph αντί για κείμενο. Το tooltip έρχεται από το native
@@ -276,6 +284,12 @@
         <button type="button" class="lang-btn" data-lang="el">GR</button>
       </div>
     </div>
+  </div>
+
+  <div class="verify-banner" id="verifyBanner" style="display:none;">
+    <span data-i18n="verifyBannerText">Please verify your email address.</span>
+    <button type="button" id="resendVerificationBtn" data-i18n="resendVerificationLink">Resend verification email</button>
+    <button type="button" id="dismissVerifyBannerBtn" class="verify-banner-dismiss" aria-label="Dismiss">✕</button>
   </div>
 
   <div class="layout">
@@ -1830,6 +1844,45 @@
   el("switchModeLink").addEventListener("click", (e) => {
     e.preventDefault();
     logoutAndSwitchMode();
+  });
+
+  // Section O follow-up: banner "μη επιβεβαιωμένο email" -- ΜΟΝΟ για
+  // πραγματικούς λογαριασμούς (υπάρχει sessionToken· το Guest/Developer flow
+  // δεν έχει καν την έννοια του "email"). "Soft" -- ποτέ δεν μπλοκάρει τη
+  // χρήση, μόνο υπενθύμιση. Dismiss κρατάει μόνο για αυτό το browser tab
+  // (sessionStorage, όχι localStorage) -- ξαναεμφανίζεται στο επόμενο login,
+  // δεν χάνεται μόνιμα μέσα σε ένα κλικ.
+  if (
+    localStorage.getItem("sessionToken") &&
+    localStorage.getItem("emailVerified") === "0" &&
+    !sessionStorage.getItem("verifyBannerDismissed")
+  ) {
+    el("verifyBanner").style.display = "flex";
+  }
+
+  el("dismissVerifyBannerBtn").addEventListener("click", () => {
+    sessionStorage.setItem("verifyBannerDismissed", "1");
+    el("verifyBanner").style.display = "none";
+  });
+
+  el("resendVerificationBtn").addEventListener("click", async () => {
+    const btn = el("resendVerificationBtn");
+    const original = btn.textContent;
+    btn.disabled = true;
+    try {
+      const res = await fetch("/account/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8", "X-Session-Token": localStorage.getItem("sessionToken") },
+        body: JSON.stringify({ lang: getLang() }),
+      });
+      btn.textContent = res.ok ? t("verificationEmailSent") : t("connectionErrorPrefix");
+    } catch (err) {
+      btn.textContent = t("connectionErrorPrefix") + err.message;
+    }
+    setTimeout(() => {
+      btn.textContent = original;
+      btn.disabled = false;
+    }, 4000);
   });
 </script>
 </body>

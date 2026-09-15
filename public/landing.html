@@ -134,6 +134,13 @@
       <div class="dev-error" id="devError" data-i18n="wrongPassword">Wrong password.</div>
     </div>
 
+    <div class="dev-form" id="verifyForm">
+      <div id="verifyStatusMessage" data-i18n="verifyingEmail">Verifying your email…</div>
+      <div class="dev-form-actions" id="verifyContinueWrap" style="display:none;">
+        <a class="submit-btn" id="verifyContinueLink" href="/" data-i18n="continueToApp" style="text-decoration:none;text-align:center;">Continue</a>
+      </div>
+    </div>
+
     <div class="legal-footer">
       <a href="/terms.html" data-i18n="termsLink">Terms of Service</a> · <a href="/privacy.html" data-i18n="privacyLink">Privacy Policy</a>
     </div>
@@ -264,7 +271,7 @@
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, lang: getLang() }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
@@ -276,6 +283,7 @@
       }
       localStorage.setItem("workspaceId", data.workspaceId);
       localStorage.setItem("sessionToken", data.sessionToken);
+      localStorage.setItem("emailVerified", data.emailVerified ? "1" : "0");
       window.location.href = "/";
     } catch (err) {
       errorEl.textContent = t("connectionErrorPrefix") + err.message;
@@ -345,6 +353,30 @@
     if (e.key === "Enter") submitForgotPassword();
   });
 
+  // Section O follow-up: αν το URL έχει ?verifyToken=..., ο χρήστης μόλις
+  // πάτησε τον σύνδεσμο επιβεβαίωσης email -- δείξε ΜΟΝΟ αυτό το panel,
+  // κάλεσε αυτόματα το backend (δεν χρειάζεται καμία είσοδος από τον
+  // χρήστη, σε αντίθεση με το reset-password).
+  const verifyToken = new URLSearchParams(window.location.search).get("verifyToken");
+  if (verifyToken) {
+    el("choiceGrid").style.display = "none";
+    el("verifyForm").classList.add("show");
+    (async () => {
+      try {
+        const res = await fetch("/account/verify-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: verifyToken }),
+        });
+        const data = await res.json();
+        el("verifyStatusMessage").textContent = (res.ok && data.ok) ? t("emailVerifiedSuccess") : (data.error || t("connectionErrorPrefix"));
+      } catch (err) {
+        el("verifyStatusMessage").textContent = t("connectionErrorPrefix") + err.message;
+      }
+      el("verifyContinueWrap").style.display = "block";
+    })();
+  }
+
   // Section O: αν το URL έχει ?resetToken=..., ο χρήστης μόλις πάτησε τον
   // σύνδεσμο από το email -- δείξε ΜΟΝΟ τη φόρμα "νέος κωδικός", κρύψε τα
   // πάντα άλλα (δεν έχει νόημα να ξαναδιαλέξει Developer/Guest/Account εδώ).
@@ -390,6 +422,7 @@
       }
       localStorage.setItem("workspaceId", data.workspaceId);
       localStorage.setItem("sessionToken", data.sessionToken);
+      localStorage.setItem("emailVerified", data.emailVerified ? "1" : "0");
       window.location.href = "/";
     } catch (err) {
       errorEl.textContent = t("connectionErrorPrefix") + err.message;
