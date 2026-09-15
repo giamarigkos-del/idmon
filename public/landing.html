@@ -75,10 +75,6 @@
     <p data-i18n="landingIntro">Before you continue, choose how you'll enter.</p>
 
     <div class="choice-grid" id="choiceGrid">
-      <button type="button" class="choice-btn" id="devBtn">
-        <div class="choice-title" data-i18n="devTitle">Developer</div>
-        <div class="choice-desc" data-i18n="devDesc">Access to the real content workspace (requires a password).</div>
-      </button>
       <button type="button" class="choice-btn" id="guestBtn">
         <div class="choice-title" data-i18n="guestTitle">Guest</div>
         <div class="choice-desc" data-i18n="guestDesc">Freely try the tool in your own separate space. Nobody else sees what you upload, and it's automatically deleted after 7 days.</div>
@@ -166,11 +162,19 @@
     window.location.href = "/";
   });
 
-  el("devBtn").addEventListener("click", () => {
+  // Section O: το "Developer" δεν είναι πια ορατή επιλογή στο δημόσιο
+  // landing (μόνο Account/Guest είναι δημόσια) -- η πρόσβαση γίνεται ΜΟΝΟ
+  // μέσω κρυφού URL (?developer=1), που ξέρει μόνο ο ίδιος ο διαχειριστής.
+  // Ήδη προστατευμένο και από rate limiting στο /developer-login backend.
+  function showDevForm() {
     el("choiceGrid").style.display = "none";
     el("devForm").classList.add("show");
     el("devPassword").focus();
-  });
+  }
+
+  if (new URLSearchParams(window.location.search).get("developer")) {
+    showDevForm();
+  }
 
   el("devCancelBtn").addEventListener("click", () => {
     el("devForm").classList.remove("show");

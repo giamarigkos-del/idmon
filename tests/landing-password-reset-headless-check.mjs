@@ -144,11 +144,32 @@ async function test4_resetPasswordSuccess() {
   assert(window.localStorage.getItem("workspaceId") === "ws-1", "αποθηκεύει το workspaceId");
 }
 
+function test5_developerFormHiddenByDefault() {
+  console.log("\n[Το \"Developer\" ΔΕΝ είναι πια ορατό δημόσιο κουμπί]");
+  const window = loadLandingPage();
+  const doc = window.document;
+
+  assert(doc.getElementById("devBtn") === null, "δεν υπάρχει καν το κουμπί devBtn στο DOM");
+  assert(!doc.getElementById("devForm").classList.contains("show"), "η φόρμα Developer είναι κρυφή χωρίς το ?developer=1");
+  assert(doc.getElementById("choiceGrid").style.display !== "none", "το κανονικό choiceGrid (Account/Guest) παραμένει ορατό");
+}
+
+function test6_developerFormViaHiddenUrl() {
+  console.log("\n[Το ?developer=1 δείχνει τη φόρμα Developer απευθείας]");
+  const window = loadLandingPage({ url: "http://localhost/landing.html?developer=1" });
+  const doc = window.document;
+
+  assert(doc.getElementById("devForm").classList.contains("show"), "η φόρμα Developer εμφανίζεται με ?developer=1");
+  assert(doc.getElementById("choiceGrid").style.display === "none", "το κανονικό choiceGrid κρύβεται");
+}
+
 async function run() {
   test1_forgotLinkVisibility();
   await test2_forgotPasswordSubmit();
   await test3_resetPasswordValidation();
   await test4_resetPasswordSuccess();
+  test5_developerFormHiddenByDefault();
+  test6_developerFormViaHiddenUrl();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);

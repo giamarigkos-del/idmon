@@ -192,8 +192,6 @@ const TRANSLATIONS = {
     // landing.html
     landingDocTitle: "Operations Portal — Welcome",
     landingIntro: "Before you continue, choose how you'll enter.",
-    devTitle: "Developer",
-    devDesc: "Access to the real content workspace (requires a password).",
     guestTitle: "Guest",
     guestDesc: "Freely try the tool in your own separate space. Nobody else sees what you upload, and it's automatically deleted after 7 days.",
     accountTitle: "Account",
@@ -414,8 +412,6 @@ const TRANSLATIONS = {
 
     landingDocTitle: "Operations Portal — Καλωσόρισες",
     landingIntro: "Πριν συνεχίσεις, διάλεξε πώς θα μπεις.",
-    devTitle: "Developer",
-    devDesc: "Πρόσβαση στο πραγματικό workspace περιεχομένου (χρειάζεται κωδικό).",
     guestTitle: "Επισκέπτης / Guest",
     guestDesc: "Δοκίμασε ελεύθερα το εργαλείο σε έναν δικό σου, ξεχωριστό χώρο. Ό,τι ανεβάσεις δεν το βλέπει κανείς άλλος, και σβήνεται μόνο του μετά από 7 μέρες.",
     accountTitle: "Λογαριασμός",

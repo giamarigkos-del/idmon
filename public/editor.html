@@ -283,7 +283,12 @@
       <div class="sidebar-section">
         <button class="new-doc-btn" id="newDocBtn" data-i18n="newDoc">+ New document</button>
         <button class="new-doc-btn" id="addFromUrlBtn" style="margin-top:6px;background:var(--surface-2);" data-i18n="addFromUrlBtn">🔗 Add from URL</button>
-        <button class="new-doc-btn" id="googleDriveBtn" style="margin-top:6px;background:var(--surface-2);" data-i18n="googleDriveBtn">📁 Google Drive</button>
+        <!-- Section O: κρυμμένο προσωρινά -- το drive.readonly scope είναι
+             "restricted" στη Google, χρειάζεται πληρωμένο ετήσιο CASA
+             security assessment για πλήρες verification (βλ. συζήτηση).
+             Ο κώδικας/backend μένει άθικτος, απλά δεν φαίνεται στο UI μέχρι
+             να αποφασιστεί verification. -->
+        <button class="new-doc-btn" id="googleDriveBtn" style="margin-top:6px;background:var(--surface-2);display:none;" data-i18n="googleDriveBtn">📁 Google Drive</button>
         <input type="text" class="filter-input" id="docFilterInput" data-i18n-placeholder="filterByTitle" placeholder="Filter by title…">
       </div>
       <div class="sidebar-section grow">
