@@ -173,7 +173,7 @@ const TRANSLATIONS = {
     // κοινά
     loading: "Loading…",
     cancel: "Cancel",
-    switchMode: "Switch mode",
+    switchMode: "Log out",
     manageContent: "Manage content",
     updatedPrefix: "Updated",
     loadErrorPrefix: "Loading error: ",
@@ -236,7 +236,6 @@ const TRANSLATIONS = {
     filterByTitle: "Filter by title…",
     documentsLabel: "Documents",
     allDocs: "All documents",
-    backToAllDocs: "← All documents",
     searchByDescription: "Find by description",
     searchExamplePlaceholder: "e.g. Billing's working hours…",
     testQuestion: "Test question",
@@ -387,7 +386,7 @@ const TRANSLATIONS = {
   el: {
     loading: "Φόρτωση…",
     cancel: "Άκυρο",
-    switchMode: "Αλλαγή λειτουργίας",
+    switchMode: "Έξοδος",
     manageContent: "Διαχείριση περιεχομένου",
     updatedPrefix: "Ενημερώθηκε",
     loadErrorPrefix: "Σφάλμα φόρτωσης: ",
@@ -446,7 +445,6 @@ const TRANSLATIONS = {
     filterByTitle: "Φίλτρο με τίτλο…",
     documentsLabel: "Έγγραφα",
     allDocs: "Όλα τα έγγραφα",
-    backToAllDocs: "← Όλα τα έγγραφα",
     searchByDescription: "Βρες με περιγραφή",
     searchExamplePlaceholder: "π.χ. τα ωράρια του Billing…",
     testQuestion: "Δοκιμαστικό ερώτημα",

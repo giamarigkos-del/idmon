@@ -181,9 +181,6 @@
   .contradiction-desc{display:block;color:var(--text-soft);}
   .contradiction-list{max-height:220px;overflow-y:auto;}
 
-  .back-to-browser-btn{border:none;background:none;color:var(--accent);font-size:12.5px;
-    cursor:pointer;padding:0;margin-bottom:14px;font-family:inherit;font-weight:600;}
-  .back-to-browser-btn:hover{text-decoration:underline;}
   .preview-head h2{font-size:22px;margin:0 0 6px;}
   .preview-meta{font-size:12.5px;color:var(--text-soft);margin-bottom:20px;}
   .preview-meta a{color:var(--accent);}
@@ -269,7 +266,7 @@
     <strong data-i18n="editorHeading">Content Management</strong>
     <div class="top-bar-right">
       <a class="back-link" id="topAllDocsBtn" href="#" data-i18n="allDocs">All documents</a>
-      <a class="back-link" id="switchModeLink" href="#" data-i18n="switchMode">Switch mode</a>
+      <a class="back-link" id="switchModeLink" href="#" data-i18n="switchMode">Log out</a>
       <a class="back-link" href="/">←Portal</a>
       <button type="button" class="icon-btn" id="settingsBtn" data-i18n-title="widgetSettingsTooltip" title="Widget settings">⚙</button>
       <button type="button" class="icon-btn" id="embedBtn" data-i18n-title="embedTooltip" title="Embed on your site">🔗</button>
@@ -292,7 +289,6 @@
       <div class="sidebar-section grow">
         <div class="label-row">
           <div class="label" data-i18n="documentsLabel">Documents</div>
-          <button type="button" class="refresh-btn" id="allDocsBtn" data-i18n="allDocs">All documents</button>
         </div>
         <div id="docList" data-i18n="loading">Loading…</div>
         <button type="button" class="deleted-toggle" id="deletedToggleBtn" style="display:none;"></button>
@@ -534,7 +530,6 @@
   function renderCompareResults(findings, titles) {
     const main = el("mainPanel");
     main.innerHTML = `
-      <button type="button" class="back-to-browser-btn" id="backFromResultsBtn">${t("backToAllDocs")}</button>
       <div class="doc-browser-head">
         <h2>${t("compareResultsTitle")}</h2>
       </div>
@@ -545,11 +540,6 @@
           : `<div class="empty-note">${t("noContradictionsFound")}</div>`}
       </div>
     `;
-    el("backFromResultsBtn").addEventListener("click", () => {
-      currentSelectedId = null;
-      renderDocList();
-      renderDocBrowser();
-    });
     el("compareResultsList").querySelectorAll(".finding-doc-link[data-id]").forEach(btn => {
       btn.addEventListener("click", () => openPreview(btn.dataset.id));
     });
@@ -821,7 +811,6 @@
     const isDraft = data.status === "draft";
 
     main.innerHTML = `
-      <button type="button" class="back-to-browser-btn" id="backToBrowserBtn">${t("backToAllDocs")}</button>
       <div class="preview-head">
         <h2></h2>
         <div class="preview-meta">
@@ -837,11 +826,6 @@
         <button type="button" class="btn-danger" id="deleteBtn">${t("delete")}</button>
       </div>
     `;
-    el("backToBrowserBtn").addEventListener("click", () => {
-      currentSelectedId = null;
-      renderDocList();
-      renderDocBrowser();
-    });
     main.querySelector(".preview-head h2").innerHTML =
       escapeHtml(data.title || data.documentId) +
       (isDraft ? `<span class="status-badge draft">${t("draftBadge")}</span>` : "");
@@ -1571,7 +1555,6 @@
     renderDocBrowser();
   }
 
-  el("allDocsBtn").addEventListener("click", goToAllDocuments);
   el("topAllDocsBtn").addEventListener("click", (e) => {
     e.preventDefault();
     goToAllDocuments();
