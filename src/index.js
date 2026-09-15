@@ -313,6 +313,7 @@ async function handleForgotPassword(request, env) {
     return jsonError(400, "Invalid JSON body");
   }
   const email = (body.email || "").trim().toLowerCase();
+  const lang = body.lang === "el" ? "el" : "en"; // ίδια λογική με τη γλώσσα του bot -- default en
   const genericResponse = new Response(
     JSON.stringify({ ok: true, message: "If that email is registered, a reset link has been sent." }),
     { headers: JSON_HEADERS }
@@ -330,12 +331,11 @@ async function handleForgotPassword(request, env) {
   );
 
   const resetUrl = `${new URL(request.url).origin}/landing.html?resetToken=${token}`;
-  await sendEmailViaResend(
-    env,
-    user.email,
-    "Επαναφορά κωδικού - Idmon",
-    `Ζητήθηκε επαναφορά κωδικού για τον λογαριασμό σου.\n\nΓια να διαλέξεις νέο κωδικό, άνοιξε αυτόν τον σύνδεσμο (ισχύει για 30 λεπτά):\n${resetUrl}\n\nΑν δεν το ζήτησες εσύ, αγνόησε αυτό το email -- ο κωδικός σου παραμένει ίδιος.`
-  );
+  const emailSubject = lang === "el" ? "Επαναφορά κωδικού - Idmon" : "Password reset - Idmon";
+  const emailText = lang === "el"
+    ? `Ζητήθηκε επαναφορά κωδικού για τον λογαριασμό σου.\n\nΓια να διαλέξεις νέο κωδικό, άνοιξε αυτόν τον σύνδεσμο (ισχύει για 30 λεπτά):\n${resetUrl}\n\nΑν δεν το ζήτησες εσύ, αγνόησε αυτό το email -- ο κωδικός σου παραμένει ίδιος.`
+    : `A password reset was requested for your account.\n\nTo choose a new password, open this link (valid for 30 minutes):\n${resetUrl}\n\nIf you didn't request this, just ignore this email -- your password stays the same.`;
+  await sendEmailViaResend(env, user.email, emailSubject, emailText);
 
   return genericResponse;
 }

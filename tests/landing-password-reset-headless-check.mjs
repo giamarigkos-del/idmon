@@ -99,6 +99,7 @@ async function test2_forgotPasswordSubmit() {
   assert(fetchImpl.calls.length === 1, "έγινε ακριβώς ένα fetch call");
   assert(fetchImpl.calls[0].url === "/account/forgot-password", "σωστό endpoint");
   assert(fetchImpl.calls[0].body.email === "someone@example.com", "στέλνει το σωστό email");
+  assert(fetchImpl.calls[0].body.lang === "en", "στέλνει και την τρέχουσα γλώσσα UI (default en)");
   assert(doc.getElementById("forgotSuccess").classList.contains("show"), "εμφανίζεται το γενικό μήνυμα επιτυχίας");
 }
 
@@ -163,9 +164,26 @@ function test6_developerFormViaHiddenUrl() {
   assert(doc.getElementById("choiceGrid").style.display === "none", "το κανονικό choiceGrid κρύβεται");
 }
 
+async function test2b_forgotPasswordSendsGreekLang() {
+  console.log("\n[Υποβολή \"Ξέχασες τον κωδικό\" με GR επιλεγμένο -- στέλνει lang: \"el\"]");
+  const fetchImpl = fetchQueue([{ status: 200, body: { ok: true } }]);
+  const window = loadLandingPage({ fetchImpl });
+  const doc = window.document;
+
+  window.localStorage.setItem("uiLang", "el");
+  doc.getElementById("loginTabBtn").click();
+  doc.getElementById("forgotLink").click();
+  doc.getElementById("forgotEmail").value = "someone@example.com";
+  doc.getElementById("forgotSubmitBtn").click();
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert(fetchImpl.calls[0].body.lang === "el", "στέλνει lang: \"el\" όταν έχει επιλεγεί ελληνικά");
+}
+
 async function run() {
   test1_forgotLinkVisibility();
   await test2_forgotPasswordSubmit();
+  await test2b_forgotPasswordSendsGreekLang();
   await test3_resetPasswordValidation();
   await test4_resetPasswordSuccess();
   test5_developerFormHiddenByDefault();
