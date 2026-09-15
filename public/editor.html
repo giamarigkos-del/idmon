@@ -268,6 +268,7 @@
   <div class="top-bar">
     <strong data-i18n="editorHeading">Content Management</strong>
     <div class="top-bar-right">
+      <a class="back-link" id="topAllDocsBtn" href="#" data-i18n="allDocs">All documents</a>
       <a class="back-link" id="switchModeLink" href="#" data-i18n="switchMode">Switch mode</a>
       <a class="back-link" href="/">←Portal</a>
       <button type="button" class="icon-btn" id="settingsBtn" data-i18n-title="widgetSettingsTooltip" title="Widget settings">⚙</button>
@@ -285,6 +286,7 @@
       <div class="sidebar-section">
         <button class="new-doc-btn" id="newDocBtn" data-i18n="newDoc">+ New document</button>
         <button class="new-doc-btn" id="addFromUrlBtn" style="margin-top:6px;background:var(--surface-2);" data-i18n="addFromUrlBtn">🔗 Add from URL</button>
+        <button class="new-doc-btn" id="googleDriveBtn" style="margin-top:6px;background:var(--surface-2);" data-i18n="googleDriveBtn">📁 Google Drive</button>
         <input type="text" class="filter-input" id="docFilterInput" data-i18n-placeholder="filterByTitle" placeholder="Filter by title…">
       </div>
       <div class="sidebar-section grow">
@@ -1003,6 +1005,229 @@
 
   el("addFromUrlBtn").addEventListener("click", renderAddFromUrlPanel);
 
+  // Section N: εισαγωγή από Google Drive -- σύνδεση OAuth (αν δεν υπάρχει
+  // ήδη) και λίστα Google Docs/Sheets με checkboxes για εισαγωγή. Κάθε
+  // επιλεγμένο αρχείο μπαίνει ως ΝΕΟ draft έγγραφο -- ίδια πολιτική
+  // draft-πρώτα με το URL sync (Section M) και τα χειροκίνητα uploads.
+  //
+  // Απλό, σχηματικό τρίχρωμο τρίγωνο (πράσινο/κίτρινο/μπλε) που θυμίζει
+  // οπτικά το Google Drive -- όχι ακριβές αντίγραφο του επίσημου λογότυπου,
+  // απλά ένα αναγνωρίσιμο, καθαρό εικονίδιο σύνδεσης.
+  const GOOGLE_DRIVE_ICON = `<svg width="16" height="16" viewBox="0 0 16 16" style="vertical-align:-3px;margin-right:6px;flex-shrink:0;" aria-hidden="true">
+    <polygon points="6,1 10,1 16,11 12,11" fill="#00ac47"/>
+    <polygon points="0,11 4,11 8,4 6,1" fill="#ffba00"/>
+    <polygon points="4,11 12,11 10,15 6,15" fill="#0066da"/>
+  </svg>`;
+  el("googleDriveBtn").innerHTML = GOOGLE_DRIVE_ICON + escapeHtml(t("googleDriveBtn"));
+
+  let driveFilesCache = [];
+  let driveSelectedIds = new Set();
+  let driveConnectedEmail = null;
+
+  async function renderGoogleDrivePanel(bannerHtml) {
+    if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
+    currentSelectedId = null;
+    const main = el("mainPanel");
+    main.innerHTML = `<div class="main-placeholder">${escapeHtml(t("loading"))}</div>`;
+
+    let data;
+    let notConnected = false;
+    try {
+      const res = await fetch("/connections/google-drive/files", { headers: HEADERS });
+      if (res.status === 404) {
+        notConnected = true;
+      } else if (!res.ok) {
+        throw new Error("bad response");
+      } else {
+        data = await res.json();
+      }
+    } catch (err) {
+      main.innerHTML = `
+        ${bannerHtml || ""}
+        <div class="main-placeholder">${escapeHtml(t("googleDriveLoadError"))}</div>
+      `;
+      return;
+    }
+
+    if (notConnected) {
+      main.innerHTML = `
+        ${bannerHtml || ""}
+        <div class="edit-form" style="max-width:480px;">
+          <h2 style="margin:0 0 4px;font-size:16px;">${GOOGLE_DRIVE_ICON}${escapeHtml(t("googleDriveTitle"))}</h2>
+          <p style="margin:0 0 20px;font-size:13px;color:var(--text-soft);">${escapeHtml(t("googleDriveConnectIntro"))}</p>
+          <button type="button" id="googleDriveConnectBtn">${escapeHtml(t("googleDriveConnectBtn"))}</button>
+        </div>
+      `;
+      el("googleDriveConnectBtn").addEventListener("click", () => {
+        // Top-level navigation (ΟΧΙ fetch) -- ο browser πρέπει να πλοηγηθεί
+        // κανονικά ώστε να δουλέψει το OAuth redirect flow προς τη Google.
+        navigateTo("/oauth/google/start?workspace_id=" + encodeURIComponent(WORKSPACE_ID));
+      });
+      return;
+    }
+
+    driveFilesCache = data.files || [];
+    driveSelectedIds = new Set();
+    driveConnectedEmail = data.connectedByEmail || null;
+    renderGoogleDriveFileList(bannerHtml);
+  }
+
+  function renderGoogleDriveFileList(bannerHtml, statusHtml) {
+    const main = el("mainPanel");
+    const filesHtml = driveFilesCache.length
+      ? driveFilesCache.map(f => `
+          <div class="doc-row" data-id="${escapeHtml(f.id)}">
+            <div class="doc-row-top">
+              <strong><input type="checkbox" class="drive-file-checkbox" data-id="${escapeHtml(f.id)}" ${driveSelectedIds.has(f.id) ? "checked" : ""} style="margin-right:8px;">${escapeHtml(f.name)}</strong>
+              <span class="doc-time">${escapeHtml(t("googleDriveModifiedPrefix"))} ${timeAgo(f.modifiedTime)}</span>
+            </div>
+          </div>
+        `).join("")
+      : `<div class="empty-note">${escapeHtml(t("googleDriveNoFiles"))}</div>`;
+
+    const accountRowHtml = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
+        <span style="font-size:12.5px;color:var(--text-soft);">${driveConnectedEmail ? escapeHtml(t("googleDriveConnectedAs", { email: driveConnectedEmail })) : ""}</span>
+        <div style="display:flex;gap:8px;">
+          <button type="button" class="back-link" id="googleDriveChangeAccountBtn">${escapeHtml(t("googleDriveChangeAccountBtn"))}</button>
+          <button type="button" class="back-link" id="googleDriveDisconnectBtn">${escapeHtml(t("googleDriveDisconnectBtn"))}</button>
+        </div>
+      </div>
+    `;
+
+    main.innerHTML = `
+      ${bannerHtml || ""}
+      ${accountRowHtml}
+      <div class="doc-browser-head">
+        <h2>${GOOGLE_DRIVE_ICON}${escapeHtml(t("googleDriveTitle"))}</h2>
+        <button type="button" class="compare-run-btn" id="googleDriveImportBtn" disabled></button>
+      </div>
+      <div id="googleDriveFileList">${filesHtml}</div>
+      <div class="upload-status" id="googleDriveStatus">${statusHtml || ""}</div>
+    `;
+
+    main.querySelectorAll(".drive-file-checkbox").forEach(cb => {
+      cb.addEventListener("change", () => {
+        if (cb.checked) driveSelectedIds.add(cb.dataset.id);
+        else driveSelectedIds.delete(cb.dataset.id);
+        updateGoogleDriveImportBtn();
+      });
+      cb.addEventListener("click", (e) => e.stopPropagation());
+    });
+
+    main.querySelectorAll(".doc-row[data-id]").forEach(row => {
+      row.addEventListener("click", (e) => {
+        if (e.target.classList.contains("drive-file-checkbox")) return;
+        const cb = row.querySelector(".drive-file-checkbox");
+        cb.checked = !cb.checked;
+        cb.dispatchEvent(new Event("change"));
+      });
+    });
+
+    updateGoogleDriveImportBtn();
+    el("googleDriveImportBtn").addEventListener("click", runGoogleDriveImport);
+
+    el("googleDriveChangeAccountBtn").addEventListener("click", () => {
+      navigateTo("/oauth/google/start?workspace_id=" + encodeURIComponent(WORKSPACE_ID));
+    });
+
+    el("googleDriveDisconnectBtn").addEventListener("click", async () => {
+      const btn = el("googleDriveDisconnectBtn");
+      btn.disabled = true;
+      btn.textContent = t("googleDriveDisconnecting");
+      try {
+        const res = await fetch("/connections/google-drive", { method: "DELETE", headers: HEADERS });
+        if (!res.ok) throw new Error(t("notFoundDefault"));
+        driveConnectedEmail = null;
+        renderGoogleDrivePanel();
+      } catch (err) {
+        alert(t("googleDriveDisconnectErrorPrefix") + err.message);
+        btn.disabled = false;
+        btn.textContent = t("googleDriveDisconnectBtn");
+      }
+    });
+  }
+
+  function updateGoogleDriveImportBtn() {
+    const btn = el("googleDriveImportBtn");
+    if (!btn) return;
+    btn.textContent = t("googleDriveImportBtn", { count: driveSelectedIds.size });
+    btn.disabled = driveSelectedIds.size === 0;
+  }
+
+  async function runGoogleDriveImport() {
+    const btn = el("googleDriveImportBtn");
+    const status = el("googleDriveStatus");
+    btn.disabled = true;
+    btn.textContent = t("googleDriveImporting");
+    status.textContent = "";
+
+    const selectedFiles = driveFilesCache.filter(f => driveSelectedIds.has(f.id));
+
+    try {
+      const res = await fetch("/connections/google-drive/import", {
+        method: "POST",
+        headers: HEADERS,
+        body: JSON.stringify({ files: selectedFiles.map(f => ({ id: f.id, name: f.name, mimeType: f.mimeType })) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || t("notFoundDefault"));
+
+      await loadDocuments();
+
+      const total = selectedFiles.length;
+      const success = (data.imported || []).length;
+      let message = t("googleDriveImportSummary", { success, total });
+      if (data.failed && data.failed.length) {
+        message += " " + t("googleDriveImportFailedPrefix") +
+          data.failed.map(f => `${f.name}: ${f.error}`).join("; ");
+      }
+      const color = data.failed && data.failed.length ? "var(--warn-border)" : "var(--ok)";
+
+      driveSelectedIds = new Set();
+      // Ξαναφτιάχνουμε τη λίστα (ώστε τα checkboxes να καθαρίσουν), αλλά
+      // περνάμε το μήνυμα επιτυχίας ΜΕΣΑ στο νέο render -- διαφορετικά το
+      // πλήρες innerHTML replacement θα το έσβηνε αμέσως.
+      renderGoogleDriveFileList(null, `<span style="color:${color};">${escapeHtml(message)}</span>`);
+    } catch (err) {
+      status.textContent = t("googleDriveImportErrorPrefix") + err.message;
+      status.style.color = "var(--danger)";
+      btn.disabled = false;
+      updateGoogleDriveImportBtn();
+    }
+  }
+
+  el("googleDriveBtn").addEventListener("click", () => renderGoogleDrivePanel());
+
+  // Μετά το OAuth redirect (Section N), η Google επιστρέφει εδώ με
+  // ?google_drive_connected=1 ή ?google_drive_error=<code>. Δείχνουμε το
+  // ανάλογο banner ΜΕΣΑ στο ίδιο panel σύνδεσης Google Drive (όχι ξεχωριστό
+  // popup/alert), και καθαρίζουμε το URL αμέσως ώστε ένα refresh να μη
+  // ξαναδείξει το ίδιο μήνυμα.
+  const GOOGLE_DRIVE_ERROR_KEYS = {
+    denied: "googleDriveErrorDenied",
+    missing_params: "googleDriveErrorMissingParams",
+    invalid_state: "googleDriveErrorInvalidState",
+    token_exchange_failed: "googleDriveErrorTokenExchangeFailed",
+    no_refresh_token: "googleDriveErrorNoRefreshToken",
+    missing_drive_scope: "googleDriveErrorMissingScope",
+  };
+
+  function checkGoogleDriveRedirectParams() {
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get("google_drive_connected");
+    const errorCode = params.get("google_drive_error");
+    if (!connected && !errorCode) return null;
+
+    window.history.replaceState(null, "", window.location.pathname);
+
+    if (connected) {
+      return `<div class="upload-status" style="color:var(--ok);margin-bottom:14px;">${escapeHtml(t("googleDriveConnectedBanner"))}</div>`;
+    }
+    const key = GOOGLE_DRIVE_ERROR_KEYS[errorCode] || "googleDriveErrorGeneric";
+    return `<div class="upload-status" style="color:var(--danger);margin-bottom:14px;">❌ ${escapeHtml(t(key))}</div>`;
+  }
+
   // Section G: πάνελ ρυθμίσεων widget (χρώμα, όνομα bot, λογότυπο, email
   // ειδοποίησης). Ίδιο pattern με τα άλλα render* functions -- γράφει
   // απευθείας στο mainPanel και ξαναδένει τα δικά του event listeners.
@@ -1339,11 +1564,17 @@
 
   el("analyticsBtn").addEventListener("click", renderAnalyticsPanel);
 
-  el("allDocsBtn").addEventListener("click", () => {
+  function goToAllDocuments() {
     if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
     currentSelectedId = null;
     renderDocList();
     renderDocBrowser();
+  }
+
+  el("allDocsBtn").addEventListener("click", goToAllDocuments);
+  el("topAllDocsBtn").addEventListener("click", (e) => {
+    e.preventDefault();
+    goToAllDocuments();
   });
 
   function renderEditForm({ title, documentId, text, sourceUrl, isExisting }) {
@@ -1599,7 +1830,12 @@
     out.querySelector("pre").textContent = JSON.stringify(data, null, 2);
   }
 
-  loadDocuments().then(renderDocBrowser);
+  const driveRedirectBanner = checkGoogleDriveRedirectParams();
+  if (driveRedirectBanner) {
+    loadDocuments().then(() => renderGoogleDrivePanel(driveRedirectBanner));
+  } else {
+    loadDocuments().then(renderDocBrowser);
+  }
   loadFallbackQuestions();
   loadContradictions();
 

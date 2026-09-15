@@ -1,3 +1,5 @@
+import { encryptToken, decryptToken } from "./crypto-helpers.js";
+
 const CHUNK_SIZE = 300;
 const CHUNK_OVERLAP = 30;
 const TOP_K = 4;
@@ -1963,6 +1965,398 @@ async function handleRestoreDocument(request, env, documentId) {
   );
 }
 
+// Section N: Google Drive OAuth connector.
+//
+// Δύο endpoints: /oauth/google/start ξεκινάει τη ροή (redirect στη Google),
+// /oauth/google/callback την ολοκληρώνει (ανταλλάσσει το code για tokens
+// και τα αποθηκεύει κρυπτογραφημένα στη D1). Ο workspaceId περνάει σαν
+// query param -- αυτό είναι top-level browser navigation (ο χρήστης
+// ανοίγει ένα link, δεν υπάρχει X-Session-Token header σε redirect flow),
+// ίδιο μοντέλο εμπιστοσύνης με το ήδη υπάρχον Guest/Developer flow (βλ.
+// Known limitations στο README).
+//
+// CSRF protection: ένα τυχαίο "state" αποθηκεύεται στο KV με σύντομη λήξη
+// (10 λεπτά), δείχνοντας ποιο workspaceId ξεκίνησε τη ροή. Το callback το
+// ελέγχει και το διαγράφει αμέσως μετά τη χρήση -- ένα state δεν
+// ξαναχρησιμοποιείται ποτέ, ίδια passive-TTL φιλοσοφία με τα υπόλοιπα
+// δεδομένα του project (καμία cron διαδικασία).
+const OAUTH_STATE_TTL_SECONDS = 60 * 10; // 10 λεπτά
+// openid + email δεν είναι ευαίσθητα scopes -- χρειάζονται μόνο για να
+// μπορούμε να καλέσουμε το userinfo endpoint και να δείξουμε ποιος
+// λογαριασμός συνδέθηκε (connected_by_email). Χωρίς αυτά, το drive.readonly
+// access token δεν έχει δικαίωμα να διαβάσει καν το email του χρήστη.
+const GOOGLE_DRIVE_SCOPE_REQUIRED = "https://www.googleapis.com/auth/drive.readonly";
+const GOOGLE_DRIVE_SCOPE =
+  `${GOOGLE_DRIVE_SCOPE_REQUIRED} openid email`;
+
+async function handleOAuthGoogleStart(request, env) {
+  const url = new URL(request.url);
+  const workspaceId = url.searchParams.get("workspace_id");
+  if (!workspaceId) {
+    return jsonError(400, "Missing workspace_id query parameter");
+  }
+
+  const state = randomHex(16);
+  await env.DOCUMENT_REGISTRY.put(`oauth:state:${state}`, workspaceId, {
+    expirationTtl: OAUTH_STATE_TTL_SECONDS,
+  });
+
+  const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  authUrl.searchParams.set("client_id", env.GOOGLE_CLIENT_ID);
+  authUrl.searchParams.set("redirect_uri", env.GOOGLE_REDIRECT_URI);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("scope", GOOGLE_DRIVE_SCOPE);
+  authUrl.searchParams.set("access_type", "offline"); // ζητάμε refresh_token
+  authUrl.searchParams.set("prompt", "consent select_account"); // πάντα ζητά consent ΚΑΙ επιλογή λογαριασμού (ποτέ σιωπηλή παράλειψη λόγω ενεργού session)
+  authUrl.searchParams.set("state", state);
+
+  return Response.redirect(authUrl.toString(), 302);
+}
+
+async function handleOAuthGoogleCallback(request, env) {
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  const errorParam = url.searchParams.get("error");
+
+  if (errorParam) {
+    // Ο χρήστης πάτησε "Deny" στη Google, ή κάτι άλλο ακυρώθηκε εκεί.
+    return Response.redirect(new URL("/editor.html?google_drive_error=denied", url).toString(), 302);
+  }
+
+  if (!code || !state) {
+    return Response.redirect(new URL("/editor.html?google_drive_error=missing_params", url).toString(), 302);
+  }
+
+  const stateKey = `oauth:state:${state}`;
+  const workspaceId = await env.DOCUMENT_REGISTRY.get(stateKey);
+  if (!workspaceId) {
+    // Άκυρο, ληγμένο, ή ήδη χρησιμοποιημένο state -- ποτέ δεν προχωράμε.
+    return Response.redirect(new URL("/editor.html?google_drive_error=invalid_state", url).toString(), 302);
+  }
+  await env.DOCUMENT_REGISTRY.delete(stateKey); // ένα state, μία χρήση
+
+  // Ανταλλαγή του authorization code για access_token + refresh_token.
+  const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: env.GOOGLE_CLIENT_ID,
+      client_secret: env.GOOGLE_CLIENT_SECRET,
+      code,
+      grant_type: "authorization_code",
+      redirect_uri: env.GOOGLE_REDIRECT_URI,
+    }),
+  });
+
+  const tokenData = await tokenResponse.json();
+  if (!tokenResponse.ok || !tokenData.access_token) {
+    return Response.redirect(new URL("/editor.html?google_drive_error=token_exchange_failed", url).toString(), 302);
+  }
+
+  // refresh_token λείπει αν ο χρήστης έχει ΞΑΝΑδώσει consent στο παρελθόν
+  // και για κάποιο λόγο το prompt=consent δεν το ανάγκασε -- σε αυτή την
+  // περίπτωση δεν μπορούμε να ανανεώσουμε αργότερα, οπότε το αντιμετωπίζουμε
+  // ως αποτυχία και ζητάμε να ξαναδοκιμάσει τη σύνδεση.
+  if (!tokenData.refresh_token) {
+    return Response.redirect(new URL("/editor.html?google_drive_error=no_refresh_token", url).toString(), 302);
+  }
+
+  // Η Google επιστρέφει το πραγματικά εγκεκριμένο scope στο ίδιο το token
+  // response (πεδίο "scope", χωρισμένο με κενά). ΠΟΤΕ δεν το εμπιστευόμαστε
+  // σιωπηλά -- η νεότερη, πιο αναλυτική οθόνη συναίνεσης της Google επιτρέπει
+  // στον χρήστη να ξε-τσεκάρει μεμονωμένα δικαιώματα (π.χ. να εγκρίνει μόνο
+  // το email αλλά όχι το Drive). Αν λείπει το scope που χρειαζόμαστε, δεν
+  // αποθηκεύουμε καθόλου σύνδεση -- θα ήταν άχρηστη και θα απέτυχε αργότερα
+  // με ασαφές σφάλμα στο πρώτο πραγματικό API call.
+  const grantedScopes = (tokenData.scope || "").split(/\s+/);
+  if (!grantedScopes.includes(GOOGLE_DRIVE_SCOPE_REQUIRED)) {
+    return Response.redirect(new URL("/editor.html?google_drive_error=missing_drive_scope", url).toString(), 302);
+  }
+
+  // Ποιος Google λογαριασμός συνδέθηκε -- μόνο για εμφάνιση στο UI
+  // ("Συνδεδεμένο ως x@gmail.com"), ποτέ για authorization logic.
+  let connectedByEmail = null;
+  try {
+    const userInfoResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+    const userInfo = await userInfoResponse.json();
+    connectedByEmail = userInfo.email || null;
+  } catch (err) {
+    // Best-effort -- η σύνδεση δουλεύει κανονικά ακόμα κι αν αυτό αποτύχει.
+  }
+
+  const encryptedAccessToken = await encryptToken(tokenData.access_token, env.TOKEN_ENCRYPTION_KEY);
+  const encryptedRefreshToken = await encryptToken(tokenData.refresh_token, env.TOKEN_ENCRYPTION_KEY);
+  const expiresAt = Date.now() + tokenData.expires_in * 1000;
+  const now = new Date().toISOString();
+
+  await env.DB.prepare(
+    `INSERT INTO connections
+       (id, workspace_id, provider, access_token, refresh_token, expires_at, connected_by_email, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(workspace_id, provider) DO UPDATE SET
+       access_token = excluded.access_token,
+       refresh_token = excluded.refresh_token,
+       expires_at = excluded.expires_at,
+       connected_by_email = excluded.connected_by_email,
+       updated_at = excluded.updated_at`
+  ).bind(
+    `conn-${randomHex(12)}`,
+    workspaceId,
+    "google_drive",
+    encryptedAccessToken,
+    encryptedRefreshToken,
+    expiresAt,
+    connectedByEmail,
+    now,
+    now
+  ).run();
+
+  return Response.redirect(new URL("/editor.html?google_drive_connected=1", url).toString(), 302);
+}
+
+// Section N (συνέχεια): χρήση της σύνδεσης Google Drive.
+//
+// getValidGoogleDriveAccessToken() είναι το ΜΟΝΟ σημείο που διαβάζει την
+// D1, αποκρυπτογραφεί, και -- αν χρειάζεται -- ανανεώνει το access token.
+// Κάθε άλλος handler που χρειάζεται να μιλήσει στο Drive API περνάει από
+// εδώ, ποτέ δεν διαβάζει το connections table απευθείας.
+const TOKEN_REFRESH_BUFFER_MS = 60 * 1000; // ανανεώνουμε 1 λεπτό πριν τη λήξη, όχι ακριβώς πάνω στη λήξη
+
+async function getValidGoogleDriveAccessToken(env, workspaceId) {
+  const row = await env.DB.prepare(
+    "SELECT access_token, refresh_token, expires_at, connected_by_email FROM connections WHERE workspace_id = ? AND provider = ?"
+  ).bind(workspaceId, "google_drive").first();
+
+  if (!row) {
+    const err = new Error("Google Drive δεν είναι συνδεδεμένο για αυτό το workspace");
+    err.code = "not_connected";
+    throw err;
+  }
+
+  // Ακόμα έγκυρο -- δεν χρειάζεται καμία κλήση στη Google.
+  if (row.expires_at - TOKEN_REFRESH_BUFFER_MS > Date.now()) {
+    const accessToken = await decryptToken(row.access_token, env.TOKEN_ENCRYPTION_KEY);
+    return { accessToken, connectedByEmail: row.connected_by_email };
+  }
+
+  // Έληξε (ή κοντεύει) -- ανανέωση μέσω του refresh_token. Το refresh_token
+  // ΔΕΝ αλλάζει σε αυτή τη ροή (η Google συνήθως δεν στέλνει καινούργιο),
+  // οπότε ενημερώνουμε ΜΟΝΟ το access_token/expires_at στη D1.
+  const refreshToken = await decryptToken(row.refresh_token, env.TOKEN_ENCRYPTION_KEY);
+
+  const refreshResponse = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: env.GOOGLE_CLIENT_ID,
+      client_secret: env.GOOGLE_CLIENT_SECRET,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+
+  const refreshData = await refreshResponse.json();
+  if (!refreshResponse.ok || !refreshData.access_token) {
+    // Το refresh token μπορεί να έχει ανακληθεί χειροκίνητα από τον χρήστη
+    // (Google Account settings) -- σε αυτή την περίπτωση δεν υπάρχει τίποτα
+    // άλλο να κάνουμε εκτός από το να ζητήσουμε νέα σύνδεση.
+    const err = new Error("Η ανανέωση του Google Drive token απέτυχε, χρειάζεται νέα σύνδεση");
+    err.code = "refresh_failed";
+    throw err;
+  }
+
+  const newAccessToken = refreshData.access_token;
+  const newExpiresAt = Date.now() + refreshData.expires_in * 1000;
+  const encryptedNewAccessToken = await encryptToken(newAccessToken, env.TOKEN_ENCRYPTION_KEY);
+
+  await env.DB.prepare(
+    "UPDATE connections SET access_token = ?, expires_at = ?, updated_at = ? WHERE workspace_id = ? AND provider = ?"
+  ).bind(encryptedNewAccessToken, newExpiresAt, new Date().toISOString(), workspaceId, "google_drive").run();
+
+  return { accessToken: newAccessToken, connectedByEmail: row.connected_by_email };
+}
+
+// Section N (συνέχεια): αποσύνδεση. Καλεί το revoke endpoint της Google
+// (best-effort -- ακόμα κι αν αποτύχει, π.χ. το token είχε ήδη ανακληθεί
+// χειροκίνητα, συνεχίζουμε ούτως ή άλλως να διαγράψουμε τη γραμμή μας)
+// ΚΑΙ διαγράφει τη γραμμή από τη D1. Μετά την αποσύνδεση, ο χρήστης βλέπει
+// ξανά την αρχική οθόνη "Σύνδεση Google Drive".
+async function handleDisconnectGoogleDrive(request, env) {
+  const workspaceId = await resolveWorkspaceId(request, env);
+  if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
+
+  const row = await env.DB.prepare(
+    "SELECT refresh_token FROM connections WHERE workspace_id = ? AND provider = ?"
+  ).bind(workspaceId, "google_drive").first();
+
+  if (row) {
+    try {
+      const refreshToken = await decryptToken(row.refresh_token, env.TOKEN_ENCRYPTION_KEY);
+      await fetch("https://oauth2.googleapis.com/revoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token: refreshToken }),
+      });
+    } catch (err) {
+      // Best-effort -- η τοπική αποσύνδεση προχωράει ούτως ή άλλως παρακάτω.
+    }
+  }
+
+  await env.DB.prepare(
+    "DELETE FROM connections WHERE workspace_id = ? AND provider = ?"
+  ).bind(workspaceId, "google_drive").run();
+
+  return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
+}
+
+// Ποια Google Workspace mimeTypes υποστηρίζουμε, και πώς εξάγεται η καθεμία
+// σε απλό κείμενο κατάλληλο για το ίδιο draft-then-publish pipeline που
+// έχουν ήδη τα χειροκίνητα uploads και το URL sync (Section D/M). Το Sheets
+// export βγάζει ΜΟΝΟ το πρώτο φύλλο σαν CSV -- γνωστός περιορισμός, αρκετό
+// για πρώτη έκδοση.
+const GOOGLE_DRIVE_EXPORT_MIME_TYPES = {
+  "application/vnd.google-apps.document": "text/plain",
+  "application/vnd.google-apps.spreadsheet": "text/csv",
+};
+
+async function handleListGoogleDriveFiles(request, env) {
+  const workspaceId = await resolveWorkspaceId(request, env);
+  if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
+
+  let accessToken, connectedByEmail;
+  try {
+    ({ accessToken, connectedByEmail } = await getValidGoogleDriveAccessToken(env, workspaceId));
+  } catch (err) {
+    if (err.code === "not_connected") return jsonError(404, err.message);
+    return jsonError(502, err.message);
+  }
+
+  // Μόνο Google Docs/Sheets, όχι folders/PDFs/εικόνες κλπ -- αυτά είναι τα
+  // δύο τύποι που ξέρουμε να εξάγουμε σε καθαρό κείμενο (βλ. πίνακα πάνω).
+  const query =
+    "(mimeType='application/vnd.google-apps.document' or mimeType='application/vnd.google-apps.spreadsheet') and trashed=false";
+
+  const listUrl = new URL("https://www.googleapis.com/drive/v3/files");
+  listUrl.searchParams.set("q", query);
+  listUrl.searchParams.set("fields", "files(id,name,mimeType,modifiedTime)");
+  listUrl.searchParams.set("pageSize", "100");
+  listUrl.searchParams.set("orderBy", "modifiedTime desc");
+
+  const listResponse = await fetch(listUrl.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const listData = await listResponse.json();
+
+  if (!listResponse.ok) {
+    return jsonError(502, "Η λίστα αρχείων από το Google Drive απέτυχε: " + JSON.stringify(listData));
+  }
+
+  return new Response(
+    JSON.stringify({ files: listData.files || [], connectedByEmail: connectedByEmail || null }),
+    { headers: JSON_HEADERS }
+  );
+}
+
+async function handleImportGoogleDriveFiles(request, env) {
+  const workspaceId = await resolveWorkspaceId(request, env);
+  if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonError(400, "Invalid JSON body");
+  }
+
+  if (!Array.isArray(body.files) || body.files.length === 0) {
+    return jsonError(400, "files must be a non-empty array of {id, name, mimeType}");
+  }
+  if (body.files.length > 20) {
+    return jsonError(400, "Maximum 20 files per import request");
+  }
+
+  let accessToken;
+  try {
+    ({ accessToken } = await getValidGoogleDriveAccessToken(env, workspaceId));
+  } catch (err) {
+    if (err.code === "not_connected") return jsonError(404, err.message);
+    return jsonError(502, err.message);
+  }
+
+  const imported = [];
+  const failed = [];
+
+  for (const file of body.files) {
+    const exportMimeType = GOOGLE_DRIVE_EXPORT_MIME_TYPES[file.mimeType];
+    if (!exportMimeType) {
+      failed.push({ id: file.id, name: file.name, error: "Μη υποστηριζόμενος τύπος αρχείου" });
+      continue;
+    }
+
+    const exportUrl = new URL(`https://www.googleapis.com/drive/v3/files/${file.id}/export`);
+    exportUrl.searchParams.set("mimeType", exportMimeType);
+
+    let exportResponse;
+    try {
+      exportResponse = await fetch(exportUrl.toString(), {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+    } catch (err) {
+      failed.push({ id: file.id, name: file.name, error: "Αποτυχία σύνδεσης με το Google Drive" });
+      continue;
+    }
+
+    if (!exportResponse.ok) {
+      failed.push({ id: file.id, name: file.name, error: `Η εξαγωγή απέτυχε (status ${exportResponse.status})` });
+      continue;
+    }
+
+    const text = (await exportResponse.text()).trim();
+    const wordCount = text.split(/\s+/).filter(Boolean).length;
+    const byteSize = new TextEncoder().encode(text).length;
+
+    if (wordCount < 3) {
+      failed.push({ id: file.id, name: file.name, error: "Το αρχείο φαίνεται άδειο" });
+      continue;
+    }
+    if (wordCount > MAX_UPLOAD_WORDS || byteSize > MAX_UPLOAD_BYTES) {
+      failed.push({
+        id: file.id,
+        name: file.name,
+        error: `Πολύ μεγάλο αρχείο (μέγιστο ${MAX_UPLOAD_WORDS} λέξεις ή 2MB, έχει ${wordCount} λέξεις)`,
+      });
+      continue;
+    }
+
+    const title = file.name || "Χωρίς τίτλο";
+    const documentId = slugifyForDocId(title);
+    const { putOptions, expiresAt } = docTtlFor(workspaceId);
+    const kvKey = `session:${workspaceId}:doc:${documentId}`;
+
+    await env.DOCUMENT_REGISTRY.put(
+      kvKey,
+      JSON.stringify({
+        title,
+        chunkCount: 0,
+        updatedAt: new Date().toISOString(),
+        volatility: null,
+        sourceUrl: `google-drive:${file.id}`,
+        fullText: text,
+        status: "draft",
+        expiresAt,
+      }),
+      putOptions
+    );
+
+    imported.push({ documentId, title, wordCount, sourceFileId: file.id });
+  }
+
+  return new Response(JSON.stringify({ imported, failed }), { headers: JSON_HEADERS });
+}
+
 // Απλός έλεγχος κωδικού για τη λειτουργία "Developer" στη landing page.
 // Ο πραγματικός κωδικός ζει ΜΟΝΟ σαν Worker secret (env.DEVELOPER_PASSWORD),
 // ποτέ μέσα στον κώδικα. Καμία session/cookie/token -- το frontend απλά
@@ -2008,6 +2402,26 @@ export default {
 
     if (url.pathname === "/account/logout" && request.method === "POST") {
       return handleLogout(request, env);
+    }
+
+    if (url.pathname === "/oauth/google/start" && request.method === "GET") {
+      return handleOAuthGoogleStart(request, env);
+    }
+
+    if (url.pathname === "/oauth/google/callback" && request.method === "GET") {
+      return handleOAuthGoogleCallback(request, env);
+    }
+
+    if (url.pathname === "/connections/google-drive/files" && request.method === "GET") {
+      return handleListGoogleDriveFiles(request, env);
+    }
+
+    if (url.pathname === "/connections/google-drive/import" && request.method === "POST") {
+      return handleImportGoogleDriveFiles(request, env);
+    }
+
+    if (url.pathname === "/connections/google-drive" && request.method === "DELETE") {
+      return handleDisconnectGoogleDrive(request, env);
     }
 
     if (url.pathname === "/workspace/settings" && request.method === "GET") {

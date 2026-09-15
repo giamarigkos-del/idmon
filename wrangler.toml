@@ -25,3 +25,9 @@ not_found_handling = "none"
 # Το ίδιο το API key ΔΕΝ μπαίνει εδώ -- είναι secret:
 #   wrangler secret put RESEND_API_KEY
 NOTIFY_FROM_EMAIL = "notifications@yourdomain.gr"
+
+# --- Google Drive OAuth connector ---
+# Το Client Secret ΔΕΝ μπαίνει εδώ -- είναι secret:
+#   wrangler secret put GOOGLE_CLIENT_SECRET
+GOOGLE_CLIENT_ID = "532047777604-98qlf4jfdp3kic0i7ko7pniteo89gaau.apps.googleusercontent.com"
+GOOGLE_REDIRECT_URI = "https://operations-portal-rag.giamarigkos.workers.dev/oauth/google/callback"

@@ -80,6 +80,14 @@ async function streamSSE(response, onEvent) {
   }
 }
 
+// Μικρή indirection γύρω από το window.location.href = ... -- χωρίς αυτό,
+// headless DOM tests (jsdom) δεν μπορούν να επαληθεύσουν top-level
+// navigation, αφού το window.location δεν είναι επαναπροσδιορίσιμο εκεί.
+// Παραγωγικά συμπεριφέρεται ακριβώς ίδια, απλά με ένα function call ανάμεσα.
+function navigateTo(url) {
+  window.location.href = url;
+}
+
 async function logoutAndSwitchMode() {
   if (SESSION_TOKEN) {
     try {
@@ -346,6 +354,33 @@ const TRANSLATIONS = {
     urlRequiredError: "Enter a URL first.",
     addFromUrlErrorPrefix: "Could not add from URL: ",
     refreshFromUrl: "↻ Refresh from URL",
+
+    // Google Drive connector (Section N)
+    googleDriveBtn: "Google Drive",
+    googleDriveTitle: "Import from Google Drive",
+    googleDriveConnectIntro: "Connect your Google Drive account to import Google Docs and Sheets directly, without copy-pasting.",
+    googleDriveConnectBtn: "Connect Google Drive",
+    googleDriveConnectedAs: "Connected as {email}",
+    googleDriveChangeAccountBtn: "Change account",
+    googleDriveDisconnectBtn: "Disconnect",
+    googleDriveDisconnecting: "Disconnecting…",
+    googleDriveDisconnectErrorPrefix: "Could not disconnect: ",
+    googleDriveLoadError: "Could not load your Google Drive files.",
+    googleDriveNoFiles: "No Google Docs or Sheets found in your Drive.",
+    googleDriveModifiedPrefix: "Modified",
+    googleDriveImportBtn: "Import selected ({count})",
+    googleDriveImporting: "Importing…",
+    googleDriveImportErrorPrefix: "Import failed: ",
+    googleDriveImportSummary: "Imported {success} of {total} files as drafts.",
+    googleDriveImportFailedPrefix: "Could not import: ",
+    googleDriveConnectedBanner: "✓ Google Drive connected successfully.",
+    googleDriveErrorDenied: "Google sign-in was cancelled.",
+    googleDriveErrorMissingParams: "Something went wrong during sign-in. Please try again.",
+    googleDriveErrorInvalidState: "This sign-in link expired. Please try connecting again.",
+    googleDriveErrorTokenExchangeFailed: "Google sign-in failed. Please try again.",
+    googleDriveErrorNoRefreshToken: "Please try connecting again and approve full access when asked.",
+    googleDriveErrorMissingScope: "Google Drive access wasn't granted. Please try connecting again and make sure the Google Drive checkbox is checked before continuing.",
+    googleDriveErrorGeneric: "Something went wrong connecting to Google Drive.",
     refreshingFromUrl: "Refreshing…",
     refreshFromUrlErrorPrefix: "Refresh error: ",
   },
@@ -530,6 +565,33 @@ const TRANSLATIONS = {
     addFromUrlErrorPrefix: "Δεν προστέθηκε από URL: ",
     refreshFromUrl: "↻ Ανανέωση από URL",
     refreshingFromUrl: "Ανανεώνεται…",
+
+    // Google Drive connector (Section N)
+    googleDriveBtn: "Google Drive",
+    googleDriveTitle: "Εισαγωγή από Google Drive",
+    googleDriveConnectIntro: "Σύνδεσε τον λογαριασμό Google Drive σου για να εισάγεις Google Docs και Sheets απευθείας, χωρίς copy-paste.",
+    googleDriveConnectBtn: "Σύνδεση Google Drive",
+    googleDriveConnectedAs: "Συνδεδεμένο ως {email}",
+    googleDriveChangeAccountBtn: "Αλλαγή λογαριασμού",
+    googleDriveDisconnectBtn: "Αποσύνδεση",
+    googleDriveDisconnecting: "Αποσυνδέεται…",
+    googleDriveDisconnectErrorPrefix: "Δεν ήταν δυνατή η αποσύνδεση: ",
+    googleDriveLoadError: "Δεν ήταν δυνατή η φόρτωση των αρχείων του Google Drive.",
+    googleDriveNoFiles: "Δεν βρέθηκαν Google Docs ή Sheets στο Drive σου.",
+    googleDriveModifiedPrefix: "Τροποποιήθηκε",
+    googleDriveImportBtn: "Εισαγωγή επιλεγμένων ({count})",
+    googleDriveImporting: "Γίνεται εισαγωγή…",
+    googleDriveImportErrorPrefix: "Η εισαγωγή απέτυχε: ",
+    googleDriveImportSummary: "Εισήχθησαν {success} από {total} αρχεία ως πρόχειρα.",
+    googleDriveImportFailedPrefix: "Δεν ήταν δυνατή η εισαγωγή: ",
+    googleDriveConnectedBanner: "✓ Το Google Drive συνδέθηκε επιτυχώς.",
+    googleDriveErrorDenied: "Η σύνδεση με τη Google ακυρώθηκε.",
+    googleDriveErrorMissingParams: "Κάτι πήγε στραβά κατά τη σύνδεση. Δοκίμασε ξανά.",
+    googleDriveErrorInvalidState: "Αυτός ο σύνδεσμος σύνδεσης έληξε. Δοκίμασε να συνδεθείς ξανά.",
+    googleDriveErrorTokenExchangeFailed: "Η σύνδεση με τη Google απέτυχε. Δοκίμασε ξανά.",
+    googleDriveErrorNoRefreshToken: "Δοκίμασε να συνδεθείς ξανά και ενέκρινε πλήρη πρόσβαση όταν σου ζητηθεί.",
+    googleDriveErrorMissingScope: "Δεν εγκρίθηκε η πρόσβαση στο Google Drive. Δοκίμασε να συνδεθείς ξανά και βεβαιώσου ότι το checkbox του Google Drive είναι τσεκαρισμένο πριν συνεχίσεις.",
+    googleDriveErrorGeneric: "Κάτι πήγε στραβά κατά τη σύνδεση με το Google Drive.",
     refreshFromUrlErrorPrefix: "Σφάλμα ανανέωσης: ",
   },
 };
