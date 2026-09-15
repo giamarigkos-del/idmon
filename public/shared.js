@@ -190,7 +190,7 @@ const TRANSLATIONS = {
     expiresInDays: "Expires in {days} days",
 
     // landing.html
-    landingDocTitle: "Operations Portal — Welcome",
+    landingDocTitle: "Idmon — Welcome",
     landingIntro: "Before you continue, choose how you'll enter.",
     guestTitle: "Guest",
     guestDesc: "Freely try the tool in your own separate space. Nobody else sees what you upload, and it's automatically deleted after 7 days.",
@@ -218,7 +218,7 @@ const TRANSLATIONS = {
     privacyLink: "Privacy Policy",
 
     // index.html
-    indexDocTitle: "Operations Portal — Assistant",
+    indexDocTitle: "Idmon — Assistant",
     recentDocs: "Recent documents",
     hostIntro: "Company procedures and policies. Click a document to read it, or ask the assistant bottom-right.",
     noDocsInWorkspace: "There are no documents yet in this workspace.",
@@ -238,7 +238,7 @@ const TRANSLATIONS = {
     updatedColon: "Updated:",
 
     // editor.html
-    editorDocTitle: "Content Management — Operations Portal",
+    editorDocTitle: "Content Management — Idmon",
     editorHeading: "Content Management",
     newDoc: "+ New document",
     filterByTitle: "Filter by title…",
@@ -410,7 +410,7 @@ const TRANSLATIONS = {
     expiresInDay: "Λήγει σε {days} ημέρα",
     expiresInDays: "Λήγει σε {days} ημέρες",
 
-    landingDocTitle: "Operations Portal — Καλωσόρισες",
+    landingDocTitle: "Idmon — Καλωσόρισες",
     landingIntro: "Πριν συνεχίσεις, διάλεξε πώς θα μπεις.",
     guestTitle: "Επισκέπτης / Guest",
     guestDesc: "Δοκίμασε ελεύθερα το εργαλείο σε έναν δικό σου, ξεχωριστό χώρο. Ό,τι ανεβάσεις δεν το βλέπει κανείς άλλος, και σβήνεται μόνο του μετά από 7 μέρες.",
@@ -437,7 +437,7 @@ const TRANSLATIONS = {
     termsLink: "Όροι Χρήσης",
     privacyLink: "Πολιτική Απορρήτου",
 
-    indexDocTitle: "Operations Portal — Βοηθός",
+    indexDocTitle: "Idmon — Βοηθός",
     recentDocs: "Πρόσφατα έγγραφα",
     hostIntro: "Διαδικασίες και πολιτικές της εταιρείας. Κάνε κλικ σε ένα έγγραφο για να το διαβάσεις, ή ρώτησε τον βοηθό κάτω-δεξιά.",
     noDocsInWorkspace: "Δεν υπάρχουν έγγραφα ακόμα σε αυτόν τον χώρο εργασίας.",
@@ -455,7 +455,7 @@ const TRANSLATIONS = {
     docNotPublished: "Αυτό το έγγραφο δεν έχει δημοσιευτεί ακόμα.",
     updatedColon: "Ενημερώθηκε:",
 
-    editorDocTitle: "Διαχείριση Περιεχομένου — Operations Portal",
+    editorDocTitle: "Διαχείριση Περιεχομένου — Idmon",
     editorHeading: "Διαχείριση Περιεχομένου",
     newDoc: "+ Νέο έγγραφο",
     filterByTitle: "Φίλτρο με τίτλο…",
