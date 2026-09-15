@@ -23,6 +23,38 @@ const MAX_ANALYTICS_DAYS = 90;
 const PROTECTED_WORKSPACE_ID = "efood-ops-demo";
 const VISITOR_DOC_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 ημέρες
 
+// Section O: γενικό rate limiting για ευαίσθητα endpoints (login, developer
+// login, signup, forgot-password) -- προστασία από brute-force/spam. 5
+// προσπάθειες ανά 15 λεπτά ανά (bucket, identifier) -- π.χ. bucket="login",
+// identifier=IP. Ίδιο KV get+put pattern με recordAnalytics/checkAndIncrementUsage,
+// ίδιο αποδεκτό ρίσκο race condition σε αυτή την κλίμακα.
+const RATE_LIMIT_WINDOW_SECONDS = 60 * 15; // 15 λεπτά
+const RATE_LIMIT_MAX_ATTEMPTS = 5;
+
+function clientIp(request) {
+  // Cloudflare Workers βάζει πάντα το πραγματικό IP του επισκέπτη εδώ --
+  // δεν εμπιστευόμαστε X-Forwarded-For (μπορεί να πλαστογραφηθεί από τον
+  // ίδιο τον client).
+  return request.headers.get("CF-Connecting-IP") || "unknown";
+}
+
+async function isRateLimited(env, bucket, identifier) {
+  const raw = await env.DOCUMENT_REGISTRY.get(`ratelimit:${bucket}:${identifier}`);
+  const count = raw ? parseInt(raw, 10) : 0;
+  return count >= RATE_LIMIT_MAX_ATTEMPTS;
+}
+
+async function recordRateLimitAttempt(env, bucket, identifier) {
+  const key = `ratelimit:${bucket}:${identifier}`;
+  const raw = await env.DOCUMENT_REGISTRY.get(key);
+  const count = raw ? parseInt(raw, 10) : 0;
+  await env.DOCUMENT_REGISTRY.put(key, String(count + 1), { expirationTtl: RATE_LIMIT_WINDOW_SECONDS });
+}
+
+async function clearRateLimit(env, bucket, identifier) {
+  await env.DOCUMENT_REGISTRY.delete(`ratelimit:${bucket}:${identifier}`);
+}
+
 // Section N: βασικό μηνιαίο όριο μηνυμάτων ανά workspace -- ΔΕΝ είναι ακόμα
 // επιβολή pricing tier (δεν υπάρχει ακόμα πεδίο "plan" στους λογαριασμούς,
 // βλ. decisions-and-pricing), απλά ένα φρένο κόστους: αν κάποιος (bug, bot,
@@ -166,6 +198,11 @@ async function resolveWorkspaceId(request, env) {
 }
 
 async function handleSignup(request, env) {
+  const ip = clientIp(request);
+  if (await isRateLimited(env, "signup", ip)) {
+    return jsonError(429, "Too many signup attempts. Please try again in a few minutes.");
+  }
+
   let body;
   try {
     body = await request.json();
@@ -177,6 +214,8 @@ async function handleSignup(request, env) {
 
   if (!email || !EMAIL_RE.test(email)) return jsonError(400, "Valid email is required");
   if (!password || password.length < 8) return jsonError(400, "Password must be at least 8 characters");
+
+  await recordRateLimitAttempt(env, "signup", ip);
 
   const existing = await env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
   if (existing) return jsonError(409, "An account with this email already exists");
@@ -202,6 +241,11 @@ async function handleSignup(request, env) {
 }
 
 async function handleLogin(request, env) {
+  const ip = clientIp(request);
+  if (await isRateLimited(env, "login", ip)) {
+    return jsonError(429, "Too many login attempts. Please try again in a few minutes.");
+  }
+
   let body;
   try {
     body = await request.json();
@@ -220,11 +264,18 @@ async function handleLogin(request, env) {
   // Το ΙΔΙΟ γενικό μήνυμα λάθους είτε δεν υπάρχει το email είτε το password
   // είναι λάθος -- ΠΟΤΕ δεν αποκαλύπτουμε ποιο από τα δύο ίσχυε (θα βοηθούσε
   // κάποιον να μαντέψει ποια emails είναι ήδη εγγεγραμμένα).
-  if (!user) return jsonError(401, "Invalid email or password");
+  if (!user) {
+    await recordRateLimitAttempt(env, "login", ip);
+    return jsonError(401, "Invalid email or password");
+  }
 
   const valid = await verifyPassword(password, user.password_salt, user.password_hash);
-  if (!valid) return jsonError(401, "Invalid email or password");
+  if (!valid) {
+    await recordRateLimitAttempt(env, "login", ip);
+    return jsonError(401, "Invalid email or password");
+  }
 
+  await clearRateLimit(env, "login", ip);
   const session = await createSession(env, user.id, user.workspace_id);
 
   return new Response(
@@ -238,6 +289,101 @@ async function handleLogout(request, env) {
   if (!sessionToken) return jsonError(400, "Missing X-Session-Token header");
   await env.DB.prepare("DELETE FROM sessions WHERE token = ?").bind(sessionToken).run();
   return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
+}
+
+// Section O: password reset -- token σε KV (όχι νέο D1 table, το ίδιο
+// pattern με το OAuth state), αυτο-καθαρίζεται μέσω TTL, μιας χρήσης
+// (διαγράφεται αμέσως μόλις χρησιμοποιηθεί).
+const PASSWORD_RESET_TTL_SECONDS = 60 * 30; // 30 λεπτά
+
+// ΠΑΝΤΑ το ΙΔΙΟ γενικό μήνυμα, ανεξάρτητα από το αν το email υπάρχει --
+// αλλιώς κάποιος θα μπορούσε να δοκιμάζει emails εδώ για να μάθει ποια
+// είναι ήδη εγγεγραμμένα (ίδια λογική με το login error message παραπάνω).
+async function handleForgotPassword(request, env) {
+  const ip = clientIp(request);
+  if (await isRateLimited(env, "forgot-password", ip)) {
+    return jsonError(429, "Too many requests. Please try again in a few minutes.");
+  }
+  await recordRateLimitAttempt(env, "forgot-password", ip);
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonError(400, "Invalid JSON body");
+  }
+  const email = (body.email || "").trim().toLowerCase();
+  const genericResponse = new Response(
+    JSON.stringify({ ok: true, message: "If that email is registered, a reset link has been sent." }),
+    { headers: JSON_HEADERS }
+  );
+  if (!email) return genericResponse;
+
+  const user = await env.DB.prepare("SELECT id, email FROM users WHERE email = ?").bind(email).first();
+  if (!user) return genericResponse;
+
+  const token = randomHex(32);
+  await env.DOCUMENT_REGISTRY.put(
+    `password-reset:${token}`,
+    JSON.stringify({ userId: user.id }),
+    { expirationTtl: PASSWORD_RESET_TTL_SECONDS }
+  );
+
+  const resetUrl = `${new URL(request.url).origin}/landing.html?resetToken=${token}`;
+  await sendEmailViaResend(
+    env,
+    user.email,
+    "Επαναφορά κωδικού - Operations Portal",
+    `Ζητήθηκε επαναφορά κωδικού για τον λογαριασμό σου.\n\nΓια να διαλέξεις νέο κωδικό, άνοιξε αυτόν τον σύνδεσμο (ισχύει για 30 λεπτά):\n${resetUrl}\n\nΑν δεν το ζήτησες εσύ, αγνόησε αυτό το email -- ο κωδικός σου παραμένει ίδιος.`
+  );
+
+  return genericResponse;
+}
+
+async function handleResetPassword(request, env) {
+  const ip = clientIp(request);
+  if (await isRateLimited(env, "reset-password", ip)) {
+    return jsonError(429, "Too many attempts. Please try again in a few minutes.");
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonError(400, "Invalid JSON body");
+  }
+  const { token, newPassword } = body;
+  if (!token) return jsonError(400, "Reset token is required");
+  if (!newPassword || newPassword.length < 8) return jsonError(400, "Password must be at least 8 characters");
+
+  const raw = await env.DOCUMENT_REGISTRY.get(`password-reset:${token}`);
+  if (!raw) {
+    await recordRateLimitAttempt(env, "reset-password", ip);
+    return jsonError(400, "This reset link is invalid or has expired.");
+  }
+  const { userId } = JSON.parse(raw);
+
+  const user = await env.DB.prepare("SELECT workspace_id, embed_id FROM users WHERE id = ?").bind(userId).first();
+  if (!user) return jsonError(400, "This reset link is invalid or has expired.");
+
+  const salt = randomHex(16);
+  const passwordHash = await hashPassword(newPassword, salt);
+  await env.DB.prepare("UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?")
+    .bind(passwordHash, salt, userId).run();
+
+  // Token μιας χρήσης -- διαγράφεται αμέσως, δεν ξαναχρησιμοποιείται.
+  await env.DOCUMENT_REGISTRY.delete(`password-reset:${token}`);
+
+  // Ασφάλεια: ένας κωδικός που μόλις άλλαξε (π.χ. επειδή διέρρευσε ο παλιός)
+  // πρέπει να ακυρώσει ΚΑΘΕ υπάρχον session αυτού του χρήστη, όχι μόνο να
+  // επιτρέψει νέο login.
+  await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId).run();
+
+  const session = await createSession(env, userId, user.workspace_id);
+  return new Response(
+    JSON.stringify({ ok: true, sessionToken: session.token, workspaceId: user.workspace_id, embedId: user.embed_id }),
+    { headers: JSON_HEADERS }
+  );
 }
 
 // Δέχεται είτε σκέτο domain ("pelatis.gr") είτε ολόκληρο URL
@@ -433,10 +579,12 @@ async function handlePatchSettings(request, env) {
 
 // Στέλνει ένα απλό transactional email μέσω Resend (https://resend.com).
 // Best-effort: ΠΟΤΕ δεν πετάει exception προς τα έξω -- μια αποτυχία στέλνοντας
-// notification δεν πρέπει ποτέ να χαλάσει την απάντηση που παίρνει ο χρήστης
-// του widget. Αν δεν έχει ρυθμιστεί ακόμα το RESEND_API_KEY secret, απλά δεν
-// στέλνει τίποτα (σιωπηλά) -- έτσι το feature είναι "add-on", όχι hard requirement.
-async function sendFallbackNotificationEmail(env, toEmail, question, workspaceId) {
+// email δεν πρέπει ποτέ να χαλάσει την απάντηση προς τον χρήστη. Αν δεν έχει
+// ρυθμιστεί ακόμα το RESEND_API_KEY secret, απλά δεν στέλνει τίποτα (σιωπηλά).
+//
+// Κοινό σημείο για ΟΛΑ τα transactional emails (fallback notification, password
+// reset) -- ένα σημείο να ρυθμίσεις/αλλάξεις τον πάροχο, όχι δύο αντίγραφα.
+async function sendEmailViaResend(env, toEmail, subject, text) {
   if (!env.RESEND_API_KEY) return;
 
   const fromEmail = env.NOTIFY_FROM_EMAIL || "notifications@example.com";
@@ -448,16 +596,20 @@ async function sendFallbackNotificationEmail(env, toEmail, question, workspaceId
         Authorization: `Bearer ${env.RESEND_API_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        from: fromEmail,
-        to: [toEmail],
-        subject: "Ο βοηθός δεν μπόρεσε να απαντήσει σε μια ερώτηση",
-        text: `Κάποιος ρώτησε κάτι που ο AI βοηθός σου δεν μπόρεσε να απαντήσει:\n\n"${question}"\n\nΜπες στο editor (καρτέλα "Unanswered questions") για να δεις όλες τις εκκρεμείς ερωτήσεις και να προσθέσεις σχετικό περιεχόμενο.\n\n(workspace: ${workspaceId})`,
-      }),
+      body: JSON.stringify({ from: fromEmail, to: [toEmail], subject, text }),
     });
   } catch (err) {
     // Σκόπιμα καταπίνουμε το error -- βλ. σχόλιο πάνω από τη function.
   }
+}
+
+async function sendFallbackNotificationEmail(env, toEmail, question, workspaceId) {
+  await sendEmailViaResend(
+    env,
+    toEmail,
+    "Ο βοηθός δεν μπόρεσε να απαντήσει σε μια ερώτηση",
+    `Κάποιος ρώτησε κάτι που ο AI βοηθός σου δεν μπόρεσε να απαντήσει:\n\n"${question}"\n\nΜπες στο editor (καρτέλα "Unanswered questions") για να δεις όλες τις εκκρεμείς ερωτήσεις και να προσθέσεις σχετικό περιεχόμενο.\n\n(workspace: ${workspaceId})`
+  );
 }
 
 // Section M: URL sync -- προσθήκη εγγράφου διαβάζοντας μια δημόσια σελίδα
@@ -2424,6 +2576,11 @@ async function handleImportGoogleDriveFiles(request, env) {
 // ποτέ μέσα στον κώδικα. Καμία session/cookie/token -- το frontend απλά
 // θυμάται την επιτυχία τοπικά (localStorage) μετά από αυτόν τον έλεγχο.
 async function handleDeveloperLogin(request, env) {
+  const ip = clientIp(request);
+  if (await isRateLimited(env, "developer-login", ip)) {
+    return new Response(JSON.stringify({ ok: false, error: "Πολλές προσπάθειες. Δοκίμασε ξανά σε λίγα λεπτά." }), { status: 429, headers: JSON_HEADERS });
+  }
+
   let body;
   try {
     body = await request.json();
@@ -2433,9 +2590,11 @@ async function handleDeveloperLogin(request, env) {
 
   const { password } = body;
   if (!env.DEVELOPER_PASSWORD || password !== env.DEVELOPER_PASSWORD) {
+    await recordRateLimitAttempt(env, "developer-login", ip);
     return new Response(JSON.stringify({ ok: false, error: "Λάθος κωδικός" }), { status: 401, headers: JSON_HEADERS });
   }
 
+  await clearRateLimit(env, "developer-login", ip);
   return new Response(JSON.stringify({ ok: true, workspaceId: PROTECTED_WORKSPACE_ID }), { headers: JSON_HEADERS });
 }
 
@@ -2464,6 +2623,14 @@ export default {
 
     if (url.pathname === "/account/logout" && request.method === "POST") {
       return handleLogout(request, env);
+    }
+
+    if (url.pathname === "/account/forgot-password" && request.method === "POST") {
+      return handleForgotPassword(request, env);
+    }
+
+    if (url.pathname === "/account/reset-password" && request.method === "POST") {
+      return handleResetPassword(request, env);
     }
 
     if (url.pathname === "/oauth/google/start" && request.method === "GET") {

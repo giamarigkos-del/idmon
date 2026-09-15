@@ -41,6 +41,19 @@
     font-weight:700;padding:7px 0;border-radius:4px;cursor:pointer;font-family:inherit;}
   .account-tabs button.active{background:var(--accent);color:var(--on-accent);}
 
+  .forgot-link{display:block;text-align:right;font-size:11.5px;color:var(--text-soft);
+    text-decoration:none;margin-top:8px;}
+  .forgot-link:hover{color:var(--accent);text-decoration:underline;}
+
+  .forgot-success{font-size:12.5px;color:var(--text-soft);line-height:1.5;
+    background:var(--surface-2);border:1px solid var(--border);border-radius:8px;
+    padding:12px 14px;display:none;}
+  .forgot-success.show{display:block;}
+
+  .legal-footer{margin-top:24px;font-size:11.5px;color:var(--text-soft);}
+  .legal-footer a{color:var(--text-soft);text-decoration:underline;}
+  .legal-footer a:hover{color:var(--accent);}
+
   /* Ίδιο .back-link στυλ με article.html/editor.html, αλλά fixed πάνω-
      αριστερά (συμμετρικό με το ήδη υπάρχον lang-toggle-fixed δεξιά) --
      αυτή η σελίδα δεν έχει top-bar, οπότε δεν υπάρχει έτοιμο container. */
@@ -85,11 +98,34 @@
       <input type="email" id="accountEmail" placeholder="you@example.com" autocomplete="email">
       <label for="accountPassword" style="margin-top:10px;" data-i18n="passwordLabel">Password</label>
       <input type="password" id="accountPassword" placeholder="••••••••" autocomplete="current-password">
+      <a href="#" class="forgot-link" id="forgotLink" data-i18n="forgotLink" style="display:none;">Forgot password?</a>
       <div class="dev-form-actions">
         <button type="button" class="submit-btn" id="accountSubmitBtn" data-i18n="signupBtn">Sign up</button>
         <button type="button" class="cancel-btn" id="accountCancelBtn" data-i18n="cancel">Cancel</button>
       </div>
       <div class="dev-error" id="accountError"></div>
+    </div>
+
+    <div class="dev-form" id="forgotForm">
+      <label for="forgotEmail" data-i18n="emailLabel">Email</label>
+      <input type="email" id="forgotEmail" placeholder="you@example.com" autocomplete="email">
+      <div class="dev-form-actions">
+        <button type="button" class="submit-btn" id="forgotSubmitBtn" data-i18n="sendResetLink">Send reset link</button>
+        <button type="button" class="cancel-btn" id="forgotCancelBtn" data-i18n="cancel">Cancel</button>
+      </div>
+      <div class="forgot-success" id="forgotSuccess" data-i18n="forgotSuccessMessage">If that email is registered, a reset link has been sent.</div>
+      <div class="dev-error" id="forgotError"></div>
+    </div>
+
+    <div class="dev-form" id="resetForm">
+      <label for="resetNewPassword" data-i18n="newPasswordLabel">New password</label>
+      <input type="password" id="resetNewPassword" placeholder="••••••••" autocomplete="new-password">
+      <label for="resetConfirmPassword" style="margin-top:10px;" data-i18n="confirmPasswordLabel">Confirm new password</label>
+      <input type="password" id="resetConfirmPassword" placeholder="••••••••" autocomplete="new-password">
+      <div class="dev-form-actions">
+        <button type="button" class="submit-btn" id="resetSubmitBtn" data-i18n="setNewPasswordBtn">Set new password</button>
+      </div>
+      <div class="dev-error" id="resetError"></div>
     </div>
 
     <div class="dev-form" id="devForm">
@@ -100,6 +136,10 @@
         <button type="button" class="cancel-btn" id="devCancelBtn" data-i18n="cancel">Cancel</button>
       </div>
       <div class="dev-error" id="devError" data-i18n="wrongPassword">Wrong password.</div>
+    </div>
+
+    <div class="legal-footer">
+      <a href="/terms.html" data-i18n="termsLink">Terms of Service</a> · <a href="/privacy.html" data-i18n="privacyLink">Privacy Policy</a>
     </div>
   </div>
 
@@ -184,6 +224,7 @@
     el("signupTabBtn").classList.toggle("active", mode === "signup");
     el("loginTabBtn").classList.toggle("active", mode === "login");
     el("accountSubmitBtn").textContent = mode === "signup" ? t("signupBtn") : t("login");
+    el("forgotLink").style.display = mode === "login" ? "block" : "none";
     el("accountError").classList.remove("show");
   }
 
@@ -243,6 +284,120 @@
   el("accountSubmitBtn").addEventListener("click", submitAccountForm);
   el("accountPassword").addEventListener("keydown", (e) => {
     if (e.key === "Enter") submitAccountForm();
+  });
+
+  // Section O: "Ξέχασα τον κωδικό" -- ξεχωριστή μικρή φόρμα (μόνο email),
+  // ΠΑΝΤΑ το ίδιο γενικό μήνυμα στο τέλος, ό,τι κι αν γράψει ο χρήστης --
+  // το backend δεν αποκαλύπτει αν το email υπάρχει.
+  el("forgotLink").addEventListener("click", (e) => {
+    e.preventDefault();
+    el("accountForm").classList.remove("show");
+    el("forgotForm").classList.add("show");
+    el("forgotSuccess").classList.remove("show");
+    el("forgotError").classList.remove("show");
+    el("forgotEmail").focus();
+  });
+
+  el("forgotCancelBtn").addEventListener("click", () => {
+    el("forgotForm").classList.remove("show");
+    el("accountForm").classList.add("show");
+    el("forgotEmail").value = "";
+  });
+
+  async function submitForgotPassword() {
+    const email = el("forgotEmail").value.trim();
+    const btn = el("forgotSubmitBtn");
+    const errorEl = el("forgotError");
+    errorEl.classList.remove("show");
+    el("forgotSuccess").classList.remove("show");
+    btn.disabled = true;
+    btn.textContent = t("checking");
+    try {
+      const res = await fetch("/account/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      btn.disabled = false;
+      btn.textContent = t("sendResetLink");
+      if (!res.ok) {
+        errorEl.textContent = data.error || t("connectionErrorPrefix");
+        errorEl.classList.add("show");
+        return;
+      }
+      el("forgotSuccess").classList.add("show");
+      el("forgotEmail").value = "";
+    } catch (err) {
+      errorEl.textContent = t("connectionErrorPrefix") + err.message;
+      errorEl.classList.add("show");
+      btn.disabled = false;
+      btn.textContent = t("sendResetLink");
+    }
+  }
+
+  el("forgotSubmitBtn").addEventListener("click", submitForgotPassword);
+  el("forgotEmail").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submitForgotPassword();
+  });
+
+  // Section O: αν το URL έχει ?resetToken=..., ο χρήστης μόλις πάτησε τον
+  // σύνδεσμο από το email -- δείξε ΜΟΝΟ τη φόρμα "νέος κωδικός", κρύψε τα
+  // πάντα άλλα (δεν έχει νόημα να ξαναδιαλέξει Developer/Guest/Account εδώ).
+  const resetToken = new URLSearchParams(window.location.search).get("resetToken");
+  if (resetToken) {
+    el("choiceGrid").style.display = "none";
+    el("resetForm").classList.add("show");
+  }
+
+  async function submitResetPassword() {
+    const newPassword = el("resetNewPassword").value;
+    const confirmPassword = el("resetConfirmPassword").value;
+    const btn = el("resetSubmitBtn");
+    const errorEl = el("resetError");
+    errorEl.classList.remove("show");
+
+    if (newPassword.length < 8) {
+      errorEl.textContent = t("passwordTooShort");
+      errorEl.classList.add("show");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      errorEl.textContent = t("passwordsDontMatch");
+      errorEl.classList.add("show");
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = t("checking");
+    try {
+      const res = await fetch("/account/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: resetToken, newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        errorEl.textContent = data.error || t("connectionErrorPrefix");
+        errorEl.classList.add("show");
+        btn.disabled = false;
+        btn.textContent = t("setNewPasswordBtn");
+        return;
+      }
+      localStorage.setItem("workspaceId", data.workspaceId);
+      localStorage.setItem("sessionToken", data.sessionToken);
+      window.location.href = "/";
+    } catch (err) {
+      errorEl.textContent = t("connectionErrorPrefix") + err.message;
+      errorEl.classList.add("show");
+      btn.disabled = false;
+      btn.textContent = t("setNewPasswordBtn");
+    }
+  }
+
+  el("resetSubmitBtn").addEventListener("click", submitResetPassword);
+  el("resetConfirmPassword").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submitResetPassword();
   });
 </script>
 </body>
