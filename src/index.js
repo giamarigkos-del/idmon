@@ -333,7 +333,7 @@ async function handleForgotPassword(request, env) {
   await sendEmailViaResend(
     env,
     user.email,
-    "Επαναφορά κωδικού - Operations Portal",
+    "Επαναφορά κωδικού - Idmon",
     `Ζητήθηκε επαναφορά κωδικού για τον λογαριασμό σου.\n\nΓια να διαλέξεις νέο κωδικό, άνοιξε αυτόν τον σύνδεσμο (ισχύει για 30 λεπτά):\n${resetUrl}\n\nΑν δεν το ζήτησες εσύ, αγνόησε αυτό το email -- ο κωδικός σου παραμένει ίδιος.`
   );
 
@@ -588,6 +588,7 @@ async function sendEmailViaResend(env, toEmail, subject, text) {
   if (!env.RESEND_API_KEY) return;
 
   const fromEmail = env.NOTIFY_FROM_EMAIL || "notifications@example.com";
+  const fromHeader = `Idmon <${fromEmail}>`;
 
   try {
     await fetch("https://api.resend.com/emails", {
@@ -596,7 +597,7 @@ async function sendEmailViaResend(env, toEmail, subject, text) {
         Authorization: `Bearer ${env.RESEND_API_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ from: fromEmail, to: [toEmail], subject, text }),
+      body: JSON.stringify({ from: fromHeader, to: [toEmail], subject, text }),
     });
   } catch (err) {
     // Σκόπιμα καταπίνουμε το error -- βλ. σχόλιο πάνω από τη function.
@@ -2604,7 +2605,7 @@ export default {
 
     if (url.pathname === "/health") {
       return new Response(
-        JSON.stringify({ status: "ok", message: "Operations Portal RAG is alive" }),
+        JSON.stringify({ status: "ok", message: "Idmon RAG is alive" }),
         { headers: JSON_HEADERS }
       );
     }
