@@ -23,6 +23,16 @@ const MAX_ANALYTICS_DAYS = 90;
 const PROTECTED_WORKSPACE_ID = "efood-ops-demo";
 const VISITOR_DOC_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 ημέρες
 
+// Section N: βασικό μηνιαίο όριο μηνυμάτων ανά workspace -- ΔΕΝ είναι ακόμα
+// επιβολή pricing tier (δεν υπάρχει ακόμα πεδίο "plan" στους λογαριασμούς,
+// βλ. decisions-and-pricing), απλά ένα φρένο κόστους: αν κάποιος (bug, bot,
+// κακόβουλη χρήση) χτυπήσει το widget πολλές φορές, δεν πληρώνουμε απεριόριστο
+// Gemini API χωρίς όριο. 3000/μήνα είναι σκόπιμα ΠΑΝΩ από το πιο ακριβό tier
+// (Pro = 2.500 μηνύματα) ώστε να μην μπλοκάρει ποτέ έναν πραγματικό πελάτη
+// μέσα στα φυσιολογικά όρια χρήσης του, μόνο ασυνήθιστη κίνηση πάνω από αυτό.
+const MONTHLY_MESSAGE_LIMIT = 3000;
+const USAGE_KEY_TTL_SECONDS = 60 * 60 * 24 * 40; // 40 μέρες -- καλύπτει τον μήνα + περιθώριο, αυτο-καθαρίζεται
+
 // Section G: ρυθμίσεις widget ανά workspace (εμφάνιση + email ειδοποίησης).
 // Αποθηκεύονται σε ΕΝΑ KV record (όχι ξεχωριστό key ανά πεδίο) ώστε να μη
 // χρειάζονται πολλαπλά reads/writes για κάτι που πάντα διαβάζεται/γράφεται μαζί.
@@ -707,6 +717,47 @@ function dateKeyFor(offsetDays) {
   return d.toISOString().slice(0, 10);
 }
 
+// Section N: επιστρέφει "YYYY-MM" σε UTC -- ίδια λογική με το dateKeyFor
+// του analytics, απλά σε επίπεδο μήνα αντί για ημέρα.
+function monthKeyFor() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+// Ελέγχει (ΚΑΙ αυξάνει, αν επιτρέπεται) τον μετρητή μηνυμάτων του μήνα για
+// αυτό το workspace. Το PROTECTED_WORKSPACE_ID (το πραγματικό demo/developer
+// workspace) εξαιρείται -- δεν είναι πελάτης προς προστασία από κόστος, το
+// ελέγχει ο ίδιος ο Giannis.
+//
+// ΣΚΟΠΙΜΑ ελέγχεται ΠΡΙΝ από οποιοδήποτε κλήση προς το Gemini API (βλ. πού
+// καλείται παρακάτω) -- αν το όριο έχει ήδη χτυπηθεί, δεν πληρώνουμε κόστος
+// embedding/generation για μια ερώτηση που έτσι κι αλλιώς θα απορριφθεί.
+//
+// Ίδιο αποδεκτό ρίσκο race condition με το recordAnalytics (KV χωρίς atomic
+// increment) -- σε πολύ σπάνιο ταυτόχρονο traffic το όριο μπορεί να ξεπεραστεί
+// κατά λίγο, αποδεκτό για ένα φρένο κόστους σε αυτή την κλίμακα.
+async function checkAndIncrementUsage(env, workspaceId) {
+  if (workspaceId === PROTECTED_WORKSPACE_ID) return { allowed: true };
+
+  // MONTHLY_MESSAGE_LIMIT_OVERRIDE: ΜΟΝΟ για τοπικά tests (μπαίνει στο
+  // .dev.vars, ποτέ στο wrangler.toml/production) -- έτσι ένα test μπορεί να
+  // ελέγξει το "χτύπημα" του ορίου με π.χ. 3 ερωτήσεις αντί για 3000
+  // πραγματικά (και ακριβά) Gemini calls.
+  const limit = env.MONTHLY_MESSAGE_LIMIT_OVERRIDE
+    ? parseInt(env.MONTHLY_MESSAGE_LIMIT_OVERRIDE, 10)
+    : MONTHLY_MESSAGE_LIMIT;
+
+  const key = `usage:${workspaceId}:${monthKeyFor()}`;
+  const raw = await env.DOCUMENT_REGISTRY.get(key);
+  const count = raw ? parseInt(raw, 10) : 0;
+
+  if (count >= limit) {
+    return { allowed: false };
+  }
+
+  await env.DOCUMENT_REGISTRY.put(key, String(count + 1), { expirationTtl: USAGE_KEY_TTL_SECONDS });
+  return { allowed: true };
+}
+
 // Best-effort, ΠΟΤΕ δεν πρέπει να μπλοκάρει ή να σπάσει την απάντηση προς
 // τον χρήστη -- ίδια φιλοσοφία με το logFallbackQuestion. ΔΕΝ αποθηκεύεται
 // το ίδιο το κείμενο της ερώτησης εδώ, μόνο μετρητές ανά ημέρα.
@@ -1375,6 +1426,11 @@ async function runQuery(env, workspaceId, question) {
     return { status: 400, body: { error: "question is required" } };
   }
 
+  const usage = await checkAndIncrementUsage(env, workspaceId);
+  if (!usage.allowed) {
+    return { status: 429, body: { error: "Monthly message limit reached for this workspace.", limitReached: true } };
+  }
+
   // Βήμα 1: embedding της ερώτησης
   const questionEmbedding = await getEmbedding(question, env.GEMINI_API_KEY);
 
@@ -1584,6 +1640,9 @@ async function handleQueryStream(request, env) {
     return jsonError(400, "Invalid JSON body");
   }
 
+  const usage = await checkAndIncrementUsage(env, workspaceId);
+  if (!usage.allowed) return jsonError(429, "Monthly message limit reached for this workspace.");
+
   const stream = buildStreamingQueryResponse(env, workspaceId, body.question);
   return new Response(stream, {
     headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache" },
@@ -1699,6 +1758,9 @@ async function handleEmbedQueryStream(request, env, embedId) {
   } catch (err) {
     return jsonError(400, "Invalid JSON body");
   }
+
+  const usage = await checkAndIncrementUsage(env, workspaceId);
+  if (!usage.allowed) return jsonError(429, "Monthly message limit reached for this workspace.");
 
   const stream = buildStreamingQueryResponse(env, workspaceId, body.question);
   return new Response(stream, {
