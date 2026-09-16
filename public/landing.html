@@ -179,7 +179,7 @@
     el("devPassword").focus();
   }
 
-  if (new URLSearchParams(window.location.search).get("developer")) {
+  if (new URLSearchParams(window.location.search).has("developer")) {
     showDevForm();
   }
 

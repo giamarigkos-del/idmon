@@ -210,6 +210,14 @@ async function test8_verifyEmailFailure() {
   assert(doc.getElementById("verifyContinueWrap").style.display === "block", "το κουμπί \"Continue\" εμφανίζεται ούτως ή άλλως (δεν κολλάει ο χρήστης)");
 }
 
+function test6b_developerFormViaBareQueryParam() {
+  console.log("\n[Το ?developer (ΧΩΡΙΣ =1) δουλεύει το ίδιο]");
+  const window = loadLandingPage({ url: "http://localhost/landing.html?developer" });
+  const doc = window.document;
+
+  assert(doc.getElementById("devForm").classList.contains("show"), "η φόρμα Developer εμφανίζεται και με ?developer χωρίς τιμή");
+}
+
 async function run() {
   test1_forgotLinkVisibility();
   await test2_forgotPasswordSubmit();
@@ -218,6 +226,7 @@ async function run() {
   await test4_resetPasswordSuccess();
   test5_developerFormHiddenByDefault();
   test6_developerFormViaHiddenUrl();
+  test6b_developerFormViaBareQueryParam();
   await test7_verifyEmailSuccess();
   await test8_verifyEmailFailure();
 
