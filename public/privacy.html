@@ -1,11 +1,12 @@
 <!--
   ΣΗΜΕΙΩΣΗ ΓΙΑ ΤΟΝ GIANNIS (δεν εμφανίζεται στους επισκέπτες):
-  Προσχέδιο βασισμένο σε πραγματική έρευνα GDPR, όχι νομική συμβουλή — χρειάζεται έλεγχο
-  από δικηγόρο πριν χρησιμοποιηθεί με πληρωμένους πελάτες. Βασίστηκε στην πραγματική
-  αρχιτεκτονική του idmon: D1 (accounts/sessions), KV (έγγραφα, 7-day TTL για guest
-  workspaces), Vectorize (embeddings), Gemini API (Google, ως υποεπεξεργαστής),
-  Resend (email), analytics = μόνο ημερήσιοι μετρητές, όχι κείμενο ερωτήσεων.
-  Account export/delete features ήδη live — αναφέρονται στην Ενότητα 7.
+  Προσχέδιο βασισμένο σε πραγματική έρευνα GDPR, όχι νομική συμβουλή —
+  χρειάζεται έλεγχο από δικηγόρο πριν χρησιμοποιηθεί με πληρωμένους πελάτες.
+  Πλήρη στοιχεία ταυτοποίησης (επωνυμία, ΑΦΜ, έδρα) πρέπει να μπουν στην
+  Ενότητα 1 μόλις ολοκληρωθεί η έναρξη στη ΔΟΥ — απαιτούνται από το Άρθρο
+  13(1)(α) ΓΚΠΔ. Δίγλωσσο, χρησιμοποιεί shared.css (design tokens, .lang-toggle,
+  .md-content) και shared.js (getLang, initLangToggle) — ίδιο μηχανισμό/εμφάνιση
+  με το υπόλοιπο site. Χρειάζεται shared.css + shared.js στον ίδιο φάκελο (public/).
 -->
 <!DOCTYPE html>
 <html lang="el">
@@ -13,29 +14,36 @@
 <meta charset="UTF-8">
 <title>Πολιτική Απορρήτου — Idmon</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="shared.css">
 <style>
-  body { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; max-width: 780px; margin: 0 auto; padding: 40px 20px 80px; line-height: 1.65; color: #1e2327; }
-  h1 { font-size: 1.7rem; margin-bottom: 0.2em; }
-  h2 { font-size: 1.2rem; margin-top: 2em; border-bottom: 1px solid #e5e5e5; padding-bottom: 0.3em; }
-  .meta { color: #666; font-size: 0.9rem; margin-bottom: 2em; }
-  .placeholder { background: #fff3cd; color: #856404; padding: 1px 6px; border-radius: 4px; font-weight: 600; }
-  .note { background: #f4f6f8; border-left: 3px solid #999; padding: 10px 14px; margin: 1.2em 0; font-size: 0.92rem; }
-  table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.93rem; }
-  th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: left; vertical-align: top; }
-  th { background: #f4f6f8; }
-  ol, ul { padding-left: 1.4em; }
-  li { margin-bottom: 0.4em; }
+  .topbar{display:flex;align-items:center;padding:16px 24px;border-bottom:1px solid var(--border);}
+  .topbar a{color:var(--text);font-weight:700;text-decoration:none;}
+  .page-wrap{max-width:780px;margin:0 auto;padding:40px 20px 80px;}
+  .meta{color:var(--text-soft);font-size:0.9rem;margin-bottom:2em;}
+  .lang-block{display:none;}
 </style>
 </head>
 <body>
+
+<div class="topbar">
+  <a href="/">idmon.app</a>
+  <div id="langToggle" class="lang-toggle">
+    <button class="lang-btn" data-lang="en">EN</button>
+    <button class="lang-btn" data-lang="el">EL</button>
+  </div>
+</div>
+
+<div class="page-wrap">
+
+<div id="content-el" class="lang-block md-content">
 
 <h1>Πολιτική Απορρήτου</h1>
 <p class="meta">Ισχύει από: 16/09/2026 · Τελευταία ενημέρωση: 16/09/2026</p>
 
 <h2>1. Υπεύθυνος Επεξεργασίας</h2>
-<p>Υπεύθυνος επεξεργασίας των δεδομένων προσωπικού χαρακτήρα που περιγράφονται παρακάτω είναι ο πάροχος της υπηρεσίας Idmon. Στοιχεία επικοινωνίας: info@idmon.app ("εμείς"). <span class="placeholder">[Πλήρη στοιχεία ταυτοποίησης (επωνυμία, ΑΦΜ, έδρα) θα προστεθούν εδώ μόλις ολοκληρωθεί η έναρξη στη ΔΟΥ — απαιτούνται από το Άρθρο 13(1)(α) ΓΚΠΔ πριν τη χρήση με πραγματικούς πελάτες.]</span></p>
+<p>Υπεύθυνος επεξεργασίας των δεδομένων προσωπικού χαρακτήρα που περιγράφονται παρακάτω είναι ο πάροχος της υπηρεσίας Idmon (idmon.app). Στοιχεία επικοινωνίας: info@idmon.app ("εμείς").</p>
 
-<div class="note">Όταν χρησιμοποιείτε το Idmon για να το ενσωματώσετε στον δικό σας ιστότοπο, εσείς (ο Πελάτης) είστε συνήθως ο <strong>Υπεύθυνος Επεξεργασίας</strong> για τα δεδομένα των δικών σας τελικών επισκεπτών/πελατών, και εμείς ενεργούμε ως <strong>Εκτελών την Επεξεργασία</strong> για λογαριασμό σας όσον αφορά αυτά τα δεδομένα. Για δεδομένα που αφορούν εσάς προσωπικά ως χρήστη του λογαριασμού (email, στοιχεία εγγραφής), ενεργούμε ως Υπεύθυνος Επεξεργασίας.</div>
+<blockquote>Όταν χρησιμοποιείτε το Idmon για να το ενσωματώσετε στον δικό σας ιστότοπο, εσείς (ο Πελάτης) είστε συνήθως ο <strong>Υπεύθυνος Επεξεργασίας</strong> για τα δεδομένα των δικών σας τελικών επισκεπτών/πελατών, και εμείς ενεργούμε ως <strong>Εκτελών την Επεξεργασία</strong> για λογαριασμό σας όσον αφορά αυτά τα δεδομένα. Για δεδομένα που αφορούν εσάς προσωπικά ως χρήστη του λογαριασμού (email, στοιχεία εγγραφής), ενεργούμε ως Υπεύθυνος Επεξεργασίας.</blockquote>
 
 <h2>2. Ποια Δεδομένα Συλλέγουμε</h2>
 <table>
@@ -106,6 +114,103 @@
 
 <h2>12. Επικοινωνία</h2>
 <p>Για ερωτήματα σχετικά με τα προσωπικά σας δεδομένα: info@idmon.app</p>
+
+</div>
+
+<div id="content-en" class="lang-block md-content">
+
+<h1>Privacy Policy</h1>
+<p class="meta">Effective from: 16/09/2026 · Last updated: 16/09/2026</p>
+
+<h2>1. Data Controller</h2>
+<p>The data controller for the personal data described below is the provider of the Idmon service (idmon.app). Contact details: info@idmon.app ("we").</p>
+
+<blockquote>When you use Idmon to embed it on your own website, you (the Customer) are typically the <strong>Data Controller</strong> for the data of your own end visitors/customers, and we act as a <strong>Data Processor</strong> on your behalf with respect to that data. For data concerning you personally as the account holder (email, signup details), we act as the Data Controller.</blockquote>
+
+<h2>2. What Data We Collect</h2>
+<table>
+<tr><th>Category</th><th>Examples</th><th>Source</th></tr>
+<tr><td>Account details</td><td>Email address, hashed password</td><td>Directly from you at signup</td></tr>
+<tr><td>Workspace content</td><td>Documents/text you upload, widget settings (bot name, color, contact details)</td><td>Directly from you</td></tr>
+<tr><td>Third-party connection data</td><td>Encrypted OAuth tokens (e.g. Google Drive), if you connect a content source</td><td>From the third-party provider, with your consent</td></tr>
+<tr><td>Usage data / analytics</td><td>Daily aggregate counters of questions and unanswered questions per workspace. <strong>We do not store the text of end users' questions</strong> in analytics.</td><td>Automatically, from widget use</td></tr>
+<tr><td>Technical data</td><td>IP address (temporarily, for rate-limiting/security), cookies/local storage for session tokens</td><td>Automatically</td></tr>
+</table>
+
+<h2>3. Purpose &amp; Legal Basis for Processing</h2>
+<ul>
+  <li><strong>Contract performance</strong> (Art. 6(1)(b) GDPR): account creation, provision of the Service, billing.</li>
+  <li><strong>Legitimate interest</strong> (Art. 6(1)(f) GDPR): security, abuse prevention (rate limiting), improving the Service via aggregate analytics.</li>
+  <li><strong>Consent</strong> (Art. 6(1)(a) GDPR): optional notification/marketing emails, if you opt in.</li>
+  <li><strong>Legal obligation</strong>: where required by tax or other legislation.</li>
+</ul>
+
+<h2>4. Use of Artificial Intelligence</h2>
+<p>To generate answers, the content of your documents and end users' questions are sent to the Gemini API of Google LLC ("Google"), which acts as a sub-processor. This processing may involve the transfer of data outside the EEA; Google is bound by the EU's Standard Contractual Clauses for such transfers. In accordance with Article 50 of the AI Act, we always inform end users, via a permanent label on the widget, that they are interacting with an artificial intelligence system.</p>
+
+<h2>5. Recipients &amp; Sub-Processors</h2>
+<table>
+<tr><th>Provider</th><th>Role</th><th>What it processes</th></tr>
+<tr><td>Cloudflare, Inc.</td><td>Hosting, database, file storage</td><td>All account and content data</td></tr>
+<tr><td>Google LLC (Gemini API)</td><td>Generating embeddings &amp; AI responses</td><td>Document content, end-user questions</td></tr>
+<tr><td>Resend</td><td>Sending emails (verification, password reset, notifications)</td><td>Email address</td></tr>
+</table>
+<p>We do not sell data to third parties for advertising purposes.</p>
+
+<h2>6. Retention Period</h2>
+<ul>
+  <li><strong>Trial workspace (guest, no account):</strong> data is automatically deleted after 7 days of inactivity.</li>
+  <li><strong>Email account:</strong> data is retained for as long as the account remains active, until you request its deletion.</li>
+  <li><strong>After account deletion:</strong> documents, embeddings, settings, usage statistics, third-party connections (with token revocation where possible), and the account itself are all deleted.</li>
+  <li><strong>Aggregate analytics:</strong> retained in anonymous/aggregate form for 12 months.</li>
+</ul>
+
+<h2>7. Your Rights</h2>
+<p>Under the GDPR, you have the right to:</p>
+<ul>
+  <li><strong>Access</strong> your data — you can download it directly in JSON format from your account settings (Export).</li>
+  <li><strong>Rectification</strong> of inaccurate data.</li>
+  <li><strong>Erasure</strong> ("right to be forgotten") — available directly from your account settings (Delete Account), with password confirmation.</li>
+  <li><strong>Portability</strong> of your data in a structured, commonly-used, machine-readable format.</li>
+  <li><strong>Object to</strong> or <strong>restrict</strong> processing, under certain conditions.</li>
+  <li><strong>Lodge a complaint</strong> with the Hellenic Data Protection Authority (ΑΠΔΠΧ, www.dpa.gr), if you believe processing violates the GDPR.</li>
+</ul>
+<p>To exercise any right not directly covered by your account settings, contact us at info@idmon.app.</p>
+
+<h2>8. Data Security</h2>
+<ul>
+  <li>Passwords are stored hashed (PBKDF2-SHA256), never in plain text.</li>
+  <li>Third-party OAuth tokens are encrypted (AES-GCM) before storage.</li>
+  <li>All communication takes place over an encrypted connection (HTTPS/TLS).</li>
+  <li>Each workspace is logically isolated from all others.</li>
+</ul>
+
+<h2>9. Cookies &amp; Local Storage</h2>
+<p>We use technically necessary cookies/local storage solely for the operation of the Service (e.g. session login token, trial workspace identifier, language preference). We do not use third-party tracking or advertising cookies.</p>
+
+<h2>10. Minors</h2>
+<p>The Service is not directed at individuals under 18 years of age, and we do not knowingly collect data from minors.</p>
+
+<h2>11. Changes to This Policy</h2>
+<p>We may update this Policy from time to time. Material changes will be announced by email or in-app notice.</p>
+
+<h2>12. Contact</h2>
+<p>For questions regarding your personal data: info@idmon.app</p>
+
+</div>
+
+</div>
+
+<script src="shared.js"></script>
+<script>
+  document.querySelectorAll('.lang-block').forEach(function(el){ el.style.display = 'none'; });
+  var activeLang = getLang();
+  var activeBlock = document.getElementById('content-' + activeLang);
+  if (activeBlock) activeBlock.style.display = 'block';
+  document.documentElement.lang = activeLang;
+  document.title = activeLang === 'el' ? 'Πολιτική Απορρήτου — Idmon' : 'Privacy Policy — Idmon';
+  initLangToggle('langToggle');
+</script>
 
 </body>
 </html>

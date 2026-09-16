@@ -1,11 +1,11 @@
 <!--
   ΣΗΜΕΙΩΣΗ ΓΙΑ ΤΟΝ GIANNIS (δεν εμφανίζεται στους επισκέπτες):
-  Αυτό είναι ένα καλά ερευνημένο ΠΡΟΣΧΕΔΙΟ, όχι νομική συμβουλή. Χρειάζεται έλεγχο από
-  πραγματικό δικηγόρο πριν χρησιμοποιηθεί με πληρωμένους πελάτες — ειδικά τα σημεία
-  [ΣΥΜΠΛΗΡΩΣΕ], ο περιορισμός ευθύνης, και η ρήτρα καταγγελίας/επιστροφών.
-  Χτίστηκε πάνω στα πραγματικά χαρακτηριστικά του idmon (βλ. rag-demo-tool repo):
-  Basic/Pro πλάνα, subprocessors (Cloudflare, Google Gemini, Resend), AI disclosure label
-  στο widget, account export/delete ήδη υλοποιημένα.
+  Καλά ερευνημένο ΠΡΟΣΧΕΔΙΟ, όχι νομική συμβουλή — χρειάζεται έλεγχο από
+  πραγματικό δικηγόρο πριν χρησιμοποιηθεί με πληρωμένους πελάτες. Η ταυτότητα
+  του παρόχου (επωνυμία/ΑΦΜ/έδρα) λείπει σκόπιμα μέχρι να ολοκληρωθεί η
+  έναρξη στη ΔΟΥ. Δίγλωσσο, χρησιμοποιεί shared.css (design tokens, .lang-toggle,
+  .md-content) και shared.js (getLang, initLangToggle) — ίδιο μηχανισμό/εμφάνιση
+  με το υπόλοιπο site. Χρειάζεται shared.css + shared.js στον ίδιο φάκελο (public/).
 -->
 <!DOCTYPE html>
 <html lang="el">
@@ -13,23 +13,33 @@
 <meta charset="UTF-8">
 <title>Όροι Χρήσης — Idmon</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="shared.css">
 <style>
-  body { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; max-width: 780px; margin: 0 auto; padding: 40px 20px 80px; line-height: 1.65; color: #1e2327; }
-  h1 { font-size: 1.7rem; margin-bottom: 0.2em; }
-  h2 { font-size: 1.2rem; margin-top: 2em; border-bottom: 1px solid #e5e5e5; padding-bottom: 0.3em; }
-  .meta { color: #666; font-size: 0.9rem; margin-bottom: 2em; }
-  .placeholder { background: #fff3cd; color: #856404; padding: 1px 6px; border-radius: 4px; font-weight: 600; }
-  .note { background: #f4f6f8; border-left: 3px solid #999; padding: 10px 14px; margin: 1.2em 0; font-size: 0.92rem; }
-  ol, ul { padding-left: 1.4em; }
-  li { margin-bottom: 0.4em; }
+  .topbar{display:flex;align-items:center;padding:16px 24px;border-bottom:1px solid var(--border);}
+  .topbar a{color:var(--text);font-weight:700;text-decoration:none;}
+  .page-wrap{max-width:780px;margin:0 auto;padding:40px 20px 80px;}
+  .meta{color:var(--text-soft);font-size:0.9rem;margin-bottom:2em;}
+  .lang-block{display:none;}
 </style>
 </head>
 <body>
 
+<div class="topbar">
+  <a href="/">idmon.app</a>
+  <div id="langToggle" class="lang-toggle">
+    <button class="lang-btn" data-lang="en">EN</button>
+    <button class="lang-btn" data-lang="el">EL</button>
+  </div>
+</div>
+
+<div class="page-wrap">
+
+<div id="content-el" class="lang-block md-content">
+
 <h1>Όροι Χρήσης</h1>
 <p class="meta">Ισχύουν από: 16/09/2026 · Τελευταία ενημέρωση: 16/09/2026</p>
 
-<div class="note">Αν δεν συμφωνείτε με κάποιον όρο, δεν θα πρέπει να χρησιμοποιείτε την Υπηρεσία.</div>
+<blockquote>Αν δεν συμφωνείτε με κάποιον όρο, δεν θα πρέπει να χρησιμοποιείτε την Υπηρεσία.</blockquote>
 
 <h2>1. Περιγραφή της Υπηρεσίας</h2>
 <p>Το Idmon είναι εργαλείο συνομιλιακού βοηθού (chatbot) που βασίζεται σε τεχνολογία Retrieval-Augmented Generation (RAG): επιτρέπει σε μια επιχείρηση ("Πελάτης") να ανεβάσει δικά της έγγραφα/περιεχόμενο και να ενσωματώσει στον ιστότοπό της ένα widget που απαντά σε ερωτήσεις επισκεπτών βάσει αυτού του περιεχομένου. Η Υπηρεσία παρέχεται "ως έχει" (βλ. Ενότητα 7).</p>
@@ -81,13 +91,95 @@
 <p>Μπορούμε να αναστείλουμε ή να τερματίσουμε την πρόσβασή σας στην Υπηρεσία σε περίπτωση παραβίασης των παρόντων Όρων, μη πληρωμής, ή παράνομης χρήσης. Κατά τη διαγραφή λογαριασμού (από εσάς ή από εμάς), τα δεδομένα του χώρου εργασίας σας διαγράφονται σύμφωνα με την Πολιτική Απορρήτου μας.</p>
 
 <h2>9. Τροποποιήσεις</h2>
-<p>Μπορούμε να τροποποιήσουμε τους παρόντες Όρους κατά καιρούς. Θα σας ενημερώνουμε για ουσιώδεις αλλαγές μέσω email ή ειδοποίησης εντός της Υπηρεσίας, τουλάχιστον <span class="placeholder">[15]</span> ημέρες πριν τεθούν σε ισχύ. Η συνέχιση χρήσης της Υπηρεσίας μετά την ισχύ αλλαγών συνιστά αποδοχή τους.</p>
+<p>Μπορούμε να τροποποιήσουμε τους παρόντες Όρους κατά καιρούς. Θα σας ενημερώνουμε για ουσιώδεις αλλαγές μέσω email ή ειδοποίησης εντός της Υπηρεσίας, τουλάχιστον 15 ημέρες πριν τεθούν σε ισχύ.</p>
 
 <h2>10. Εφαρμοστέο Δίκαιο</h2>
 <p>Οι παρόντες Όροι διέπονται από το Ελληνικό Δίκαιο και το δίκαιο της Ευρωπαϊκής Ένωσης. Αρμόδια για κάθε διαφορά ορίζονται τα Δικαστήρια της Ελλάδας, με επιφύλαξη τυχόν αναγκαστικών κανόνων προστασίας καταναλωτή.</p>
 
 <h2>11. Επικοινωνία</h2>
 <p>Για οποιαδήποτε ερώτηση σχετικά με τους παρόντες Όρους: info@idmon.app</p>
+
+</div>
+
+<div id="content-en" class="lang-block md-content">
+
+<h1>Terms of Service</h1>
+<p class="meta">Effective from: 16/09/2026 · Last updated: 16/09/2026</p>
+
+<blockquote>If you do not agree to any of these terms, you should not use the Service.</blockquote>
+
+<h2>1. Description of the Service</h2>
+<p>Idmon is a conversational assistant (chatbot) tool based on Retrieval-Augmented Generation (RAG) technology: it allows a business ("Customer") to upload its own documents/content and embed a widget on its website that answers visitor questions based on that content. The Service is provided "as is" (see Section 7).</p>
+
+<h2>2. Accounts</h2>
+<ol>
+  <li>Use beyond trial/guest access requires creating an account with an email address and password.</li>
+  <li>You are solely responsible for keeping your credentials confidential and for any activity that occurs through your account.</li>
+  <li>You must notify us immediately of any unauthorized use of your account.</li>
+  <li>You must be at least 18 years old, or authorized as the legal representative of a business, to accept these Terms.</li>
+</ol>
+
+<h2>3. Plans, Charges &amp; Cancellation</h2>
+<ol>
+  <li>The Service is offered on subscription plans (e.g. Basic, Pro), with features and usage limits (e.g. messages/month, number of documents) as described on the pricing page at the time of signup.</li>
+  <li>Billing occurs monthly, in advance, unless otherwise specified at purchase.</li>
+  <li>We may change prices or plan features, with at least 30 days' notice before this applies to an active subscription.</li>
+  <li>You may cancel your subscription at any time; cancellation takes effect at the end of the current billing period, without a pro-rated refund for the remaining time, unless otherwise required by mandatory law.</li>
+  <li>Exceeding your plan's usage limits (e.g. number of messages) may result in a temporary restriction of functionality until the period renews or the plan is upgraded.</li>
+</ol>
+
+<h2>4. Customer Content</h2>
+<ol>
+  <li>You retain full ownership and intellectual property rights over the content (documents, text, data) you upload to the Service ("Customer Content").</li>
+  <li>You grant us a non-exclusive, limited license to store, process, and generate embeddings from Customer Content solely for the purpose of providing the Service to you.</li>
+  <li>You represent that you hold all rights necessary to upload the Customer Content and that it does not infringe the rights of any third party, applicable law, or these Terms.</li>
+  <li>You may not use the Service to upload or distribute content that is unlawful, defamatory, infringes the intellectual property rights of a third party, or contains malicious code.</li>
+</ol>
+
+<h2>5. AI-Generated Content</h2>
+<ol>
+  <li>Widget responses are generated automatically by a third-party artificial intelligence model, based on the Customer Content. We always inform the end user that they are interacting with an AI system, in accordance with Article 50 of Regulation (EU) 2024/1689 (the AI Act).</li>
+  <li>Responses may contain inaccuracies or be incomplete ("hallucinations"). The Service does not replace professional, legal, medical, or financial advice.</li>
+  <li>The Customer is solely responsible for verifying the accuracy of responses before relying on them or presenting them to third parties as authoritative information, particularly for significant decisions.</li>
+</ol>
+
+<h2>6. Availability &amp; Third-Party Providers</h2>
+<p>The Service relies on infrastructure and APIs from third-party providers (including Cloudflare for hosting/databases, Google for Gemini models, and Resend for email notifications). We make reasonable efforts to maintain continuous availability, but we do not guarantee uninterrupted operation and are not liable for outages caused by these third-party providers.</p>
+
+<h2>7. Disclaimer of Warranties &amp; Limitation of Liability</h2>
+<ol>
+  <li>The Service is provided "as is" and "as available", without any express or implied warranty of fitness for a particular purpose.</li>
+  <li>To the maximum extent permitted by law, the Provider shall not be liable for indirect, incidental, special, or consequential damages, or loss of data, profits, or goodwill arising from the use or inability to use the Service.</li>
+  <li>The Provider's total liability to the Customer, for any cause, is limited to the amount the Customer paid for the Service during the 3 months preceding the event giving rise to the claim.</li>
+  <li>Nothing in these Terms limits liability that cannot be excluded under mandatory law (e.g. fraud, gross negligence, death or personal injury).</li>
+</ol>
+
+<h2>8. Termination</h2>
+<p>We may suspend or terminate your access to the Service in the event of a breach of these Terms, non-payment, or unlawful use. Upon account deletion (by you or by us), your workspace data is deleted in accordance with our Privacy Policy.</p>
+
+<h2>9. Changes</h2>
+<p>We may amend these Terms from time to time. We will notify you of material changes by email or in-app notice, at least 15 days before they take effect.</p>
+
+<h2>10. Governing Law</h2>
+<p>These Terms are governed by Greek law and the law of the European Union. The courts of Greece shall have jurisdiction over any dispute, subject to any mandatory consumer-protection rules that may apply.</p>
+
+<h2>11. Contact</h2>
+<p>For any question regarding these Terms: info@idmon.app</p>
+
+</div>
+
+</div>
+
+<script src="shared.js"></script>
+<script>
+  document.querySelectorAll('.lang-block').forEach(function(el){ el.style.display = 'none'; });
+  var activeLang = getLang();
+  var activeBlock = document.getElementById('content-' + activeLang);
+  if (activeBlock) activeBlock.style.display = 'block';
+  document.documentElement.lang = activeLang;
+  document.title = activeLang === 'el' ? 'Όροι Χρήσης — Idmon' : 'Terms of Service — Idmon';
+  initLangToggle('langToggle');
+</script>
 
 </body>
 </html>
