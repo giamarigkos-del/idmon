@@ -18,6 +18,13 @@ routes = [
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "operations-portal-rag-index"
+# Το τοπικό wrangler dev δεν υποστηρίζει καθόλου Vectorize emulation --
+# χωρίς αυτό, κάθε publish/delete εγγράφου σκάει τοπικά. Με remote = true,
+# το τοπικό dev μιλάει με το ΠΡΑΓΜΑΤΙΚΟ production index -- πρόσεξε: τα
+# test έγγραφα που δημοσιεύεις τοπικά μπαίνουν πραγματικά εκεί (γι' αυτό
+# όλα τα tests χρησιμοποιούν πάντα τυχαία/ξεχωριστά documentId, δεν
+# πειράζουν ποτέ πραγματικό περιεχόμενο).
+remote = true
 
 [[kv_namespaces]]
 binding = "DOCUMENT_REGISTRY"
