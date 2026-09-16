@@ -200,6 +200,19 @@
   .preview-actions button.btn-danger{background:none;border:1px solid var(--danger);color:var(--danger);}
   .preview-actions button.btn-danger:hover{background:var(--danger);color:var(--on-accent);}
 
+  .account-section{margin-top:28px;padding-top:18px;border-top:1px solid var(--border);}
+  .secondary-btn{border:1px solid var(--border);background:var(--surface-2);color:var(--text);
+    border-radius:6px;padding:8px 16px;font-size:13px;cursor:pointer;font-weight:600;}
+  .secondary-btn:hover{border-color:var(--accent);}
+  .danger-link{display:block;margin-top:14px;border:none;background:none;color:var(--danger);
+    font-size:12.5px;cursor:pointer;padding:0;text-decoration:underline;font-family:inherit;}
+  #deleteAccountConfirm input{margin-top:0;}
+  #deleteAccountConfirm .btn-danger{border:1px solid var(--danger);background:none;color:var(--danger);
+    border-radius:6px;padding:8px 16px;font-size:13px;cursor:pointer;font-weight:600;}
+  #deleteAccountConfirm .btn-danger:hover{background:var(--danger);color:var(--on-accent);}
+  #deleteAccountConfirm button:not(.btn-danger){border:1px solid var(--border);background:none;
+    color:var(--text-soft);border-radius:6px;padding:8px 16px;font-size:13px;cursor:pointer;}
+
   .edit-form{display:flex;flex-direction:column;gap:8px;max-width:760px;}
   .form-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;}
   .form-header .label{margin-bottom:0;}
@@ -1283,6 +1296,25 @@
 
         <button type="button" id="saveSettingsBtn" style="margin-top:20px;">${escapeHtml(t("saveSettingsBtn"))}</button>
         <div class="upload-status" id="settingsStatus"></div>
+
+        ${SESSION_TOKEN ? `
+        <div class="account-section">
+          <div class="label" style="margin-top:0;">${escapeHtml(t("accountSectionTitle"))}</div>
+          <button type="button" id="exportDataBtn" class="secondary-btn">${escapeHtml(t("exportDataBtn"))}</button>
+          <div class="upload-status" id="exportStatus"></div>
+
+          <button type="button" id="showDeleteAccountBtn" class="danger-link">${escapeHtml(t("deleteAccountBtn"))}</button>
+          <div id="deleteAccountConfirm" style="display:none;">
+            <p style="margin:10px 0 8px;font-size:12.5px;color:var(--danger);">${escapeHtml(t("deleteAccountWarning"))}</p>
+            <input type="password" id="deleteAccountPassword" placeholder="${escapeHtml(t("passwordLabel"))}" autocomplete="current-password">
+            <div style="display:flex;gap:8px;margin-top:10px;">
+              <button type="button" id="confirmDeleteAccountBtn" class="btn-danger">${escapeHtml(t("confirmDeleteAccountBtn"))}</button>
+              <button type="button" id="cancelDeleteAccountBtn">${escapeHtml(t("cancel"))}</button>
+            </div>
+            <div class="upload-status" id="deleteAccountStatus"></div>
+          </div>
+        </div>
+        ` : ""}
       </div>
     `;
 
@@ -1311,6 +1343,76 @@
       } catch (err) {
         status.textContent = t("settingsSaveErrorPrefix") + err.message;
         status.style.color = "var(--danger)";
+      }
+    });
+
+    if (!SESSION_TOKEN) return;
+
+    el("exportDataBtn").addEventListener("click", async () => {
+      const status = el("exportStatus");
+      status.textContent = t("checking");
+      status.style.color = "";
+      try {
+        const res = await fetch("/account/export", { headers: HEADERS });
+        if (!res.ok) throw new Error("export failed");
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "idmon-account-export.json";
+        a.click();
+        URL.revokeObjectURL(url);
+        status.textContent = "";
+      } catch (err) {
+        status.textContent = t("settingsSaveErrorPrefix") + err.message;
+        status.style.color = "var(--danger)";
+      }
+    });
+
+    el("showDeleteAccountBtn").addEventListener("click", () => {
+      el("deleteAccountConfirm").style.display = "block";
+      el("showDeleteAccountBtn").style.display = "none";
+    });
+
+    el("cancelDeleteAccountBtn").addEventListener("click", () => {
+      el("deleteAccountConfirm").style.display = "none";
+      el("showDeleteAccountBtn").style.display = "block";
+      el("deleteAccountPassword").value = "";
+      el("deleteAccountStatus").textContent = "";
+    });
+
+    el("confirmDeleteAccountBtn").addEventListener("click", async () => {
+      const password = el("deleteAccountPassword").value;
+      const status = el("deleteAccountStatus");
+      const btn = el("confirmDeleteAccountBtn");
+      status.textContent = "";
+      if (!password) {
+        status.textContent = t("deleteAccountPasswordRequired");
+        status.style.color = "var(--danger)";
+        return;
+      }
+      btn.disabled = true;
+      try {
+        const res = await fetch("/account/delete", {
+          method: "POST",
+          headers: HEADERS,
+          body: JSON.stringify({ password }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          status.textContent = data.error || t("settingsSaveErrorPrefix");
+          status.style.color = "var(--danger)";
+          btn.disabled = false;
+          return;
+        }
+        localStorage.removeItem("workspaceId");
+        localStorage.removeItem("sessionToken");
+        localStorage.removeItem("emailVerified");
+        window.location.href = "/landing.html";
+      } catch (err) {
+        status.textContent = t("settingsSaveErrorPrefix") + err.message;
+        status.style.color = "var(--danger)";
+        btn.disabled = false;
       }
     });
   }

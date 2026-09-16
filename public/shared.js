@@ -222,6 +222,12 @@ const TRANSLATIONS = {
     verifyBannerText: "Please verify your email address.",
     resendVerificationLink: "Resend verification email",
     verificationEmailSent: "Sent! Check your inbox.",
+    accountSectionTitle: "Account",
+    exportDataBtn: "Export my data",
+    deleteAccountBtn: "Delete my account",
+    deleteAccountWarning: "This permanently deletes your account, all documents, and settings. This cannot be undone.",
+    confirmDeleteAccountBtn: "Permanently delete",
+    deleteAccountPasswordRequired: "Enter your password to confirm.",
 
     // index.html
     indexDocTitle: "Idmon — Assistant",
@@ -448,6 +454,12 @@ const TRANSLATIONS = {
     verifyBannerText: "Παρακαλούμε επιβεβαίωσε τη διεύθυνση email σου.",
     resendVerificationLink: "Ξαναστείλε email επιβεβαίωσης",
     verificationEmailSent: "Στάλθηκε! Έλεγξε τα εισερχόμενά σου.",
+    accountSectionTitle: "Λογαριασμός",
+    exportDataBtn: "Εξαγωγή δεδομένων μου",
+    deleteAccountBtn: "Διαγραφή λογαριασμού",
+    deleteAccountWarning: "Αυτό διαγράφει μόνιμα τον λογαριασμό σου, όλα τα έγγραφα, και τις ρυθμίσεις. Δεν αναιρείται.",
+    confirmDeleteAccountBtn: "Μόνιμη διαγραφή",
+    deleteAccountPasswordRequired: "Γράψε τον κωδικό σου για επιβεβαίωση.",
 
     indexDocTitle: "Idmon — Βοηθός",
     recentDocs: "Πρόσφατα έγγραφα",

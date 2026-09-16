@@ -488,6 +488,196 @@ async function handleResendVerification(request, env) {
   return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
 }
 
+// Section P: account deletion / data export (GDPR δικαιώματα διαγραφής +
+// φορητότητας δεδομένων).
+
+// Γενικό βοηθητικό -- διαγράφει ΟΛΑ τα KV keys κάτω από ένα prefix, με
+// pagination (το list() γυρνάει το πολύ ~1000 keys ανά κλήση, χρειάζεται
+// cursor loop για workspaces με πολλά δεδομένα).
+async function deleteAllByPrefix(env, prefix) {
+  let cursor;
+  do {
+    const list = await env.DOCUMENT_REGISTRY.list({ prefix, cursor });
+    for (const key of list.keys) await env.DOCUMENT_REGISTRY.delete(key.name);
+    cursor = list.list_complete ? undefined : list.cursor;
+  } while (cursor);
+}
+
+// Πλήρης καθαρισμός ΟΛΩΝ των δεδομένων ενός workspace -- αγγίζει ΚΑΘΕ
+// σύστημα που κρατάει κάτι scoped σε αυτό το workspace: KV (έγγραφα,
+// ρυθμίσεις, analytics, usage, fallback ερωτήσεις, contradictions),
+// Vectorize (embeddings των εγγράφων), D1 (embed_domains, connections --
+// με best-effort revoke στον εξωτερικό provider πρώτα, ίδια λογική με το
+// disconnect endpoint). ΔΕΝ αγγίζει users/sessions -- αυτό είναι ευθύνη
+// του caller (handleDeleteAccount), ώστε αυτή η function να μπορεί κάποια
+// στιγμή να ξαναχρησιμοποιηθεί και για κάτι άλλο εκτός από πλήρη διαγραφή
+// λογαριασμού (π.χ. "reset workspace" χωρίς διαγραφή account).
+async function deleteAllWorkspaceData(env, workspaceId) {
+  // -- Έγγραφα + τα δικά τους vectors (χρειάζεται το chunkCount ΚΑΘΕ
+  // εγγράφου για να ξαναφτιάξει τα ίδια vector IDs, ίδιο pattern με το
+  // publish/delete/republish παραπάνω) --
+  const docPrefix = `session:${workspaceId}:doc:`;
+  let cursor;
+  do {
+    const list = await env.DOCUMENT_REGISTRY.list({ prefix: docPrefix, cursor });
+    for (const key of list.keys) {
+      const documentId = key.name.slice(docPrefix.length);
+      const raw = await env.DOCUMENT_REGISTRY.get(key.name);
+      if (raw) {
+        const doc = JSON.parse(raw);
+        if (doc.chunkCount) {
+          const idsToDelete = [];
+          for (let i = 0; i < doc.chunkCount; i++) idsToDelete.push(`${documentId}-chunk-${i}`);
+          await env.VECTORIZE.deleteByIds(idsToDelete);
+        }
+      }
+      await env.DOCUMENT_REGISTRY.delete(key.name);
+    }
+    cursor = list.list_complete ? undefined : list.cursor;
+  } while (cursor);
+
+  // -- Υπόλοιπα KV δεδομένα scoped στο workspace --
+  await deleteAllByPrefix(env, `session:${workspaceId}:contradiction:`);
+  await deleteAllByPrefix(env, `session:${workspaceId}:fallback:`);
+  await deleteAllByPrefix(env, `analytics:${workspaceId}:`);
+  await deleteAllByPrefix(env, `usage:${workspaceId}:`);
+  await env.DOCUMENT_REGISTRY.delete(`workspace:${workspaceId}:settings`);
+  await env.DOCUMENT_REGISTRY.delete(`session:${workspaceId}:notify-cooldown`);
+
+  // -- Συνδέσεις τρίτων (π.χ. Google Drive) -- best-effort revoke στον
+  // πάροχο πρώτα, ίδια λογική με το handleDisconnectGoogleDrive.
+  const connections = await env.DB.prepare(
+    "SELECT provider, refresh_token FROM connections WHERE workspace_id = ?"
+  ).bind(workspaceId).all();
+  for (const conn of connections.results || []) {
+    if (conn.provider === "google_drive") {
+      try {
+        const refreshToken = await decryptToken(conn.refresh_token, env.TOKEN_ENCRYPTION_KEY);
+        await fetch("https://oauth2.googleapis.com/revoke", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ token: refreshToken }),
+        });
+      } catch (err) {
+        // Best-effort -- η διαγραφή προχωράει ούτως ή άλλως.
+      }
+    }
+  }
+  await env.DB.prepare("DELETE FROM connections WHERE workspace_id = ?").bind(workspaceId).run();
+  await env.DB.prepare("DELETE FROM embed_domains WHERE workspace_id = ?").bind(workspaceId).run();
+}
+
+// GET /account/export -- κατεβάζει ΟΛΑ τα δεδομένα του λογαριασμού σε ένα
+// JSON αρχείο (δικαίωμα φορητότητας). ΔΕΝ περιλαμβάνει raw analytics/usage
+// counters ή contradiction/fallback logs -- αυτά είναι λειτουργικά logs,
+// όχι περιεχόμενο που "ανήκει" στον χρήστη· η εξαγωγή εστιάζει σε ό,τι
+// πραγματικά δημιούργησε/ρύθμισε ο ίδιος: στοιχεία λογαριασμού, έγγραφα,
+// ρυθμίσεις widget, allow-listed domains.
+async function handleExportAccountData(request, env) {
+  const sessionToken = request.headers.get("X-Session-Token");
+  if (!sessionToken) return jsonError(401, "Not logged in");
+  const session = await env.DB.prepare(
+    "SELECT user_id, workspace_id, expires_at FROM sessions WHERE token = ?"
+  ).bind(sessionToken).first();
+  if (!session || new Date(session.expires_at) <= new Date()) return jsonError(401, "Session expired");
+
+  const user = await env.DB.prepare("SELECT email, created_at FROM users WHERE id = ?").bind(session.user_id).first();
+  if (!user) return jsonError(401, "Not logged in");
+
+  const workspaceId = session.workspace_id;
+  const docPrefix = `session:${workspaceId}:doc:`;
+  const documents = [];
+  let cursor;
+  do {
+    const list = await env.DOCUMENT_REGISTRY.list({ prefix: docPrefix, cursor });
+    for (const key of list.keys) {
+      const raw = await env.DOCUMENT_REGISTRY.get(key.name);
+      if (raw) {
+        const doc = JSON.parse(raw);
+        documents.push({
+          documentId: key.name.slice(docPrefix.length),
+          title: doc.title || null,
+          status: doc.status || null,
+          fullText: doc.fullText || null,
+          sourceUrl: doc.sourceUrl || null,
+          updatedAt: doc.updatedAt || null,
+          publishedAt: doc.publishedAt || null,
+        });
+      }
+    }
+    cursor = list.list_complete ? undefined : list.cursor;
+  } while (cursor);
+
+  const settings = await getWorkspaceSettings(env, workspaceId);
+  const domainsResult = await env.DB.prepare(
+    "SELECT domain, created_at FROM embed_domains WHERE workspace_id = ?"
+  ).bind(workspaceId).all();
+
+  const exportData = {
+    exportedAt: new Date().toISOString(),
+    account: { email: user.email, createdAt: user.created_at },
+    widgetSettings: settings,
+    embedDomains: (domainsResult.results || []).map((r) => ({ domain: r.domain, addedAt: r.created_at })),
+    documents,
+  };
+
+  return new Response(JSON.stringify(exportData, null, 2), {
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Disposition": 'attachment; filename="idmon-account-export.json"',
+    },
+  });
+}
+
+// POST /account/delete -- ΜΟΝΙΜΗ διαγραφή. Απαιτεί επανάληψη του κωδικού
+// (standard πρακτική πριν από κάθε καταστροφική ενέργεια -- προστασία από
+// π.χ. κλεμμένο/ξεχασμένο ανοιχτό session σε κοινόχρηστο υπολογιστή).
+async function handleDeleteAccount(request, env) {
+  const ip = clientIp(request);
+  if (await isRateLimited(env, "delete-account", ip)) {
+    return jsonError(429, "Too many attempts. Please try again in a few minutes.");
+  }
+
+  const sessionToken = request.headers.get("X-Session-Token");
+  if (!sessionToken) return jsonError(401, "Not logged in");
+  const session = await env.DB.prepare(
+    "SELECT user_id, workspace_id, expires_at FROM sessions WHERE token = ?"
+  ).bind(sessionToken).first();
+  if (!session || new Date(session.expires_at) <= new Date()) return jsonError(401, "Session expired");
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonError(400, "Invalid JSON body");
+  }
+  const { password } = body;
+  if (!password) return jsonError(400, "Password confirmation is required");
+
+  const user = await env.DB.prepare(
+    "SELECT password_hash, password_salt FROM users WHERE id = ?"
+  ).bind(session.user_id).first();
+  if (!user) return jsonError(401, "Not logged in");
+
+  const valid = await verifyPassword(password, user.password_salt, user.password_hash);
+  if (!valid) {
+    await recordRateLimitAttempt(env, "delete-account", ip);
+    return jsonError(401, "Incorrect password");
+  }
+
+  const workspaceId = session.workspace_id;
+  // Διπλός έλεγχος ασφαλείας -- το πραγματικό demo/developer workspace δεν
+  // είναι account-based, δεν θα έπρεπε καν να φτάσει εδώ, αλλά καλύτερα να
+  // μην υπάρχει ΚΑΝΕΝΑ σενάριο όπου διαγράφεται κατά λάθος.
+  if (workspaceId === PROTECTED_WORKSPACE_ID) return jsonError(400, "This workspace cannot be deleted");
+
+  await deleteAllWorkspaceData(env, workspaceId);
+  await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(session.user_id).run();
+  await env.DB.prepare("DELETE FROM users WHERE id = ?").bind(session.user_id).run();
+
+  return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
+}
+
 // Δέχεται είτε σκέτο domain ("pelatis.gr") είτε ολόκληρο URL
 // ("https://www.pelatis.gr/"), και επιστρέφει πάντα το ίδιο, καθαρό
 // αποτέλεσμα ("www.pelatis.gr"). Ο χρήστης δεν χρειάζεται να ξέρει ποια
@@ -2752,6 +2942,14 @@ export default {
 
     if (url.pathname === "/account/resend-verification" && request.method === "POST") {
       return handleResendVerification(request, env);
+    }
+
+    if (url.pathname === "/account/export" && request.method === "GET") {
+      return handleExportAccountData(request, env);
+    }
+
+    if (url.pathname === "/account/delete" && request.method === "POST") {
+      return handleDeleteAccount(request, env);
     }
 
     if (url.pathname === "/oauth/google/start" && request.method === "GET") {
