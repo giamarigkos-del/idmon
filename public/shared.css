@@ -9,6 +9,16 @@
 body{margin:0;font-family:-apple-system,"Segoe UI",Inter,sans-serif;background:var(--bg);color:var(--text);}
 input,textarea,button{font-family:inherit;}
 
+/* Λεπτή, διακριτική μπάρα κύλισης (σαν resend.com/claude.ai) αντί για την
+   χοντρή προεπιλογή του browser -- ισχύει παντού αφού είναι στο shared.css.
+   Firefox: scrollbar-width/color. Chrome/Edge/Safari: ::-webkit-scrollbar. */
+*{scrollbar-width:thin;scrollbar-color:var(--border) transparent;}
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px;border:2px solid var(--bg);
+  background-clip:padding-box;}
+::-webkit-scrollbar-thumb:hover{background:var(--text-soft);background-clip:padding-box;}
+
 /* Κοινά στυλ για οποιοδήποτε σημείο δείχνει το πλήρες (markdown -> HTML)
    κείμενο ενός εγγράφου: δημόσιο άρθρο, read-only preview στο editor,
    live preview στο editing. Μία πηγή αλήθειας για την εμφάνιση. */
