@@ -339,6 +339,7 @@
       <div class="sidebar-section">
         <button class="new-doc-btn" id="newDocBtn" data-i18n="newDoc">+ New document</button>
         <button class="new-doc-btn" id="addFromUrlBtn" style="margin-top:6px;background:var(--surface-2);" data-i18n="addFromUrlBtn">🔗 Add from URL</button>
+        <button class="new-doc-btn" id="uploadFileBtn" style="margin-top:6px;background:var(--surface-2);" data-i18n="uploadFileBtn">📤 Upload file</button>
         <!-- Section O: κρυμμένο προσωρινά -- το drive.readonly scope είναι
              "restricted" στη Google, χρειάζεται πληρωμένο ετήσιο CASA
              security assessment για πλήρες verification (βλ. συζήτηση).
@@ -1056,6 +1057,79 @@
   }
 
   el("addFromUrlBtn").addEventListener("click", renderAddFromUrlPanel);
+
+  // Section P: upload αρχείου (.txt/.md/.pdf) -- ΙΔΙΟ μοτίβο με το Add from
+  // URL (draft πρώτα, ο πελάτης ελέγχει πριν δημοσιεύσει). Ένα σημείο
+  // προσοχής: το FormData request ΔΕΝ πρέπει να έχει Content-Type header
+  // (το βάζει μόνο του ο browser, με το σωστό multipart boundary) -- γι'
+  // αυτό εδώ φτιάχνουμε custom headers χωρίς το "Content-Type" του κοινού
+  // HEADERS, αντί να το χρησιμοποιήσουμε απευθείας όπως παντού αλλού.
+  function renderUploadFilePanel() {
+    if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
+    currentSelectedId = null;
+    const main = el("mainPanel");
+    main.innerHTML = `
+      <div class="edit-form" style="max-width:480px;">
+        <h2 style="margin:0 0 4px;font-size:16px;">${escapeHtml(t("uploadFileTitle"))}</h2>
+        <p style="margin:0 0 20px;font-size:13px;color:var(--text-soft);">${escapeHtml(t("uploadFileIntro"))}</p>
+
+        <div class="label" style="margin-top:0;">${escapeHtml(t("fileLabel"))}</div>
+        <input type="file" id="uploadFileInput" accept=".txt,.md,.pdf">
+
+        <div class="label">${escapeHtml(t("titleOptionalLabel"))}</div>
+        <input type="text" id="uploadFileTitleInput" placeholder="${escapeHtml(t("titleOptionalPlaceholder"))}">
+
+        <button type="button" id="uploadFileSubmitBtn" style="margin-top:20px;">${escapeHtml(t("uploadFileSubmitBtn"))}</button>
+        <div class="upload-status" id="uploadFileStatus"></div>
+      </div>
+    `;
+
+    el("uploadFileSubmitBtn").addEventListener("click", async () => {
+      const fileInput = el("uploadFileInput");
+      const titleValue = el("uploadFileTitleInput").value.trim();
+      const status = el("uploadFileStatus");
+      status.textContent = "";
+
+      const file = fileInput.files[0];
+      if (!file) {
+        status.textContent = t("fileRequiredError");
+        status.style.color = "var(--danger)";
+        return;
+      }
+
+      const btn = el("uploadFileSubmitBtn");
+      btn.disabled = true;
+      btn.textContent = t("uploadingFile");
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        if (titleValue) formData.append("title", titleValue);
+
+        const uploadHeaders = {
+          "X-Workspace-Id": WORKSPACE_ID,
+          ...(SESSION_TOKEN ? { "X-Session-Token": SESSION_TOKEN } : {}),
+        };
+
+        const res = await fetch("/upload-file", {
+          method: "POST",
+          headers: uploadHeaders,
+          body: formData,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "unknown error");
+        await loadDocuments();
+        openPreview(data.documentId);
+      } catch (err) {
+        status.textContent = t("uploadFileErrorPrefix") + err.message;
+        status.style.color = "var(--danger)";
+        btn.disabled = false;
+        btn.textContent = t("uploadFileSubmitBtn");
+      }
+    });
+  }
+
+  el("uploadFileBtn").addEventListener("click", renderUploadFilePanel);
 
   // Section N: εισαγωγή από Google Drive -- σύνδεση OAuth (αν δεν υπάρχει
   // ήδη) και λίστα Google Docs/Sheets με checkboxes για εισαγωγή. Κάθε

@@ -137,6 +137,22 @@ function hexToBuffer(hex) {
   return bytes.buffer;
 }
 
+// Section P: file upload (.txt/.md/.pdf). Χρειαζόμαστε base64 encoding ενός
+// ArrayBuffer για να στείλουμε PDF bytes στο Gemini ως inlineData -- το
+// btoa() δουλεύει μόνο πάνω σε string, όχι απευθείας σε bytes, και το
+// naive String.fromCharCode(...bytes) σκάει σε μεγάλα αρχεία (υπερβαίνει το
+// όριο ορισμάτων της JS engine). Επεξεργασία σε chunks των 8KB αποφεύγει
+// αυτό το πρόβλημα.
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 8192;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
 // crypto.getRandomValues -- κρυπτογραφικά ασφαλές RNG, διαθέσιμο native στο
 // Workers runtime. Χρησιμοποιείται ΚΑΙ για salts ΚΑΙ για session tokens.
 function randomHex(byteLength) {
@@ -1045,6 +1061,43 @@ async function getEmbedding(text, apiKey) {
   return data.embedding.values;
 }
 
+// Section P: εξαγωγή κειμένου από PDF μέσω του native document understanding
+// του Gemini (inlineData, application/pdf) -- η ΙΔΙΑ γενική δυνατότητα που
+// χρησιμοποιεί ήδη το Invoice Extractor (Tool #3) για την ανάγνωση
+// τιμολογίων, εδώ σε ολόκληρα έγγραφα/πολιτικές. Επιβεβαιωμένο ότι δουλεύει
+// σε όλη την οικογένεια μοντέλων Gemini μέσω generateContent (όχι κάτι
+// αποκλειστικό σε συγκεκριμένη έκδοση) -- χρησιμοποιούμε το ίδιο
+// gemini-3.6-flash με το askGemini(), όχι ξεχωριστό μοντέλο μόνο γι' αυτό.
+// Το Gemini δέχεται inline PDF data μέχρι 20MB συνολικού request -- το δικό
+// μας MAX_UPLOAD_BYTES (2MB) είναι ήδη πολύ πιο αυστηρό, οπότε δεν
+// χρειάζεται ξεχωριστός έλεγχος εδώ.
+async function extractTextFromPdfViaGemini(pdfBytes, apiKey) {
+  const prompt = "Μετέγραψε ΟΛΟΚΛΗΡΟ το περιεχόμενο αυτού του εγγράφου σε απλό κείμενο (plain text). Διατήρησε τη δομή (επικεφαλίδες, λίστες, παραγράφους) όσο πιο πιστά γίνεται, αλλά ΧΩΡΙΣ markdown συμβολισμό -- μόνο το κείμενο, γραμμή προς γραμμή, όπως θα το διάβαζε ένας άνθρωπος. Μην προσθέσεις δικό σου σχόλιο, περίληψη, ή εισαγωγή -- μόνο την ίδια τη μεταγραφή.";
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { inlineData: { mimeType: "application/pdf", data: arrayBufferToBase64(pdfBytes) } },
+            { text: prompt },
+          ],
+        }],
+      }),
+    }
+  );
+
+  const data = await response.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    throw new Error("Gemini PDF extraction failed: " + JSON.stringify(data));
+  }
+  return text;
+}
+
 async function askGemini(context, question, apiKey) {
   const prompt = `Απάντησε στην ερώτηση χρησιμοποιώντας ΜΟΝΟ τις παρακάτω πληροφορίες. Αν η απάντηση δεν βρίσκεται στις πληροφορίες, πες ότι δεν γνωρίζεις. Απάντησε στην ίδια γλώσσα με την ερώτηση.
 
@@ -1607,6 +1660,105 @@ async function handleUploadFromUrl(request, env) {
       updatedAt: new Date().toISOString(),
       volatility: null,
       sourceUrl: parsedUrl.toString(),
+      fullText: text,
+      status: "draft",
+      expiresAt,
+    }),
+    putOptions
+  );
+
+  return new Response(
+    JSON.stringify({ ok: true, documentId, title, wordCount }),
+    { headers: JSON_HEADERS }
+  );
+}
+
+// Section P: φτιάχνει ΝΕΟ έγγραφο από ένα ανεβασμένο αρχείο (.txt/.md/.pdf).
+// ΙΔΙΑ πολιτική draft-πρώτα με το URL sync (Section M) και τα χειροκίνητα
+// uploads (Section D) -- ο πελάτης ελέγχει το εξαγμένο κείμενο πριν το
+// δημοσιεύσει, καμία κλήση Vectorize εδώ.
+//
+// .txt/.md: διαβάζεται απευθείας, καμία εξωτερική κλήση.
+// .pdf: extractTextFromPdfViaGemini() -- native document understanding του
+// Gemini, ίδια δυνατότητα με το Invoice Extractor (Tool #3).
+// .docx και άλλα: ΔΕΝ υποστηρίζονται ακόμα (planned, βλ. cloudflare-docx-parser
+// -- βρέθηκε φτιαγμένο ειδικά για Workers, θα προστεθεί σε επόμενο γύρο).
+async function handleUploadFile(request, env) {
+  const workspaceId = await resolveWorkspaceId(request, env);
+  if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
+
+  let formData;
+  try {
+    formData = await request.formData();
+  } catch (err) {
+    return jsonError(400, "Expected multipart/form-data with a 'file' field");
+  }
+
+  const file = formData.get("file");
+  if (!file || typeof file.arrayBuffer !== "function") {
+    return jsonError(400, "file is required");
+  }
+
+  const titleOverride = (formData.get("title") || "").toString().trim();
+  const filename = file.name || "document";
+  const extension = (filename.split(".").pop() || "").toLowerCase();
+
+  const SUPPORTED_EXTENSIONS = ["txt", "md", "pdf"];
+  if (!SUPPORTED_EXTENSIONS.includes(extension)) {
+    return jsonError(
+      400,
+      `Unsupported file type ".${extension}". Currently supported: ${SUPPORTED_EXTENSIONS.map(e => "." + e).join(", ")}.`
+    );
+  }
+
+  // Έλεγχος μεγέθους ΠΡΙΝ οποιαδήποτε επεξεργασία -- ειδικά σημαντικό για
+  // .pdf, ώστε να μη σπαταλάμε μια (σχετικά ακριβή) κλήση Gemini σε αρχείο
+  // που θα απορριπτόταν ούτως ή άλλως.
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return jsonError(
+      400,
+      `Το αρχείο ξεπερνά το επιτρεπτό όριο (μέγιστο 2MB). Το αρχείο έχει ${(file.size / 1024 / 1024).toFixed(2)}MB.`
+    );
+  }
+
+  let text;
+  try {
+    if (extension === "pdf") {
+      const pdfBytes = await file.arrayBuffer();
+      text = await extractTextFromPdfViaGemini(pdfBytes, env.GEMINI_API_KEY);
+    } else {
+      text = await file.text();
+    }
+  } catch (err) {
+    return jsonError(400, "Could not read the file: " + err.message);
+  }
+
+  if (!text || text.split(/\s+/).filter(Boolean).length < 10) {
+    return jsonError(400, "Could not extract enough readable text from this file");
+  }
+
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  const byteSize = new TextEncoder().encode(text).length;
+  if (wordCount > MAX_UPLOAD_WORDS || byteSize > MAX_UPLOAD_BYTES) {
+    return jsonError(
+      400,
+      `Το αρχείο έχει πολύ περιεχόμενο (μέγιστο ${MAX_UPLOAD_WORDS} λέξεις ή 2MB). Έχει ${wordCount} λέξεις.`
+    );
+  }
+
+  const title = titleOverride || filename.replace(/\.[^.]+$/, "");
+  const documentId = slugifyForDocId(title);
+
+  const { putOptions, expiresAt } = await docTtlFor(env, workspaceId);
+  const kvKey = `session:${workspaceId}:doc:${documentId}`;
+  await env.DOCUMENT_REGISTRY.put(
+    kvKey,
+    JSON.stringify({
+      title,
+      chunkCount: 0,
+      updatedAt: new Date().toISOString(),
+      volatility: null,
+      sourceUrl: null,
       fullText: text,
       status: "draft",
       expiresAt,
@@ -3102,6 +3254,10 @@ export default {
 
     if (url.pathname === "/upload-from-url" && request.method === "POST") {
       return handleUploadFromUrl(request, env);
+    }
+
+    if (url.pathname === "/upload-file" && request.method === "POST") {
+      return handleUploadFile(request, env);
     }
 
     if (url.pathname === "/documents" && request.method === "GET") {
