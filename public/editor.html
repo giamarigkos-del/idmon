@@ -277,13 +277,27 @@
 
   /* Σε στενές οθόνες, το sidebar (σταθερό πλάτος) σπρώχνει το main panel
      εκτός οθόνης -- εδώ το κύριο panel πάει ΚΑΤΩ από το sidebar αντί
-     να εξαφανίζεται. */
+     να εξαφανίζεται.
+     ΔΙΟΡΘΩΘΗΚΕ, Σεπτέμβριος 2026 (βρέθηκε σε ζωντανή χρήση σε κινητό): η
+     παραπάνω περιγραφή ήταν η αρχική πρόθεση, αλλά είχε δύο πραγματικά
+     προβλήματα. (1) Σειρά: το .main -- το ΠΡΑΓΜΑΤΙΚΟ εργαλείο διαχείρισης
+     εγγράφων (λίστα με edit/delete/publish ανά έγγραφο) -- ερχόταν ΜΕΤΑ από
+     ολόκληρο το sidebar (compact λίστα + find-by-description + test
+     question + unanswered + contradictions), θάβοντας την κύρια δουλειά
+     κάτω από δευτερεύοντα utility panels. Τώρα το .main έρχεται πρώτο.
+     (2) Μέγεθος: το desktop layout βασίζεται σε ΔΥΟ ανεξάρτητα
+     scrollable panels μέσα σε σταθερό ύψος (.layout{flex:1;min-height:0},
+     .sidebar/.main{overflow-y:auto}) -- σωστό για desktop, αλλά στο
+     κινητό αυτό στρίμωχνε το .main σε ένα μικροσκοπικό δικό του κουτί
+     (ό,τι απέμενε από το σταθερό ύψος αφού το ψηλό sidebar έπαιρνε τον
+     χώρο του). Τώρα και τα δύο panels παίρνουν το φυσικό τους ύψος και η
+     ΙΔΙΑ η σελίδα κυλάει κανονικά, σαν παντού αλλού στο site. */
   @media (max-width: 900px){
     .layout{flex-direction:column;}
-    .sidebar{width:100%;border-left:none;border-bottom:1px solid var(--border);order:1;}
-    .main{order:2;}
+    .main{order:1;flex:none;overflow-y:visible;padding:20px;}
+    .sidebar{width:100%;border-left:none;border-top:1px solid var(--border);
+      order:2;flex-shrink:0;overflow-y:visible;}
     .sidebar-section.grow{max-height:280px;}
-    .main{padding:20px;}
 
     /* Το top-bar είχε σταθερό ύψος (56px) και ΧΩΡΙΣ flex-wrap -- σε στενό
        κινητό, τα κουμπιά/εικονίδια (⚙ 🔗 📊 EN/GR) ξεχείλιζαν αθόρυβα εκτός
