@@ -98,18 +98,24 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // βιβλιοθήκη δεν χρειάζεται.
 //
 // PBKDF2_ITERATIONS είναι ο αριθμός που παίρνουν ΝΕΟΙ hashes από εδώ και
-// πέρα (νέο signup, ή αλλαγή password) -- το τρέχον OWASP recommendation για
-// PBKDF2-SHA256 είναι ~600.000 (το παλιό 100.000 ήταν λειτουργικό αλλά
-// ξεπερασμένο). ΔΕΝ μπορούμε απλά να αλλάξουμε αυτόν τον αριθμό και να
-// αφήσουμε τους παλιούς hashes ως έχουν -- το ίδιο password με διαφορετικό
-// αριθμό iterations βγάζει ΔΙΑΦΟΡΕΤΙΚΟ hash, άρα θα έσπαγε το login για κάθε
-// υπάρχοντα λογαριασμό. Γι' αυτό ο πραγματικός αριθμός iterations κάθε
-// χρήστη αποθηκεύεται τώρα ξεχωριστά στη στήλη users.password_iterations
-// (migration 0005) -- οι παλιοί λογαριασμοί κρατάνε το δικό τους 100.000,
-// οι καινούργιοι/όσοι αλλάξουν password παίρνουν το νέο, υψηλότερο νούμερο.
-// Βρέθηκε σε πλήρες audit, Σεπτέμβριος 2026.
-const PBKDF2_ITERATIONS = 600000;
-const LEGACY_PBKDF2_ITERATIONS = 100000; // για hashes από πριν το migration 0005
+// πέρα (νέο signup, ή αλλαγή password).
+//
+// ΣΗΜΑΝΤΙΚΟ, βρέθηκε σε ζωντανό crash, Σεπτέμβριος 2026: το Cloudflare
+// Workers WebCrypto ΔΕΝ υποστηρίζει PBKDF2 πάνω από 100.000 iterations --
+// καθόλου, ανεξάρτητα από CPU time limit. Ρητό, μόνιμο όριο της
+// πλατφόρμας: "NotSupportedError: Pbkdf2 failed: iteration counts above
+// 100000 are not supported". Δοκιμάστηκε αρχικά 600.000 (το τρέχον OWASP
+// recommendation για PBKDF2-SHA256 γενικά, σε άλλα runtimes), αλλά αυτό
+// έσπαγε ΚΑΘΕ signup/password-reset αμέσως, 100% αναπαραγώγιμο -- όχι
+// περιστασιακό πρόβλημα. Η στήλη users.password_iterations (migration
+// 0005) και η υποδομή για διαφορετικό αριθμό ανά χρήστη παραμένουν χρήσιμα
+// -- αν το Cloudflare ποτέ ανεβάσει αυτό το όριο, μπορούμε να ανεβάσουμε
+// ξανά το PBKDF2_ITERATIONS με ασφάλεια, χωρίς να σπάσει το login των
+// ήδη υπαρχόντων λογαριασμών. Προς το παρόν, 100.000 είναι ήδη το ανώτατο
+// όριο που επιτρέπει η ίδια η πλατφόρμα -- δεν υπάρχει περιθώριο βελτίωσης
+// εδώ χωρίς να αλλάξει το ίδιο το Cloudflare Workers WebCrypto.
+const PBKDF2_ITERATIONS = 100000;
+const LEGACY_PBKDF2_ITERATIONS = 100000; // ίδιο νούμερο προς το παρόν -- βλ. σχόλιο παραπάνω
 const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 ημέρες
 
 // Section I: embed layer (domain allow-list).

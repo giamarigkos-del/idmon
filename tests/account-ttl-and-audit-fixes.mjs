@@ -9,14 +9,12 @@
 //   #4 Restore validation -- POST /document/{id}/restore πρέπει να
 //      απορρίπτει έγγραφα που δεν είναι ήδη "deleted".
 //
-// ΔΕΝ ελέγχει το #5 (PBKDF2 password_iterations) εδώ -- αυτό χρειάζεται ένα
-// υπάρχον λογαριασμό με το ΠΑΛΙΟ (100000) iterations count ήδη αποθηκευμένο
-// στη D1 για να δοκιμαστεί σωστά το backward-compat path, κάτι που δεν
-// μπορεί να δημιουργηθεί μέσω του δημόσιου API (κάθε νέο signup παίρνει
-// αυτόματα το νέο 600000). Αν θες να το δοκιμάσεις χειροκίνητα: κάνε ένα
-// νέο signup, μετά wrangler d1 execute --local ... "UPDATE users SET
-// password_iterations = 100000 WHERE email = '...'", και επιβεβαίωσε ότι το
-// login ΣΥΝΕΧΙΖΕΙ να δουλεύει κανονικά.
+// ΔΕΝ ελέγχει το #5 (PBKDF2 password_iterations) εδώ -- η στήλη υπάρχει για
+// μελλοντική χρήση (αν το Cloudflare Workers WebCrypto ποτέ ανεβάσει το
+// σκληρό όριο των 100.000 iterations), αλλά αυτή τη στιγμή PBKDF2_ITERATIONS
+// και LEGACY_PBKDF2_ITERATIONS είναι ήδη το ίδιο νούμερο (100.000, το
+// ανώτατο που επιτρέπει η πλατφόρμα) -- τίποτα πρακτικό να δοκιμαστεί εδώ
+// προς το παρόν.
 //
 // Πώς τρέχει:
 //   1. wrangler dev
