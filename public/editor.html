@@ -2028,7 +2028,22 @@
         headers: HEADERS,
         body: JSON.stringify({ question }),
       });
-      const data = await res.json();
+
+      // Δύο ξεχωριστά σημεία αποτυχίας εδώ, και τα δύο ΠΡΕΠΕΙ να δείχνουν
+      // καθαρό, ανθρώπινο μήνυμα -- ποτέ ωμό τεχνικό κείμενο στον χρήστη
+      // (π.χ. το δικό της JS parse error "Unexpected token '<'..." αν το
+      // backend γυρίσει σελίδα λάθους HTML αντί για JSON). Βρέθηκε σε
+      // ζωντανή χρήση, Σεπτέμβριος 2026.
+      let data;
+      try {
+        data = await res.json();
+      } catch (parseErr) {
+        throw new Error(t("testQGenericErrorMessage"));
+      }
+      if (!res.ok) {
+        throw new Error(data.error || t("testQGenericErrorMessage"));
+      }
+
       renderTestQResult(data);
       // Ο agent μόλις κατέγραψε αυτό το ερώτημα ως fallback (αν ήταν) --
       // ανανεώνουμε τη λίστα ώστε να το δεις αμέσως, χωρίς χειροκίνητο κλικ.
