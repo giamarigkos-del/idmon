@@ -10,11 +10,18 @@
 -- φτιαγμένο ρητά για να είναι δημόσιο -- μπαίνει μέσα στο <script> tag που
 -- θα βλέπει ο καθένας αν κάνει view-source στο site του πελάτη. Ο Worker
 -- το μεταφράζει εσωτερικά σε workspace_id.
+-- ΣΗΜΕΙΩΣΗ συντήρησης: αυτό το αρχείο είναι το πλήρες, τρέχον schema για
+-- φρέσκο τοπικό setup (π.χ. νέο wrangler dev D1). Η production D1 φτάνει
+-- στο ίδιο σημείο μέσω των migrations/*.sql, ένα-ένα, με σειρά. Κάθε φορά
+-- που προστίθεται νέα migration, το ίδιο σχήμα πρέπει να αντικατοπτρίζεται
+-- και ΕΔΩ -- τα δύο αρχεία συντηρούνται χειροκίνητα παράλληλα, κανένα
+-- αυτόματο sync. Σημειώθηκε σε πλήρες audit, Σεπτέμβριος 2026.
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   password_salt TEXT NOT NULL,
+  password_iterations INTEGER NOT NULL DEFAULT 100000,
   workspace_id TEXT UNIQUE NOT NULL,
   embed_id TEXT UNIQUE NOT NULL,
   email_verified INTEGER NOT NULL DEFAULT 0,

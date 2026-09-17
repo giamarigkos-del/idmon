@@ -12,7 +12,13 @@
 <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
 <style>
-  html,body{height:100%;}
+  html,body{height:100%;overflow-x:hidden;}
+  /* overflow-x:hidden: δεύτερη γραμμή άμυνας -- αν κάτι (π.χ. ένα flex
+     container χωρίς wrap) ξεχειλίσει σε στενή οθόνη, ΔΕΝ κάνει ολόκληρη τη
+     σελίδα οριζόντια scrollable (το πρόβλημα που φάνηκε ζωντανά σε κινητό,
+     Σεπτέμβριος 2026 -- το top-bar ξεχείλιζε και τραβούσε μαζί του και το
+     υπόλοιπο περιεχόμενο). Η κύρια διόρθωση είναι το flex-wrap στο
+     .top-bar παρακάτω· αυτό εδώ είναι απλά ασφάλεια για το μέλλον. */
   body{display:flex;flex-direction:column;}
 
   .top-bar{height:56px;flex-shrink:0;background:var(--surface);border-bottom:1px solid var(--border);
@@ -278,6 +284,15 @@
     .main{order:2;}
     .sidebar-section.grow{max-height:280px;}
     .main{padding:20px;}
+
+    /* Το top-bar είχε σταθερό ύψος (56px) και ΧΩΡΙΣ flex-wrap -- σε στενό
+       κινητό, τα κουμπιά/εικονίδια (⚙ 🔗 📊 EN/GR) ξεχείλιζαν αθόρυβα εκτός
+       οθόνης προς τα δεξιά αντί να τυλιχτούν σε δεύτερη γραμμή, χωρίς καν
+       ορατή ένδειξη οριζόντιου scroll. Βρέθηκε σε ζωντανή χρήση σε κινητό,
+       Σεπτέμβριος 2026. Εδώ επιτρέπουμε δεύτερη γραμμή αντί για ξεχείλισμα,
+       και μικραίνουμε λίγο το padding/gap ώστε να χωράει πιο άνετα. */
+    .top-bar{height:auto;min-height:56px;flex-wrap:wrap;padding:10px 12px;gap:8px;}
+    .top-bar-right{flex-wrap:wrap;gap:8px;}
   }
 </style>
 </head>
@@ -1036,6 +1051,21 @@
   </svg>`;
   el("googleDriveBtn").innerHTML = GOOGLE_DRIVE_ICON + escapeHtml(t("googleDriveBtn"));
 
+  // Χτίζει το URL για το /oauth/google/start. Για πραγματικούς λογαριασμούς
+  // (SESSION_TOKEN υπάρχει) στέλνουμε το session_token -- το backend το
+  // επικυρώνει στη D1 και βρίσκει το ΣΩΣΤΟ workspace μόνο του, δεν εμπιστεύεται
+  // ό,τι raw workspace_id θα μπορούσε να γράψει κάποιος στο URL. Για
+  // Guest/Developer (χωρίς λογαριασμό) συνεχίζουμε με το raw workspace_id,
+  // όπως πριν -- backward compatible, ίδιο σκεπτικό με το resolveWorkspaceId
+  // στο backend. Διορθώθηκε σε πλήρες audit, Σεπτέμβριος 2026 (πριν έστελνε
+  // πάντα raw workspace_id, χωρίς κανέναν έλεγχο ιδιοκτησίας στο backend).
+  function googleDriveOAuthStartUrl() {
+    const param = SESSION_TOKEN
+      ? "session_token=" + encodeURIComponent(SESSION_TOKEN)
+      : "workspace_id=" + encodeURIComponent(WORKSPACE_ID);
+    return "/oauth/google/start?" + param;
+  }
+
   let driveFilesCache = [];
   let driveSelectedIds = new Set();
   let driveConnectedEmail = null;
@@ -1077,7 +1107,7 @@
       el("googleDriveConnectBtn").addEventListener("click", () => {
         // Top-level navigation (ΟΧΙ fetch) -- ο browser πρέπει να πλοηγηθεί
         // κανονικά ώστε να δουλέψει το OAuth redirect flow προς τη Google.
-        navigateTo("/oauth/google/start?workspace_id=" + encodeURIComponent(WORKSPACE_ID));
+        navigateTo(googleDriveOAuthStartUrl());
       });
       return;
     }
@@ -1144,7 +1174,7 @@
     el("googleDriveImportBtn").addEventListener("click", runGoogleDriveImport);
 
     el("googleDriveChangeAccountBtn").addEventListener("click", () => {
-      navigateTo("/oauth/google/start?workspace_id=" + encodeURIComponent(WORKSPACE_ID));
+      navigateTo(googleDriveOAuthStartUrl());
     });
 
     el("googleDriveDisconnectBtn").addEventListener("click", async () => {

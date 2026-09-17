@@ -65,6 +65,12 @@ function buildHarness(fetchImpl) {
     function timeAgo(iso) { return "2 days ago"; }
     var HEADERS = { "Content-Type": "application/json", "X-Workspace-Id": "ws-test" };
     var WORKSPACE_ID = "ws-test";
+    // null -- στο πραγματικό shared.js αυτό είναι localStorage.getItem("sessionToken"),
+    // που είναι null για το Guest/Developer flow (χωρίς λογαριασμό) που καλύπτει
+    // αυτό ακριβώς το test suite. Χρειάζεται εδώ μετά το audit fix στο
+    // googleDriveOAuthStartUrl(), που διαβάζει το SESSION_TOKEN για να αποφασίσει
+    // αν θα στείλει session_token ή workspace_id στο /oauth/google/start.
+    var SESSION_TOKEN = null;
     var tuiEditorInstance = null;
     var currentSelectedId = null;
     function loadDocuments() { return window.__loadDocuments(); }

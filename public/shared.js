@@ -14,19 +14,35 @@
 // ρητά μια global σημαία (window.__IS_LANDING_PAGE__ = true) ΠΡΙΝ φορτώσει
 // το shared.js -- καμία εξάρτηση από το πώς μοιάζει το URL.
 //
-// Επιπλέον, ασφάλεια δεύτερου επιπέδου: αν παρ' όλα αυτά κάτι προσπαθήσει να
-// ανακατευθύνει ξανά μέσα στο ίδιο tab χωρίς ποτέ να αποκτήσει workspaceId,
-// σταματάμε μετά την πρώτη προσπάθεια αντί να μπούμε σε άπειρο βρόχο.
+// Επιπλέον σημείωση: παλιότερα υπήρχε εδώ και ΔΕΥΤΕΡΟ επίπεδο ασφάλειας --
+// ένα flag στο sessionStorage που σταματούσε το redirect μετά την πρώτη
+// προσπάθεια μέσα στο ίδιο tab, "για κάθε ενδεχόμενο". Αφαιρέθηκε: αντί να
+// προστατεύει από κάτι, δημιουργούσε το δικό του πραγματικό bug -- αν ο
+// επισκέπτης ξαναγύριζε στη ρίζα (π.χ. πλοήγηση πίσω, bookmark, νέο
+// πληκτρολόγημα του URL) μέσα στο ίδιο tab ΧΩΡΙΣ ποτέ να έχει αποκτήσει
+// workspaceId, το flag ήταν ήδη σημειωμένο και ΔΕΝ ξανάκανε redirect --
+// έμενε "κολλημένος" στο index.html, με WORKSPACE_ID null, δείχνοντας άδειο
+// "no documents" αντί να τον στείλει στη landing page. Βρέθηκε σε ζωντανή
+// χρήση, Σεπτέμβριος 2026. Η πρωτεύουσα προστασία (__IS_LANDING_PAGE__,
+// παραπάνω) είναι αρκετή από μόνη της -- δεν χρειάζεται δεύτερο επίπεδο.
+//
+// __SKIP_WORKSPACE_REDIRECT__: ξεχωριστό, γενικότερο flag από το
+// __IS_LANDING_PAGE__ -- για σελίδες που ΔΕΝ είναι η landing page αλλά ΔΕΝ
+// χρειάζονται ποτέ κανένα workspace (π.χ. terms.html, privacy.html, καθαρά
+// στατικό/δημόσιο περιεχόμενο, όχι ειδικό ανά-workspace). Χωρίς αυτό, ένας
+// πρωτοεπισκέπτης που φτάνει απευθείας σε /terms.html (π.χ. από email,
+// footer link, πριν καν διαλέξει Guest/Account) ανακατευθυνόταν στη landing
+// page αντί να δει τους όρους. Βρέθηκε σε ζωντανή χρήση, Σεπτέμβριος 2026,
+// αμέσως μετά την αφαίρεση του παραπάνω sessionStorage guard -- το guard
+// έκρυβε εν μέρει αυτό το ίδιο πρόβλημα κατά τύχη (η δεύτερη επίσκεψη σε
+// terms.html στο ίδιο tab έδειχνε σωστά, επειδή το flag είχε ήδη
+// "καταναλωθεί" από κάποιο προηγούμενο redirect, όχι επίτηδες).
 function resolveWorkspaceId() {
   const stored = localStorage.getItem("workspaceId");
   if (stored) return stored;
 
-  if (window.__IS_LANDING_PAGE__) return null;
+  if (window.__IS_LANDING_PAGE__ || window.__SKIP_WORKSPACE_REDIRECT__) return null;
 
-  const alreadyRedirected = sessionStorage.getItem("landingRedirectAttempted");
-  if (alreadyRedirected) return null;
-
-  sessionStorage.setItem("landingRedirectAttempted", "1");
   window.location.href = "/landing.html";
   return null;
 }
@@ -132,7 +148,16 @@ function formatAnswer(text) {
 function renderMarkdown(text) {
   if (!text) return "";
   const html = marked.parse(text);
-  return typeof DOMPurify !== "undefined" ? DOMPurify.sanitize(html) : html;
+  if (typeof DOMPurify === "undefined") {
+    // Fail CLOSED, όχι ανοιχτά: αν το DOMPurify CDN δεν φόρτωσε (δίκτυο,
+    // ad-blocker, firewall), ΔΕΝ δείχνουμε το ακατέργαστο, μη-καθαρισμένο
+    // HTML του marked.js (το marked δεν κάνει sanitize μόνο του -- θα ήταν
+    // πιθανό XSS, ειδικά σε περιεχόμενο από URL sync/Google Drive import,
+    // όχι πλήρως ελεγμένη πηγή). Δείχνουμε απλό, escaped κείμενο αντί για
+    // μορφοποιημένο. Βρέθηκε σε πλήρες audit, Σεπτέμβριος 2026.
+    return escapeHtml(text).replace(/\n/g, "<br>");
+  }
+  return DOMPurify.sanitize(html);
 }
 
 // Παράγει τεχνικό documentId από τον τίτλο -- ο editor δεν χρειάζεται ποτέ

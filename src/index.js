@@ -95,10 +95,21 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Section H: λογαριασμοί πελατών + sessions (D1).
 //
 // PBKDF2 μέσω του ενσωματωμένου Web Crypto του Workers -- καμία εξωτερική
-// βιβλιοθήκη δεν χρειάζεται. 100.000 iterations είναι ένα λογικό,
-// αναγνωρισμένο standard (NIST recommends >=10.000, εδώ είμαστε πιο
-// συντηρητικοί).
-const PBKDF2_ITERATIONS = 100000;
+// βιβλιοθήκη δεν χρειάζεται.
+//
+// PBKDF2_ITERATIONS είναι ο αριθμός που παίρνουν ΝΕΟΙ hashes από εδώ και
+// πέρα (νέο signup, ή αλλαγή password) -- το τρέχον OWASP recommendation για
+// PBKDF2-SHA256 είναι ~600.000 (το παλιό 100.000 ήταν λειτουργικό αλλά
+// ξεπερασμένο). ΔΕΝ μπορούμε απλά να αλλάξουμε αυτόν τον αριθμό και να
+// αφήσουμε τους παλιούς hashes ως έχουν -- το ίδιο password με διαφορετικό
+// αριθμό iterations βγάζει ΔΙΑΦΟΡΕΤΙΚΟ hash, άρα θα έσπαγε το login για κάθε
+// υπάρχοντα λογαριασμό. Γι' αυτό ο πραγματικός αριθμός iterations κάθε
+// χρήστη αποθηκεύεται τώρα ξεχωριστά στη στήλη users.password_iterations
+// (migration 0005) -- οι παλιοί λογαριασμοί κρατάνε το δικό τους 100.000,
+// οι καινούργιοι/όσοι αλλάξουν password παίρνουν το νέο, υψηλότερο νούμερο.
+// Βρέθηκε σε πλήρες audit, Σεπτέμβριος 2026.
+const PBKDF2_ITERATIONS = 600000;
+const LEGACY_PBKDF2_ITERATIONS = 100000; // για hashes από πριν το migration 0005
 const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 ημέρες
 
 // Section I: embed layer (domain allow-list).
@@ -128,7 +139,7 @@ function randomHex(byteLength) {
   return bufferToHex(bytes.buffer);
 }
 
-async function hashPassword(password, saltHex) {
+async function hashPassword(password, saltHex, iterations = PBKDF2_ITERATIONS) {
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(password),
@@ -137,7 +148,7 @@ async function hashPassword(password, saltHex) {
     ["deriveBits"]
   );
   const derivedBits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt: hexToBuffer(saltHex), iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    { name: "PBKDF2", salt: hexToBuffer(saltHex), iterations, hash: "SHA-256" },
     keyMaterial,
     256
   );
@@ -154,8 +165,8 @@ function timingSafeEqual(a, b) {
   return diff === 0;
 }
 
-async function verifyPassword(password, saltHex, expectedHashHex) {
-  const actualHashHex = await hashPassword(password, saltHex);
+async function verifyPassword(password, saltHex, expectedHashHex, iterations = LEGACY_PBKDF2_ITERATIONS) {
+  const actualHashHex = await hashPassword(password, saltHex, iterations);
   return timingSafeEqual(actualHashHex, expectedHashHex);
 }
 
@@ -222,7 +233,7 @@ async function handleSignup(request, env) {
   if (existing) return jsonError(409, "An account with this email already exists");
 
   const salt = randomHex(16);
-  const passwordHash = await hashPassword(password, salt);
+  const passwordHash = await hashPassword(password, salt); // χρησιμοποιεί το τρέχον PBKDF2_ITERATIONS
   const workspaceId = `ws-${randomHex(12)}`;
   // Ξεχωριστό από το workspaceId ρητά -- αυτό είναι το ΜΟΝΟ αναγνωριστικό
   // που επιτρέπεται να εμφανίζεται σε δημόσιο <script> tag (βλ. Section I).
@@ -230,8 +241,8 @@ async function handleSignup(request, env) {
   const createdAt = new Date().toISOString();
 
   const result = await env.DB.prepare(
-    "INSERT INTO users (email, password_hash, password_salt, workspace_id, embed_id, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-  ).bind(email, passwordHash, salt, workspaceId, embedId, createdAt).run();
+    "INSERT INTO users (email, password_hash, password_salt, password_iterations, workspace_id, embed_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).bind(email, passwordHash, salt, PBKDF2_ITERATIONS, workspaceId, embedId, createdAt).run();
 
   const session = await createSession(env, result.meta.last_row_id, workspaceId);
 
@@ -264,7 +275,7 @@ async function handleLogin(request, env) {
   if (!email || !password) return jsonError(400, "Email and password are required");
 
   const user = await env.DB.prepare(
-    "SELECT id, password_hash, password_salt, workspace_id, embed_id, email_verified FROM users WHERE email = ?"
+    "SELECT id, password_hash, password_salt, password_iterations, workspace_id, embed_id, email_verified FROM users WHERE email = ?"
   ).bind(email).first();
 
   // Το ΙΔΙΟ γενικό μήνυμα λάθους είτε δεν υπάρχει το email είτε το password
@@ -275,7 +286,11 @@ async function handleLogin(request, env) {
     return jsonError(401, "Invalid email or password");
   }
 
-  const valid = await verifyPassword(password, user.password_salt, user.password_hash);
+  // password_iterations: NULL για λογαριασμούς από πριν το migration 0005
+  // (η στήλη έχει DEFAULT 100000 στη D1, αλλά είμαστε ρητοί εδώ αντί να
+  // βασιστούμε σιωπηλά σε αυτό).
+  const iterations = user.password_iterations || LEGACY_PBKDF2_ITERATIONS;
+  const valid = await verifyPassword(password, user.password_salt, user.password_hash, iterations);
   if (!valid) {
     await recordRateLimitAttempt(env, "login", ip);
     return jsonError(401, "Invalid email or password");
@@ -399,9 +414,12 @@ async function handleResetPassword(request, env) {
   if (!user) return jsonError(400, "This reset link is invalid or has expired.");
 
   const salt = randomHex(16);
+  // Νέο password -> νέο hash με το τρέχον (υψηλότερο) PBKDF2_ITERATIONS,
+  // ανεξάρτητα με τι είχε ο λογαριασμός πριν -- κάθε reset αναβαθμίζει
+  // αυτόματα και τον αριθμό iterations.
   const passwordHash = await hashPassword(newPassword, salt);
-  await env.DB.prepare("UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?")
-    .bind(passwordHash, salt, userId).run();
+  await env.DB.prepare("UPDATE users SET password_hash = ?, password_salt = ?, password_iterations = ? WHERE id = ?")
+    .bind(passwordHash, salt, PBKDF2_ITERATIONS, userId).run();
 
   // Token μιας χρήσης -- διαγράφεται αμέσως, δεν ξαναχρησιμοποιείται.
   await env.DOCUMENT_REGISTRY.delete(`password-reset:${token}`);
@@ -655,11 +673,12 @@ async function handleDeleteAccount(request, env) {
   if (!password) return jsonError(400, "Password confirmation is required");
 
   const user = await env.DB.prepare(
-    "SELECT password_hash, password_salt FROM users WHERE id = ?"
+    "SELECT password_hash, password_salt, password_iterations FROM users WHERE id = ?"
   ).bind(session.user_id).first();
   if (!user) return jsonError(401, "Not logged in");
 
-  const valid = await verifyPassword(password, user.password_salt, user.password_hash);
+  const iterations = user.password_iterations || LEGACY_PBKDF2_ITERATIONS;
+  const valid = await verifyPassword(password, user.password_salt, user.password_hash, iterations);
   if (!valid) {
     await recordRateLimitAttempt(env, "delete-account", ip);
     return jsonError(401, "Incorrect password");
@@ -762,11 +781,30 @@ async function handlePatchEmbedDomains(request, env) {
 // το inbox του πελάτη με ένα email ανά ερώτηση.
 const NOTIFY_COOLDOWN_SECONDS = 60 * 60; // 1 ώρα
 
+// Ελέγχει αν αυτό το workspace ανήκει σε πραγματικό, εγγεγραμμένο λογαριασμό
+// (users.workspace_id) -- σε αντίθεση με έναν ανώνυμο Guest, που δεν έχει
+// καμία γραμμή στο users table, μόνο ένα τυχαίο localStorage ID.
+async function isRealAccountWorkspace(env, workspaceId) {
+  const row = await env.DB.prepare(
+    "SELECT id FROM users WHERE workspace_id = ?"
+  ).bind(workspaceId).first();
+  return !!row;
+}
+
 // Επιστρέφει τα options που πρέπει να περάσουν στο env.DOCUMENT_REGISTRY.put(),
-// και το ισοδύναμο expiresAt (για να το δείχνουμε στο frontend), ανάλογα με
-// το αν το workspace είναι το προστατευμένο ή όχι.
-function docTtlFor(workspaceId) {
+// και το ισοδύναμο expiresAt (για να το δείχνουμε στο frontend). ΤΡΕΙΣ
+// κατηγορίες workspace, όχι δύο: το προστατευμένο demo workspace ΚΑΙ κάθε
+// πραγματικός λογαριασμός (Account) δεν λήγουν ΠΟΤΕ -- μόνο οι ανώνυμοι
+// Guest επισκέπτες παίρνουν την προσωρινή λήξη 7 ημερών. Πριν αυτή η
+// function δεν ήξερε καν ότι υπάρχουν πραγματικοί λογαριασμοί (γράφτηκε πριν
+// το Section H) -- πραγματικοί πελάτες έχαναν έγγραφα μετά από 7 μέρες
+// αδράνειας, αντίθετα με το "permanent workspace" που υπόσχεται το landing
+// page. Βρέθηκε σε πλήρες audit, Σεπτέμβριος 2026.
+async function docTtlFor(env, workspaceId) {
   if (workspaceId === PROTECTED_WORKSPACE_ID) {
+    return { putOptions: {}, expiresAt: null };
+  }
+  if (await isRealAccountWorkspace(env, workspaceId)) {
     return { putOptions: {}, expiresAt: null };
   }
   return {
@@ -873,7 +911,7 @@ async function handlePatchSettings(request, env) {
   // Ίδια πολιτική TTL με τα υπόλοιπα δεδομένα του workspace: το προστατευμένο
   // demo workspace δεν λήγει ποτέ, οι επισκέπτες παίρνουν 7 ημέρες που
   // ανανεώνονται αυτόματα σε κάθε save.
-  const { putOptions } = docTtlFor(workspaceId);
+  const { putOptions } = await docTtlFor(env, workspaceId);
   await env.DOCUMENT_REGISTRY.put(`workspace:${workspaceId}:settings`, JSON.stringify(current), putOptions);
 
   return new Response(JSON.stringify(current), { headers: JSON_HEADERS });
@@ -1416,7 +1454,7 @@ async function handleCompareDocuments(request, env) {
   // Ίδια πολιτική λήξης με τα ίδια τα έγγραφα (docTtlFor) -- ΟΧΙ το σύντομο
   // fallback TTL. Ένα εύρημα αντίφασης είναι πραγματικό, χρήσιμο περιεχόμενο
   // που μπορεί να θες να κρατήσεις μέχρι να το λύσεις, όχι "θόρυβος".
-  const { putOptions, expiresAt } = docTtlFor(workspaceId);
+  const { putOptions, expiresAt } = await docTtlFor(env, workspaceId);
   const savedFindings = [];
 
   for (const finding of rawFindings) {
@@ -1553,7 +1591,7 @@ async function handleUploadFromUrl(request, env) {
   const title = (body.title || "").trim() || extractTitleFromHtml(html) || parsedUrl.hostname;
   const documentId = slugifyForDocId(title);
 
-  const { putOptions, expiresAt } = docTtlFor(workspaceId);
+  const { putOptions, expiresAt } = await docTtlFor(env, workspaceId);
   const kvKey = `session:${workspaceId}:doc:${documentId}`;
   await env.DOCUMENT_REGISTRY.put(
     kvKey,
@@ -1659,7 +1697,7 @@ async function handleUpload(request, env) {
   // Το chunking παραπάνω παραμένει ξεχωριστό και χρησιμεύει ΜΟΝΟ για
   // embeddings/αναζήτηση -- ποτέ πια δεν το χρησιμοποιούμε για να δείξουμε
   // κείμενο σε άνθρωπο.
-  const { putOptions, expiresAt } = docTtlFor(workspaceId);
+  const { putOptions, expiresAt } = await docTtlFor(env, workspaceId);
   await env.DOCUMENT_REGISTRY.put(
     kvKey,
     JSON.stringify({
@@ -2342,7 +2380,7 @@ async function handleRefreshFromUrl(request, env, documentId) {
     doc.chunkCount = chunks.length;
   }
 
-  const { putOptions, expiresAt } = docTtlFor(workspaceId);
+  const { putOptions, expiresAt } = await docTtlFor(env, workspaceId);
   doc.expiresAt = expiresAt;
   await env.DOCUMENT_REGISTRY.put(kvKey, JSON.stringify(doc), putOptions);
 
@@ -2397,7 +2435,7 @@ async function handlePublishDocument(request, env, documentId) {
   doc.chunkCount = chunks.length;
   doc.publishedAt = new Date().toISOString();
 
-  const { putOptions, expiresAt } = docTtlFor(workspaceId);
+  const { putOptions, expiresAt } = await docTtlFor(env, workspaceId);
   doc.expiresAt = expiresAt;
   await env.DOCUMENT_REGISTRY.put(kvKey, JSON.stringify(doc), putOptions);
 
@@ -2438,7 +2476,7 @@ async function handleDeleteDocument(request, env, documentId) {
   doc.status = "deleted";
   doc.chunkCount = 0;
 
-  const { putOptions, expiresAt } = docTtlFor(workspaceId);
+  const { putOptions, expiresAt } = await docTtlFor(env, workspaceId);
   doc.expiresAt = expiresAt;
   await env.DOCUMENT_REGISTRY.put(kvKey, JSON.stringify(doc), putOptions);
 
@@ -2470,9 +2508,22 @@ async function handleRestoreDocument(request, env, documentId) {
   }
 
   const doc = JSON.parse(raw);
+
+  // Μόνο πραγματικά διαγραμμένα έγγραφα μπορούν να γίνουν restore. Χωρίς
+  // αυτό τον έλεγχο, ένα POST απευθείας στο endpoint (όχι μέσω editor.html,
+  // που δείχνει το κουμπί μόνο για status "deleted") θα μπορούσε να γυρίσει
+  // ένα ήδη-published έγγραφο σε "draft" κατά λάθος, χάνοντας το δημοσιευμένο
+  // status του χωρίς προειδοποίηση. Βρέθηκε σε πλήρες audit, Σεπτέμβριος 2026.
+  if (doc.status !== "deleted") {
+    return new Response(
+      JSON.stringify({ error: "Only deleted documents can be restored" }),
+      { status: 400, headers: JSON_HEADERS }
+    );
+  }
+
   doc.status = "draft";
 
-  const { putOptions, expiresAt } = docTtlFor(workspaceId);
+  const { putOptions, expiresAt } = await docTtlFor(env, workspaceId);
   doc.expiresAt = expiresAt;
   await env.DOCUMENT_REGISTRY.put(kvKey, JSON.stringify(doc), putOptions);
 
@@ -2506,11 +2557,38 @@ const GOOGLE_DRIVE_SCOPE_REQUIRED = "https://www.googleapis.com/auth/drive.reado
 const GOOGLE_DRIVE_SCOPE =
   `${GOOGLE_DRIVE_SCOPE_REQUIRED} openid email`;
 
-async function handleOAuthGoogleStart(request, env) {
+// Ειδική εκδοχή του resolveWorkspaceId() για ΑΥΤΟ το ένα endpoint: το
+// /oauth/google/start ανοίγει με πραγματική πλοήγηση browser (όχι fetch),
+// άρα δεν μπορεί να στείλει το X-Session-Token header -- ο μόνος τρόπος να
+// περάσει έγκυρο session είναι μέσω query param. ΠΟΤΕ δεν εμπιστευόμαστε
+// απευθείας ένα raw workspace_id σε αυτό το endpoint όταν υπάρχει
+// session_token -- κάνουμε το ΙΔΙΟ D1 lookup με το resolveWorkspaceId, ώστε
+// να μην μπορεί κάποιος να "δέσει" τη δική του σύνδεση Google Drive σε
+// workspace άλλου απλά γράφοντας ένα workspace_id που έμαθε/μάντεψε.
+//
+// Χωρίς session_token (Guest/Developer flow, χωρίς λογαριασμό), συνεχίζουμε
+// να εμπιστευόμαστε το raw workspace_id -- ίδιο backward-compatible σκεπτικό
+// με το resolveWorkspaceId. Βρέθηκε σε πλήρες audit, Σεπτέμβριος 2026: πριν
+// αυτή τη διόρθωση, ΚΑΘΕ /oauth/google/start δεχόταν οποιοδήποτε workspace_id
+// χωρίς κανέναν έλεγχο.
+async function resolveWorkspaceIdForOAuthStart(request, env) {
   const url = new URL(request.url);
-  const workspaceId = url.searchParams.get("workspace_id");
+  const sessionToken = url.searchParams.get("session_token");
+  if (sessionToken) {
+    const row = await env.DB.prepare(
+      "SELECT workspace_id, expires_at FROM sessions WHERE token = ?"
+    ).bind(sessionToken).first();
+    if (!row) return null;
+    if (new Date(row.expires_at) <= new Date()) return null;
+    return row.workspace_id;
+  }
+  return url.searchParams.get("workspace_id");
+}
+
+async function handleOAuthGoogleStart(request, env) {
+  const workspaceId = await resolveWorkspaceIdForOAuthStart(request, env);
   if (!workspaceId) {
-    return jsonError(400, "Missing workspace_id query parameter");
+    return jsonError(400, "Missing or invalid session_token/workspace_id query parameter");
   }
 
   const state = randomHex(16);
@@ -2850,7 +2928,7 @@ async function handleImportGoogleDriveFiles(request, env) {
 
     const title = file.name || "Χωρίς τίτλο";
     const documentId = slugifyForDocId(title);
-    const { putOptions, expiresAt } = docTtlFor(workspaceId);
+    const { putOptions, expiresAt } = await docTtlFor(env, workspaceId);
     const kvKey = `session:${workspaceId}:doc:${documentId}`;
 
     await env.DOCUMENT_REGISTRY.put(

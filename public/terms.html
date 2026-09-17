@@ -170,6 +170,13 @@
 
 </div>
 
+<script>
+  // Το terms.html δεν χρειάζεται ΠΟΤΕ κάποιο workspace -- καθαρά δημόσιο,
+  // στατικό περιεχόμενο. Χωρίς αυτό, ένας πρωτοεπισκέπτης χωρίς αποθηκευμένο
+  // workspaceId ανακατευθυνόταν στη landing page αντί να δει τους όρους.
+  // Βρέθηκε σε ζωντανή χρήση, Σεπτέμβριος 2026.
+  window.__SKIP_WORKSPACE_REDIRECT__ = true;
+</script>
 <script src="shared.js"></script>
 <script>
   document.querySelectorAll('.lang-block').forEach(function(el){ el.style.display = 'none'; });
