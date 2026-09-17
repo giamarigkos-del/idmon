@@ -704,6 +704,13 @@
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || t("notFoundDefault"));
       await loadDocuments();
+      // Χωρίς αυτό, το ήδη ανοιχτό κεντρικό "All documents" panel
+      // (renderDocBrowser -- ξεχωριστό render από τη compact sidebar
+      // λίστα) έμενε με παλιά δεδομένα μέχρι να το ξανα-ανοίξεις χειροκίνητα
+      // -- το restore φαινόταν σαν να "μην έπιασε" ενώ στην πραγματικότητα
+      // δούλευε κανονικά στο backend. Ίδιο pattern με το delete παραπάνω.
+      // Βρέθηκε σε ζωντανή χρήση, Σεπτέμβριος 2026.
+      renderDocBrowser();
     } catch (err) {
       alert(t("restoreErrorPrefix") + err.message);
     }
