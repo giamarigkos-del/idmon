@@ -165,6 +165,8 @@
     try {
       const res = await fetch("/documents", { headers: HEADERS });
       const data = await res.json();
+      // Section D: ο απλός χρήστης βλέπει ΜΟΝΟ δημοσιευμένα έγγραφα -- τα
+      // πρόχειρα/διαγραμμένα υπάρχουν μόνο στο editor.
       const documents = (data.documents || []).filter(d => d.status === "published");
 
       if (!documents.length) {
@@ -223,8 +225,7 @@
   // Section Q: μήνυμα προς τον ΤΕΛΙΚΟ επισκέπτη όταν ο πελάτης-ιδιοκτήτης
   // έχει εξαντλήσει το μηνιαίο του όριο μηνυμάτων. Σκόπιμα γενικό (καμία
   // αναφορά σε "όριο", "πλάνο", ή Idmon) -- μόνο τα στοιχεία επικοινωνίας
-  // που έχει ήδη δηλώσει ο ίδιος ο πελάτης (Section J, human handoff),
-  // όπως είχε συμφωνηθεί.
+  // που έχει ήδη δηλώσει ο ίδιος ο πελάτης (Section J, human handoff).
   function showLimitReachedMessage(botDiv) {
     let html = escapeHtml(t("limitReachedMessage"));
     if (currentContactSettings.contactLabel && currentContactSettings.contactUrl) {
