@@ -1469,6 +1469,14 @@ async function handleGetUsageStatus(request, env) {
 
   const plan = await getPlanForWorkspace(env, workspaceId);
   const limits = PLAN_LIMITS[plan] || PLAN_LIMITS[DEFAULT_PLAN];
+  // Σεβόμαστε το ίδιο MONTHLY_MESSAGE_LIMIT_OVERRIDE με το checkAndIncrementUsage()
+  // -- αλλιώς το τοπικό testing γίνεται μπερδεμένο: το backend θα μπλοκάρει
+  // στο override νούμερο, αλλά αυτό το endpoint (άρα και το usage-limit
+  // banner στο editor.html) θα συνέχιζε να κοιτάει το πραγματικό όριο του
+  // plan. Ποτέ δεν επηρεάζει production -- το override δεν υπάρχει εκεί.
+  const messagesLimit = env.MONTHLY_MESSAGE_LIMIT_OVERRIDE
+    ? parseInt(env.MONTHLY_MESSAGE_LIMIT_OVERRIDE, 10)
+    : limits.messages;
 
   const key = `usage:${workspaceId}:${monthKeyFor()}`;
   const raw = await env.DOCUMENT_REGISTRY.get(key);
@@ -1480,8 +1488,8 @@ async function handleGetUsageStatus(request, env) {
     JSON.stringify({
       plan,
       messagesUsed,
-      messagesLimit: limits.messages,
-      messagesLimitReached: workspaceId !== PROTECTED_WORKSPACE_ID && messagesUsed >= limits.messages,
+      messagesLimit,
+      messagesLimitReached: workspaceId !== PROTECTED_WORKSPACE_ID && messagesUsed >= messagesLimit,
       docsUsed,
       docsLimit: limits.docs === Infinity ? null : limits.docs,
       docsLimitReached: workspaceId !== PROTECTED_WORKSPACE_ID && limits.docs !== Infinity && docsUsed >= limits.docs,
