@@ -13,12 +13,6 @@
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
 <style>
   html,body{height:100%;overflow-x:hidden;}
-  /* overflow-x:hidden: δεύτερη γραμμή άμυνας -- αν κάτι (π.χ. ένα flex
-     container χωρίς wrap) ξεχειλίσει σε στενή οθόνη, ΔΕΝ κάνει ολόκληρη τη
-     σελίδα οριζόντια scrollable (το πρόβλημα που φάνηκε ζωντανά σε κινητό,
-     Σεπτέμβριος 2026 -- το top-bar ξεχείλιζε και τραβούσε μαζί του και το
-     υπόλοιπο περιεχόμενο). Η κύρια διόρθωση είναι το flex-wrap στο
-     .top-bar παρακάτω· αυτό εδώ είναι απλά ασφάλεια για το μέλλον. */
   body{display:flex;flex-direction:column;}
 
   .top-bar{height:56px;flex-shrink:0;background:var(--surface);border-bottom:1px solid var(--border);
@@ -38,10 +32,15 @@
     cursor:pointer;padding:0;font-size:13px;}
   .verify-banner-dismiss:hover{color:var(--text);}
 
-  /* Section G: γρανάζι ρυθμίσεων widget -- ίδια χρωματική λογική με το
-     .back-link (ίδιο background/border/hover), απλά τετράγωνο μέγεθος για
-     ένα μόνο glyph αντί για κείμενο. Το tooltip έρχεται από το native
-     title="" attribute (μεταφράζεται μέσω data-i18n-title). */
+  /* Section Q: usage-limit banner -- ίδιο οπτικό στυλ με το verify-banner
+     (ίδια δομή class), αλλά με warn χρώματα αντί για accent, ώστε να
+     ξεχωρίζει ως προειδοποίηση, όχι ως ουδέτερη υπενθύμιση. Χωρίς κουμπί
+     dismiss σκόπιμα -- σε αντίθεση με το email verification (καθαρά
+     πληροφοριακό), αυτό είναι ενεργό πρόβλημα μέχρι να λυθεί (νέος μήνας ή
+     αναβάθμιση), δεν βγάζει νόημα να "κλείσει" και να ξεχαστεί. */
+  .usage-limit-banner{flex-shrink:0;background:var(--warn-bg);border-bottom:1px solid var(--warn-border);
+    display:flex;align-items:center;gap:14px;padding:8px 24px;font-size:12.5px;color:var(--text);}
+
   .icon-btn{font-size:15px;line-height:1;color:var(--text);text-decoration:none;
     background:var(--surface-2);border:1px solid var(--border);border-radius:4px;
     width:30px;height:30px;display:flex;align-items:center;justify-content:center;
@@ -143,7 +142,6 @@
   .doc-browser-card-preview{font-size:12.5px;line-height:1.6;color:var(--text-soft);
     display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
 
-  /* Χειροκίνητος έλεγχος αντιφάσεων -- επιλογή έως 3 εγγράφων στο grid */
   .compare-toggle-btn{border:1px solid var(--border);background:var(--surface);color:var(--text);
     font-size:12.5px;font-weight:600;padding:7px 12px;border-radius:6px;cursor:pointer;font-family:inherit;
     white-space:nowrap;}
@@ -157,9 +155,6 @@
   .doc-browser-card.compare-selected .compare-checkbox{background:var(--accent);border-color:var(--accent);}
   .doc-browser-card.compare-disabled{opacity:.4;pointer-events:none;}
 
-  /* Sticky bar κάτω-κάτω με τα επιλεγμένα έγγραφα -- βασισμένο σε γνωστό,
-     δοκιμασμένο UX pattern (π.χ. product-compare tools): persistent overlay
-     panel που δείχνει τι έχεις ήδη επιλέξει, όχι μόνο πόσα. */
   .compare-bar{position:sticky;bottom:0;margin-top:20px;background:var(--surface);
     border:1px solid var(--border);border-radius:10px;padding:14px 16px;display:flex;
     align-items:center;gap:12px;flex-wrap:wrap;box-shadow:0 -4px 16px rgba(0,0,0,.35);}
@@ -176,8 +171,6 @@
     padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:inherit;}
   .compare-run-btn:disabled{opacity:.5;cursor:default;}
 
-  /* Αποτελέσματα σύγκρισης -- εμφανίζονται μέσα στο ίδιο main panel, ποτέ σε
-     popup/νέο tab (γνωστό UX λάθος που είδαμε στην έρευνα). */
   .compare-results-sub{font-size:13px;color:var(--text-soft);margin:-10px 0 18px;}
   .finding-card{background:var(--surface);border:1px solid var(--warn-border);border-radius:8px;
     padding:14px 16px;margin-bottom:12px;}
@@ -234,9 +227,6 @@
     letter-spacing:.02em;margin-top:2px;}
   .live-preview{font-size:14px;line-height:1.75;border:1px solid var(--border);border-radius:8px;
     padding:16px;background:var(--surface);min-height:100px;}
-  /* Το placeholder κείμενο ("Η προεπισκόπηση θα εμφανιστεί...") περνάει από
-     CSS custom property αντί για hardcoded content, ώστε να μπορεί να το
-     αλλάζει το JS ανάλογα με τη γλώσσα (βλ. applyLivePreviewEmptyText()). */
   .live-preview:empty::before{content:var(--live-preview-empty-text, "");color:var(--text-soft);}
   .edit-form button[type="submit"]{border:none;background:var(--accent);color:var(--on-accent);
     border-radius:6px;padding:10px 18px;font-size:13px;cursor:pointer;align-self:flex-start;font-weight:600;}
@@ -258,10 +248,6 @@
   .slug-hint{font-size:11.5px;color:var(--text-soft);margin-top:-2px;}
   .upload-limit-hint{font-size:11.5px;color:var(--text-soft);margin-top:-2px;}
 
-  /* Section K: analytics bar chart -- σκόπιμα plain CSS, καμία εξωτερική
-     βιβλιοθήκη γραφημάτων. Κάθε bar είναι δύο-χρωμο (κόκκινο πάνω μέρος =
-     fallback, accent-χρώμα κάτω μέρος = απαντημένες), ώστε να φαίνεται ΚΑΙ
-     ο όγκος ΚΑΙ η αναλογία fallback με μια ματιά. */
   .analytics-chart{display:flex;align-items:flex-end;gap:2px;height:140px;
     margin:16px 0 4px;background:var(--surface-2);border:1px solid var(--border);
     border-radius:6px;padding:8px;}
@@ -275,36 +261,12 @@
     cursor:pointer;font-family:inherit;}
   .analytics-range-btn.active{background:var(--accent);color:var(--on-accent);border-color:var(--accent);}
 
-  /* Σε στενές οθόνες, το sidebar (σταθερό πλάτος) σπρώχνει το main panel
-     εκτός οθόνης -- εδώ το κύριο panel πάει ΚΑΤΩ από το sidebar αντί
-     να εξαφανίζεται.
-     ΔΙΟΡΘΩΘΗΚΕ, Σεπτέμβριος 2026 (βρέθηκε σε ζωντανή χρήση σε κινητό): η
-     παραπάνω περιγραφή ήταν η αρχική πρόθεση, αλλά είχε δύο πραγματικά
-     προβλήματα. (1) Σειρά: το .main -- το ΠΡΑΓΜΑΤΙΚΟ εργαλείο διαχείρισης
-     εγγράφων (λίστα με edit/delete/publish ανά έγγραφο) -- ερχόταν ΜΕΤΑ από
-     ολόκληρο το sidebar (compact λίστα + find-by-description + test
-     question + unanswered + contradictions), θάβοντας την κύρια δουλειά
-     κάτω από δευτερεύοντα utility panels. Τώρα το .main έρχεται πρώτο.
-     (2) Μέγεθος: το desktop layout βασίζεται σε ΔΥΟ ανεξάρτητα
-     scrollable panels μέσα σε σταθερό ύψος (.layout{flex:1;min-height:0},
-     .sidebar/.main{overflow-y:auto}) -- σωστό για desktop, αλλά στο
-     κινητό αυτό στρίμωχνε το .main σε ένα μικροσκοπικό δικό του κουτί
-     (ό,τι απέμενε από το σταθερό ύψος αφού το ψηλό sidebar έπαιρνε τον
-     χώρο του). Τώρα και τα δύο panels παίρνουν το φυσικό τους ύψος και η
-     ΙΔΙΑ η σελίδα κυλάει κανονικά, σαν παντού αλλού στο site. */
   @media (max-width: 900px){
     .layout{flex-direction:column;}
     .main{order:1;flex:none;overflow-y:visible;padding:20px;}
     .sidebar{width:100%;border-left:none;border-top:1px solid var(--border);
       order:2;flex-shrink:0;overflow-y:visible;}
     .sidebar-section.grow{max-height:280px;}
-
-    /* Το top-bar είχε σταθερό ύψος (56px) και ΧΩΡΙΣ flex-wrap -- σε στενό
-       κινητό, τα κουμπιά/εικονίδια (⚙ 🔗 📊 EN/GR) ξεχείλιζαν αθόρυβα εκτός
-       οθόνης προς τα δεξιά αντί να τυλιχτούν σε δεύτερη γραμμή, χωρίς καν
-       ορατή ένδειξη οριζόντιου scroll. Βρέθηκε σε ζωντανή χρήση σε κινητό,
-       Σεπτέμβριος 2026. Εδώ επιτρέπουμε δεύτερη γραμμή αντί για ξεχείλισμα,
-       και μικραίνουμε λίγο το padding/gap ώστε να χωράει πιο άνετα. */
     .top-bar{height:auto;min-height:56px;flex-wrap:wrap;padding:10px 12px;gap:8px;}
     .top-bar-right{flex-wrap:wrap;gap:8px;}
   }
@@ -334,17 +296,20 @@
     <button type="button" id="dismissVerifyBannerBtn" class="verify-banner-dismiss" aria-label="Dismiss">✕</button>
   </div>
 
+  <!-- Section Q: usage-limit banner -- κρυμμένο by default, εμφανίζεται μόνο
+       αν το GET /usage/status (βλ. checkUsageStatus() στο script) επιστρέψει
+       messagesLimitReached:true. Χωρίς dismiss κουμπί σκόπιμα (βλ. CSS
+       σχόλιο) -- παραμένει ορατό όσο το πρόβλημα είναι ενεργό. -->
+  <div class="usage-limit-banner" id="usageLimitBanner" style="display:none;">
+    <span id="usageLimitBannerText" data-i18n="usageLimitBannerText">You've reached this month's message limit for your plan.</span>
+  </div>
+
   <div class="layout">
     <div class="sidebar">
       <div class="sidebar-section">
         <button class="new-doc-btn" id="newDocBtn" data-i18n="newDoc">+ New document</button>
         <button class="new-doc-btn" id="addFromUrlBtn" style="margin-top:6px;background:var(--surface-2);" data-i18n="addFromUrlBtn">🔗 Add from URL</button>
         <button class="new-doc-btn" id="uploadFileBtn" style="margin-top:6px;background:var(--surface-2);" data-i18n="uploadFileBtn">📤 Upload file</button>
-        <!-- Section O: κρυμμένο προσωρινά -- το drive.readonly scope είναι
-             "restricted" στη Google, χρειάζεται πληρωμένο ετήσιο CASA
-             security assessment για πλήρες verification (βλ. συζήτηση).
-             Ο κώδικας/backend μένει άθικτος, απλά δεν φαίνεται στο UI μέχρι
-             να αποφασιστεί verification. -->
         <button class="new-doc-btn" id="googleDriveBtn" style="margin-top:6px;background:var(--surface-2);display:none;" data-i18n="googleDriveBtn">📁 Google Drive</button>
         <input type="text" class="filter-input" id="docFilterInput" data-i18n-placeholder="filterByTitle" placeholder="Filter by title…">
       </div>
@@ -394,9 +359,6 @@
   applyTranslations();
   initLangToggle("langToggle");
 
-  // Το CSS custom property για το placeholder κείμενο του live preview
-  // (βλ. σχόλιο δίπλα στο .live-preview:empty::before) -- JSON.stringify
-  // παράγει ακριβώς τη σωστή CSS string σύνταξη (με τα εισαγωγικά).
   document.documentElement.style.setProperty(
     "--live-preview-empty-text",
     JSON.stringify(t("livePreviewEmpty"))
@@ -424,18 +386,10 @@
     }
   }
 
-  // --- Browser εγγράφων στο κεντρικό panel -- αντικαθιστά το άδειο
-  // "Επίλεξε ένα έγγραφο..." όταν δεν υπάρχει επιλεγμένο έγγραφο. Ίδιο
-  // οπτικό στυλ με το "Πρόσφατα έγγραφα" grid του δημόσιου Portal, αλλά με
-  // δική του αναζήτηση και ΟΛΑ τα έγγραφα (πρόχειρα + δημοσιευμένα, όχι
-  // διαγραμμένα) -- έτσι λύνεται εύκολα η επιλογή όταν υπάρχουν πολλά.
   function renderDocBrowser() {
     const main = el("mainPanel");
     const docs = allDocuments.filter(d => d.status !== "deleted");
 
-    // Τοπική κατάσταση του "compare mode" -- ξαναρχίζει καθαρή κάθε φορά
-    // που ξαναμπαίνεις στο browser (renderDocBrowser καλείται ξανά), κάτι
-    // λογικό: δεν θες παλιά επιλογή να επιβιώνει ανάμεσα σε επισκέψεις.
     let compareMode = false;
     let compareSelection = [];
 
@@ -551,9 +505,6 @@
     renderGrid();
   }
 
-  // Ίδιο όριο με το backend (COMPARE_MIN_DOCS/COMPARE_MAX_DOCS στο
-  // src/index.js) -- κρατιέται ξεχωριστά εδώ γιατί το frontend δεν έχει
-  // πρόσβαση σε server-side σταθερές, αλλά πρέπει να ταιριάζουν.
   const COMPARE_MIN_DOCS_CLIENT = 2;
   const COMPARE_MAX_DOCS_CLIENT = 3;
 
@@ -587,8 +538,6 @@
     }
   }
 
-  // Τα αποτελέσματα εμφανίζονται ΜΕΣΑ στο ίδιο main panel -- ποτέ popup ή
-  // νέο tab (γνωστό UX λάθος, το είδαμε στην έρευνα πριν το σχεδιασμό).
   function renderCompareResults(findings, titles) {
     const main = el("mainPanel");
     main.innerHTML = `
@@ -627,8 +576,6 @@
   function renderDocList() {
     const list = el("docList");
     const filterVal = el("docFilterInput").value.trim().toLowerCase();
-    // Section D: τα διαγραμμένα δεν εμφανίζονται εδώ -- έχουν το δικό τους
-    // ξεχωριστό, κρυμμένο section παρακάτω (βλ. renderDeletedList).
     const visibleDocs = allDocuments.filter(d => d.status !== "deleted");
     const filtered = !filterVal
       ? visibleDocs
@@ -658,8 +605,6 @@
     renderDeletedList();
   }
 
-  // --- Section D: διαγραμμένα (soft-deleted) -- κρυμμένα by default,
-  // με ένα toggle link για να τα δεις/τα επαναφέρεις ---
   let showDeleted = false;
 
   function renderDeletedList() {
@@ -705,12 +650,6 @@
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || t("notFoundDefault"));
       await loadDocuments();
-      // Χωρίς αυτό, το ήδη ανοιχτό κεντρικό "All documents" panel
-      // (renderDocBrowser -- ξεχωριστό render από τη compact sidebar
-      // λίστα) έμενε με παλιά δεδομένα μέχρι να το ξανα-ανοίξεις χειροκίνητα
-      // -- το restore φαινόταν σαν να "μην έπιασε" ενώ στην πραγματικότητα
-      // δούλευε κανονικά στο backend. Ίδιο pattern με το delete παραπάνω.
-      // Βρέθηκε σε ζωντανή χρήση, Σεπτέμβριος 2026.
       renderDocBrowser();
     } catch (err) {
       alert(t("restoreErrorPrefix") + err.message);
@@ -719,7 +658,6 @@
 
   el("docFilterInput").addEventListener("input", renderDocList);
 
-  // --- εύρεση με ελεύθερη περιγραφή (semantic search) ---
   el("docSearchInput").addEventListener("keydown", async (e) => {
     if (e.key !== "Enter") return;
     const query = e.target.value.trim();
@@ -751,7 +689,6 @@
     }
   });
 
-  // --- ερωτήσεις χωρίς απάντηση (Section E) ---
   async function loadFallbackQuestions() {
     const list = el("fallbackList");
     list.textContent = t("loading");
@@ -801,9 +738,6 @@
 
   el("refreshFallbackBtn").addEventListener("click", loadFallbackQuestions);
 
-  // --- Ευρήματα αντιφάσεων (contradiction-checker, χειροκίνητο mode) ---
-  // Ίδιο ακριβώς πρότυπο με τα fallback questions: manual refresh, dismiss
-  // button ανά γραμμή, καμία background/polling διαδικασία.
   async function loadContradictions() {
     const list = el("contradictionList");
     list.textContent = t("loading");
@@ -853,7 +787,6 @@
 
   el("refreshContradictionsBtn").addEventListener("click", loadContradictions);
 
-  // --- preview (πρώτο βήμα, πάντα, πριν το edit) ---
   async function openPreview(documentId) {
     if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
     currentSelectedId = documentId;
@@ -977,7 +910,6 @@
     });
   }
 
-  // --- edit mode (ρητό κλικ, ποτέ αυτόματα) ---
   function enterEditMode(data) {
     editingId = data.documentId;
     originalText = data.text;
@@ -998,9 +930,6 @@
     renderEditForm({ title: "", documentId: "", text: "", sourceUrl: "", isExisting: false });
   }
 
-  // Section M: "Πρόσθεσε από URL" -- διαβάζει μια δημόσια σελίδα αντί για
-  // copy-paste. Νέο έγγραφο πάντα ως draft (ίδια πολιτική με τα κανονικά
-  // uploads) -- ο χρήστης βλέπει το preview και δημοσιεύει ρητά όποτε θέλει.
   function renderAddFromUrlPanel() {
     if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
     currentSelectedId = null;
@@ -1058,12 +987,6 @@
 
   el("addFromUrlBtn").addEventListener("click", renderAddFromUrlPanel);
 
-  // Section P: upload αρχείου (.txt/.md/.pdf) -- ΙΔΙΟ μοτίβο με το Add from
-  // URL (draft πρώτα, ο πελάτης ελέγχει πριν δημοσιεύσει). Ένα σημείο
-  // προσοχής: το FormData request ΔΕΝ πρέπει να έχει Content-Type header
-  // (το βάζει μόνο του ο browser, με το σωστό multipart boundary) -- γι'
-  // αυτό εδώ φτιάχνουμε custom headers χωρίς το "Content-Type" του κοινού
-  // HEADERS, αντί να το χρησιμοποιήσουμε απευθείας όπως παντού αλλού.
   function renderUploadFilePanel() {
     if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
     currentSelectedId = null;
@@ -1131,14 +1054,6 @@
 
   el("uploadFileBtn").addEventListener("click", renderUploadFilePanel);
 
-  // Section N: εισαγωγή από Google Drive -- σύνδεση OAuth (αν δεν υπάρχει
-  // ήδη) και λίστα Google Docs/Sheets με checkboxes για εισαγωγή. Κάθε
-  // επιλεγμένο αρχείο μπαίνει ως ΝΕΟ draft έγγραφο -- ίδια πολιτική
-  // draft-πρώτα με το URL sync (Section M) και τα χειροκίνητα uploads.
-  //
-  // Απλό, σχηματικό τρίχρωμο τρίγωνο (πράσινο/κίτρινο/μπλε) που θυμίζει
-  // οπτικά το Google Drive -- όχι ακριβές αντίγραφο του επίσημου λογότυπου,
-  // απλά ένα αναγνωρίσιμο, καθαρό εικονίδιο σύνδεσης.
   const GOOGLE_DRIVE_ICON = `<svg width="16" height="16" viewBox="0 0 16 16" style="vertical-align:-3px;margin-right:6px;flex-shrink:0;" aria-hidden="true">
     <polygon points="6,1 10,1 16,11 12,11" fill="#00ac47"/>
     <polygon points="0,11 4,11 8,4 6,1" fill="#ffba00"/>
@@ -1146,14 +1061,6 @@
   </svg>`;
   el("googleDriveBtn").innerHTML = GOOGLE_DRIVE_ICON + escapeHtml(t("googleDriveBtn"));
 
-  // Χτίζει το URL για το /oauth/google/start. Για πραγματικούς λογαριασμούς
-  // (SESSION_TOKEN υπάρχει) στέλνουμε το session_token -- το backend το
-  // επικυρώνει στη D1 και βρίσκει το ΣΩΣΤΟ workspace μόνο του, δεν εμπιστεύεται
-  // ό,τι raw workspace_id θα μπορούσε να γράψει κάποιος στο URL. Για
-  // Guest/Developer (χωρίς λογαριασμό) συνεχίζουμε με το raw workspace_id,
-  // όπως πριν -- backward compatible, ίδιο σκεπτικό με το resolveWorkspaceId
-  // στο backend. Διορθώθηκε σε πλήρες audit, Σεπτέμβριος 2026 (πριν έστελνε
-  // πάντα raw workspace_id, χωρίς κανέναν έλεγχο ιδιοκτησίας στο backend).
   function googleDriveOAuthStartUrl() {
     const param = SESSION_TOKEN
       ? "session_token=" + encodeURIComponent(SESSION_TOKEN)
@@ -1200,8 +1107,6 @@
         </div>
       `;
       el("googleDriveConnectBtn").addEventListener("click", () => {
-        // Top-level navigation (ΟΧΙ fetch) -- ο browser πρέπει να πλοηγηθεί
-        // κανονικά ώστε να δουλέψει το OAuth redirect flow προς τη Google.
         navigateTo(googleDriveOAuthStartUrl());
       });
       return;
@@ -1326,9 +1231,6 @@
       const color = data.failed && data.failed.length ? "var(--warn-border)" : "var(--ok)";
 
       driveSelectedIds = new Set();
-      // Ξαναφτιάχνουμε τη λίστα (ώστε τα checkboxes να καθαρίσουν), αλλά
-      // περνάμε το μήνυμα επιτυχίας ΜΕΣΑ στο νέο render -- διαφορετικά το
-      // πλήρες innerHTML replacement θα το έσβηνε αμέσως.
       renderGoogleDriveFileList(null, `<span style="color:${color};">${escapeHtml(message)}</span>`);
     } catch (err) {
       status.textContent = t("googleDriveImportErrorPrefix") + err.message;
@@ -1340,11 +1242,6 @@
 
   el("googleDriveBtn").addEventListener("click", () => renderGoogleDrivePanel());
 
-  // Μετά το OAuth redirect (Section N), η Google επιστρέφει εδώ με
-  // ?google_drive_connected=1 ή ?google_drive_error=<code>. Δείχνουμε το
-  // ανάλογο banner ΜΕΣΑ στο ίδιο panel σύνδεσης Google Drive (όχι ξεχωριστό
-  // popup/alert), και καθαρίζουμε το URL αμέσως ώστε ένα refresh να μη
-  // ξαναδείξει το ίδιο μήνυμα.
   const GOOGLE_DRIVE_ERROR_KEYS = {
     denied: "googleDriveErrorDenied",
     missing_params: "googleDriveErrorMissingParams",
@@ -1369,9 +1266,6 @@
     return `<div class="upload-status" style="color:var(--danger);margin-bottom:14px;">❌ ${escapeHtml(t(key))}</div>`;
   }
 
-  // Section G: πάνελ ρυθμίσεων widget (χρώμα, όνομα bot, λογότυπο, email
-  // ειδοποίησης). Ίδιο pattern με τα άλλα render* functions -- γράφει
-  // απευθείας στο mainPanel και ξαναδένει τα δικά του event listeners.
   async function renderSettingsPanel() {
     if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
     currentSelectedId = null;
@@ -1545,10 +1439,6 @@
   el("newDocBtn").addEventListener("click", enterNewDocumentMode);
   el("settingsBtn").addEventListener("click", renderSettingsPanel);
 
-  // Section I: πάνελ embed layer -- λίστα domains + έτοιμο script tag.
-  // Χωρίς ΚΑΝΕΝΑ καταχωρημένο domain, δεν εμφανίζεται καν το script tag --
-  // αυτό είναι η ίδια η ασφάλεια που χτίσαμε στο backend (CORS middleware),
-  // απλά αντανακλασμένη στο UI ώστε ο χρήστης να καταλαβαίνει γιατί λείπει.
   function embedScriptTag(embedId, settings) {
     const attrs = [`src="${window.location.origin}/widget.js"`, `data-embed-id="${embedId}"`];
     if (settings.accentColor) attrs.push(`data-accent-color="${escapeHtml(settings.accentColor)}"`);
@@ -1694,11 +1584,6 @@
 
   el("embedBtn").addEventListener("click", renderEmbedPanel);
 
-  // Section K: πάνελ analytics -- μεγάλοι αριθμοί + απλό CSS bar chart
-  // (χωρίς εξωτερική βιβλιοθήκη γραφημάτων, το ίδιο πνεύμα με το widget.js:
-  // λιγότερες εξαρτήσεις, μικρότερο ρίσκο). Δύο-χρωμα bars: το κόκκινο
-  // κομμάτι δείχνει το ποσοστό fallback μέσα στη συνολική ερωτήσεις της
-  // ημέρας, ώστε να φαίνεται ΚΑΙ ο όγκος ΚΑΙ η αναλογία με μια ματιά.
   let currentAnalyticsDays = 30;
 
   function renderAnalyticsChart(daily) {
@@ -1836,10 +1721,6 @@
     el("docTitle").value = title;
     el("docSourceUrl").value = sourceUrl;
 
-    // --- WYSIWYG: TOAST UI Editor -- ο χρήστης βλέπει το κείμενο ήδη
-    // μορφοποιημένο ενώ γράφει (bold/λίστες/επικεφαλίδες/πίνακες/links/κ.λπ.),
-    // χωρίς να χρειάζεται να ξέρει markdown syntax. Αποθηκεύει πάντα markdown
-    // από πίσω (getMarkdown()) -- καμία αλλαγή στο πώς σώζουμε/κάνουμε diff.
     if (tuiEditorInstance) {
       tuiEditorInstance.destroy();
       tuiEditorInstance = null;
@@ -1862,12 +1743,8 @@
     updatePreview();
 
     if (isExisting) {
-      // Υπάρχον έγγραφο -- το documentId είναι ήδη σταθερό, δεν αλλάζει
-      // ποτέ ξανά από αλλαγές στον τίτλο. Απλή ενημερωτική γραμμή (τεχνικός
-      // όρος -- δεν μεταφράζεται, ίδιος και στις δύο γλώσσες).
       el("slugHint").textContent = `documentId: ${documentId}`;
     } else {
-      // Νέο έγγραφο -- το slug ενημερώνεται ζωντανά καθώς γράφει τον τίτλο.
       const updateHint = () => {
         const slug = slugify(el("docTitle").value);
         el("slugHint").textContent = slug ? t("willBeSavedAs", { slug }) : "";
@@ -1899,7 +1776,6 @@
     });
   }
 
-  // --- word-level diff (LCS), τρέχει εξ ολοκλήρου στον browser ---
   function diffWords(oldText, newText) {
     const oldTokens = oldText.split(/(\s+)/);
     const newTokens = newText.split(/(\s+)/);
@@ -1933,13 +1809,10 @@
     }).join("");
   }
 
-  // Το documentId δεν το πληκτρολογεί ποτέ ο χρήστης: για υπάρχον έγγραφο
-  // είναι το ήδη σταθερό editingId, για νέο παράγεται από τον τίτλο.
   function getFormDocumentId() {
     return editingId || slugify(el("docTitle").value);
   }
 
-  // --- submit: νέο έγγραφο πάει κατευθείαν, υπάρχον δείχνει πρώτα diff ---
   async function handleFormSubmit(e) {
     e.preventDefault();
     const btn = el("uploadBtn");
@@ -1951,9 +1824,6 @@
       return;
     }
 
-    // Δύο διαφορετικά έγγραφα με πολύ παρόμοιο τίτλο θα παράγουν το ίδιο
-    // slug -- το αναγνωρίζουμε και δείχνουμε diff αντί για σιωπηλή
-    // αντικατάσταση, ακριβώς όπως στην περίπτωση της έμμεσης επεξεργασίας.
     if (!editingId && knownDocumentIds.has(documentId)) {
       btn.disabled = true;
       el("uploadStatus").textContent = t("checkingExistingDoc");
@@ -1986,6 +1856,11 @@
     el("diffView").classList.add("show");
   }
 
+  // Section Q: μικρή προσθήκη -- αν το backend απαντήσει 429 με
+  // limitReached:true (όριο ΕΓΓΡΑΦΩΝ, όχι μηνυμάτων), δείχνουμε το ίδιο
+  // μήνυμα σφάλματος με πριν (status.textContent = "❌ " + err.message),
+  // απλά με πιο φιλικό κείμενο -- ο editor βλέπει ήδη το ίδιο μήνυμα που
+  // στέλνει το backend, δεν χρειάζεται ξεχωριστό branch εδώ.
   async function doUpload() {
     const documentId = getFormDocumentId();
     const title = el("docTitle").value.trim();
@@ -2011,11 +1886,6 @@
     }
   }
 
-  // --- δοκιμαστικό ερώτημα ---
-  // Δείχνουμε την απάντηση μορφοποιημένη, σαν κανονική απάντηση chat --
-  // ΟΧΙ raw JSON, που μπερδεύει όποιον δεν είναι προγραμματιστής. Οι
-  // τεχνικές λεπτομέρειες (score, chunk index, πλήρες JSON) παραμένουν
-  // διαθέσιμες πίσω από ένα προαιρετικό "Τεχνικές λεπτομέρειες".
   el("testQInput").addEventListener("keydown", async (e) => {
     if (e.key !== "Enter") return;
     const question = e.target.value.trim();
@@ -2029,11 +1899,6 @@
         body: JSON.stringify({ question }),
       });
 
-      // Δύο ξεχωριστά σημεία αποτυχίας εδώ, και τα δύο ΠΡΕΠΕΙ να δείχνουν
-      // καθαρό, ανθρώπινο μήνυμα -- ποτέ ωμό τεχνικό κείμενο στον χρήστη
-      // (π.χ. το δικό της JS parse error "Unexpected token '<'..." αν το
-      // backend γυρίσει σελίδα λάθους HTML αντί για JSON). Βρέθηκε σε
-      // ζωντανή χρήση, Σεπτέμβριος 2026.
       let data;
       try {
         data = await res.json();
@@ -2045,8 +1910,6 @@
       }
 
       renderTestQResult(data);
-      // Ο agent μόλις κατέγραψε αυτό το ερώτημα ως fallback (αν ήταν) --
-      // ανανεώνουμε τη λίστα ώστε να το δεις αμέσως, χωρίς χειροκίνητο κλικ.
       if (data.isFallback) loadFallbackQuestions();
     } catch (err) {
       out.innerHTML = `<div class="empty-note">❌ ${escapeHtml(err.message)}</div>`;
@@ -2074,6 +1937,23 @@
     out.querySelector("pre").textContent = JSON.stringify(data, null, 2);
   }
 
+  // Section Q: διαβάζει GET /usage/status και δείχνει το usage-limit banner
+  // αν το μηνιαίο όριο μηνυμάτων έχει εξαντληθεί. Best-effort -- αν
+  // αποτύχει το fetch, απλά δεν δείχνουμε το banner (ίδιο σκεπτικό με
+  // applyWidgetSettings· δεν πρέπει ποτέ να μπλοκάρει τη φόρτωση του editor).
+  async function checkUsageStatus() {
+    try {
+      const res = await fetch("/usage/status", { headers: HEADERS });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.messagesLimitReached) {
+        el("usageLimitBanner").style.display = "flex";
+      }
+    } catch (err) {
+      // best-effort, δες σχόλιο πάνω
+    }
+  }
+
   const driveRedirectBanner = checkGoogleDriveRedirectParams();
   if (driveRedirectBanner) {
     loadDocuments().then(() => renderGoogleDrivePanel(driveRedirectBanner));
@@ -2082,18 +1962,13 @@
   }
   loadFallbackQuestions();
   loadContradictions();
+  checkUsageStatus();
 
   el("switchModeLink").addEventListener("click", (e) => {
     e.preventDefault();
     logoutAndSwitchMode();
   });
 
-  // Section O follow-up: banner "μη επιβεβαιωμένο email" -- ΜΟΝΟ για
-  // πραγματικούς λογαριασμούς (υπάρχει sessionToken· το Guest/Developer flow
-  // δεν έχει καν την έννοια του "email"). "Soft" -- ποτέ δεν μπλοκάρει τη
-  // χρήση, μόνο υπενθύμιση. Dismiss κρατάει μόνο για αυτό το browser tab
-  // (sessionStorage, όχι localStorage) -- ξαναεμφανίζεται στο επόμενο login,
-  // δεν χάνεται μόνιμα μέσα σε ένα κλικ.
   if (
     localStorage.getItem("sessionToken") &&
     localStorage.getItem("emailVerified") === "0" &&

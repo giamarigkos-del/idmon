@@ -1,42 +1,3 @@
-// Κάθε επισκέπτης διαλέγει ρητά, στη landing page, "Developer" (με κωδικό,
-// πάει στο πραγματικό demo workspace) ή "Επισκέπτης/Guest" (παίρνει ένα
-// τυχαίο, δικό του, απομονωμένο workspace). Η επιλογή αποθηκεύεται εδώ
-// (localStorage) ώστε να μη ρωτάει ξανά στο ίδιο browser. Αν δεν έχει γίνει
-// ακόμα καμία επιλογή, στέλνουμε στη landing page πριν φορτώσει οτιδήποτε
-// άλλο -- δεν έχει νόημα να καλέσουμε το backend χωρίς workspace.
-//
-// ΣΗΜΑΝΤΙΚΟ: η landing.html φορτώνει ΚΙ ΑΥΤΗ το shared.js (για τις i18n
-// συναρτήσεις), οπότε ΔΕΝ πρέπει ποτέ να ανακατευθύνει τον εαυτό της σε
-// τον εαυτό της. Παλιότερα αυτό ελεγχόταν συγκρίνοντας το URL
-// (window.location.pathname.endsWith(...)), αλλά αυτό αποδείχτηκε εύθραυστο
-// -- π.χ. ένα trailing slash στο URL (/landing.html/) το έσπαγε και
-// δημιουργούσε άπειρο βρόχο ανανέωσης. Αντ' αυτού, η landing.html δηλώνει
-// ρητά μια global σημαία (window.__IS_LANDING_PAGE__ = true) ΠΡΙΝ φορτώσει
-// το shared.js -- καμία εξάρτηση από το πώς μοιάζει το URL.
-//
-// Επιπλέον σημείωση: παλιότερα υπήρχε εδώ και ΔΕΥΤΕΡΟ επίπεδο ασφάλειας --
-// ένα flag στο sessionStorage που σταματούσε το redirect μετά την πρώτη
-// προσπάθεια μέσα στο ίδιο tab, "για κάθε ενδεχόμενο". Αφαιρέθηκε: αντί να
-// προστατεύει από κάτι, δημιουργούσε το δικό του πραγματικό bug -- αν ο
-// επισκέπτης ξαναγύριζε στη ρίζα (π.χ. πλοήγηση πίσω, bookmark, νέο
-// πληκτρολόγημα του URL) μέσα στο ίδιο tab ΧΩΡΙΣ ποτέ να έχει αποκτήσει
-// workspaceId, το flag ήταν ήδη σημειωμένο και ΔΕΝ ξανάκανε redirect --
-// έμενε "κολλημένος" στο index.html, με WORKSPACE_ID null, δείχνοντας άδειο
-// "no documents" αντί να τον στείλει στη landing page. Βρέθηκε σε ζωντανή
-// χρήση, Σεπτέμβριος 2026. Η πρωτεύουσα προστασία (__IS_LANDING_PAGE__,
-// παραπάνω) είναι αρκετή από μόνη της -- δεν χρειάζεται δεύτερο επίπεδο.
-//
-// __SKIP_WORKSPACE_REDIRECT__: ξεχωριστό, γενικότερο flag από το
-// __IS_LANDING_PAGE__ -- για σελίδες που ΔΕΝ είναι η landing page αλλά ΔΕΝ
-// χρειάζονται ποτέ κανένα workspace (π.χ. terms.html, privacy.html, καθαρά
-// στατικό/δημόσιο περιεχόμενο, όχι ειδικό ανά-workspace). Χωρίς αυτό, ένας
-// πρωτοεπισκέπτης που φτάνει απευθείας σε /terms.html (π.χ. από email,
-// footer link, πριν καν διαλέξει Guest/Account) ανακατευθυνόταν στη landing
-// page αντί να δει τους όρους. Βρέθηκε σε ζωντανή χρήση, Σεπτέμβριος 2026,
-// αμέσως μετά την αφαίρεση του παραπάνω sessionStorage guard -- το guard
-// έκρυβε εν μέρει αυτό το ίδιο πρόβλημα κατά τύχη (η δεύτερη επίσκεψη σε
-// terms.html στο ίδιο tab έδειχνε σωστά, επειδή το flag είχε ήδη
-// "καταναλωθεί" από κάποιο προηγούμενο redirect, όχι επίτηδες).
 function resolveWorkspaceId() {
   const stored = localStorage.getItem("workspaceId");
   if (stored) return stored;
@@ -52,22 +13,9 @@ const SESSION_TOKEN = localStorage.getItem("sessionToken");
 const HEADERS = {
   "Content-Type": "application/json; charset=utf-8",
   "X-Workspace-Id": WORKSPACE_ID,
-  // Section H: αν υπάρχει session (login μέσω account, όχι Developer/Guest),
-  // το backend το προτιμάει ΠΑΝΤΑ έναντι του X-Workspace-Id -- το τελευταίο
-  // μένει μόνο για συμβατότητα με το Developer/Guest flow.
   ...(SESSION_TOKEN ? { "X-Session-Token": SESSION_TOKEN } : {}),
 };
 
-// Section H: κοινό logout -- ακυρώνει το session στο backend (best-effort,
-// δεν μπλοκάρει ποτέ την πλοήγηση αν αποτύχει το request), καθαρίζει το
-// localStorage, και γυρνάει στη landing page. Χρησιμοποιείται από το
-// "switch mode" link σε index.html/editor.html -- μία υλοποίηση, όχι δύο
-// αντίγραφα.
-// Section L: streaming. Διαβάζει ένα SSE response (Response.body είναι
-// ReadableStream) και καλεί onEvent(parsedJson) για κάθε "data: {...}"
-// γραμμή. Το ΙΔΙΟ πρωτόκολλο ορίζεται και στο backend (buildStreamingQueryResponse
-// στο index.js) και ξανα-υλοποιείται (σκόπιμα, αντιγραμμένο) μέσα στο
-// widget.js, που πρέπει να μείνει αυτόνομο αρχείο χωρίς εξάρτηση σε αυτό.
 async function streamSSE(response, onEvent) {
   if (!response.body) return;
   const reader = response.body.getReader();
@@ -96,10 +44,6 @@ async function streamSSE(response, onEvent) {
   }
 }
 
-// Μικρή indirection γύρω από το window.location.href = ... -- χωρίς αυτό,
-// headless DOM tests (jsdom) δεν μπορούν να επαληθεύσουν top-level
-// navigation, αφού το window.location δεν είναι επαναπροσδιορίσιμο εκεί.
-// Παραγωγικά συμπεριφέρεται ακριβώς ίδια, απλά με ένα function call ανάμεσα.
 function navigateTo(url) {
   window.location.href = url;
 }
@@ -112,8 +56,7 @@ async function logoutAndSwitchMode() {
         headers: { "X-Session-Token": SESSION_TOKEN },
       });
     } catch (err) {
-      // best-effort -- ακόμα κι αν αποτύχει το logout call, συνεχίζουμε να
-      // καθαρίσουμε το τοπικό state και να φύγουμε από τη σελίδα.
+      // best-effort
     }
   }
   localStorage.removeItem("workspaceId");
@@ -128,9 +71,6 @@ function escapeHtml(str) {
     .replace(/>/g, "&gt;");
 }
 
-// Μετατρέπει **bold** και newlines σε πραγματικό HTML -- χρησιμοποιείται
-// τόσο στο chat widget όσο και στο δοκιμαστικό ερώτημα του editor, ώστε
-// και τα δύο να δείχνουν καθαρή, μορφοποιημένη απάντηση, ποτέ raw κείμενο.
 function formatAnswer(text) {
   let safe = escapeHtml(text);
   safe = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
@@ -138,32 +78,15 @@ function formatAnswer(text) {
   return safe;
 }
 
-// Πλήρης μετατροπή markdown -> HTML για το κείμενο ενός εγγράφου. Χρησιμοποιεί
-// το marked.js (πλήρες markdown: επικεφαλίδες, links, πίνακες, code, quotes,
-// λίστες, **bold**, *πλάγια* κ.λπ.) και το DOMPurify για καθαρισμό του HTML
-// πριν μπει στη σελίδα -- το marked ΔΕΝ καθαρίζει μόνο του το output του.
-// Ίδια συνάρτηση χρησιμοποιείται στο live preview του editor, στο read-only
-// preview, και στη δημόσια σελίδα άρθρου -- μία πηγή αλήθειας για το πώς
-// φαίνεται το κείμενο.
 function renderMarkdown(text) {
   if (!text) return "";
   const html = marked.parse(text);
   if (typeof DOMPurify === "undefined") {
-    // Fail CLOSED, όχι ανοιχτά: αν το DOMPurify CDN δεν φόρτωσε (δίκτυο,
-    // ad-blocker, firewall), ΔΕΝ δείχνουμε το ακατέργαστο, μη-καθαρισμένο
-    // HTML του marked.js (το marked δεν κάνει sanitize μόνο του -- θα ήταν
-    // πιθανό XSS, ειδικά σε περιεχόμενο από URL sync/Google Drive import,
-    // όχι πλήρως ελεγμένη πηγή). Δείχνουμε απλό, escaped κείμενο αντί για
-    // μορφοποιημένο. Βρέθηκε σε πλήρες audit, Σεπτέμβριος 2026.
     return escapeHtml(text).replace(/\n/g, "<br>");
   }
   return DOMPurify.sanitize(html);
 }
 
-// Παράγει τεχνικό documentId από τον τίτλο -- ο editor δεν χρειάζεται ποτέ
-// να σκεφτεί ή να πληκτρολογήσει ID χειροκίνητα. Μετατρέπει Ελληνικά σε
-// Λατινικά (ίδιο στυλ με τα ήδη υπάρχοντα slugs: shop-journey,
-// verification-process), αφαιρεί τόνους/κενά, κρατάει μόνο πεζά+παύλες.
 const GREEK_TO_LATIN = {
   "α":"a","ά":"a","β":"v","γ":"g","δ":"d","ε":"e","έ":"e","ζ":"z","η":"i","ή":"i",
   "θ":"th","ι":"i","ί":"i","ϊ":"i","ΐ":"i","κ":"k","λ":"l","μ":"m","ν":"n","ξ":"x",
@@ -184,15 +107,6 @@ function slugify(title) {
   return out || "";
 }
 
-// ============================================================================
-// i18n (EN/GR δίγλωσσο UI). ΜΟΝΟ το UI (κουμπιά, labels, μηνύματα) -- τα ίδια
-// τα έγγραφα (SOPs κ.λπ.) ΔΕΝ μεταφράζονται, μένουν στη γλώσσα που γράφτηκαν.
-// Η γλώσσα αποθηκεύεται στο localStorage ("uiLang"), προεπιλογή "en" αν δεν
-// έχει επιλεγεί ποτέ. Το toggle κουμπί (βλ. initLangToggle) απλά αλλάζει το
-// localStorage και ξαναφορτώνει τη σελίδα -- πιο απλό και ασφαλές από το να
-// ξαναφτιάχνουμε "ζωντανά" όλο το δυναμικό περιεχόμενο (λίστες, chat κ.λπ.)
-// χωρίς reload.
-// ============================================================================
 const TRANSLATIONS = {
   en: {
     // κοινά
@@ -213,6 +127,14 @@ const TRANSLATIONS = {
     expiresToday: "Expires today",
     expiresInDay: "Expires in {days} day",
     expiresInDays: "Expires in {days} days",
+
+    // Section Q: pricing tiers -- μήνυμα προς τον ΤΕΛΙΚΟ επισκέπτη όταν
+    // εξαντλείται το μηνιαίο όριο μηνυμάτων του πελάτη (index.html/widget.js),
+    // και μήνυμα προς τον ΙΔΙΟΚΤΗΤΗ workspace στο editor.html όταν το δει.
+    // Σκόπιμα γενικό προς τον επισκέπτη -- καμία αναφορά σε Idmon, tiers,
+    // ή όρια, όπως είχε συμφωνηθεί.
+    limitReachedMessage: "We're experiencing technical difficulties right now. Please contact us directly:",
+    usageLimitBannerText: "You've reached this month's message limit for your plan. Visitors are seeing a generic \"technical difficulties\" message instead of answers until next month, or until you upgrade.",
 
     // landing.html
     landingDocTitle: "Idmon — Welcome",
@@ -456,6 +378,10 @@ const TRANSLATIONS = {
     expiresInDay: "Λήγει σε {days} ημέρα",
     expiresInDays: "Λήγει σε {days} ημέρες",
 
+    // Section Q: pricing tiers -- ίδιο σκεπτικό με το en dict παραπάνω.
+    limitReachedMessage: "Αντιμετωπίζουμε προσωρινά τεχνικό πρόβλημα. Επικοινώνησε απευθείας μαζί μας:",
+    usageLimitBannerText: "Έφτασες το μηνιαίο όριο μηνυμάτων του πλάνου σου. Οι επισκέπτες βλέπουν προσωρινά ένα γενικό μήνυμα \"τεχνικό πρόβλημα\" αντί για απαντήσεις, μέχρι τον επόμενο μήνα ή μέχρι να αναβαθμίσεις.",
+
     landingDocTitle: "Idmon — Καλωσόρισες",
     landingIntro: "Πριν συνεχίσεις, διάλεξε πώς θα μπεις.",
     guestTitle: "Επισκέπτης / Guest",
@@ -677,8 +603,6 @@ const TRANSLATIONS = {
   },
 };
 
-// Χρόνος/ημερομηνία -- ξεχωριστά λεξικά (χρειάζονται πληθυντικό/ενικό, όχι
-// απλά μία μετάφραση λέξη-προς-λέξη).
 const TIME_UNIT_LABELS = {
   en: { justNow: "just now", min: "minute", mins: "minutes", hour: "hour", hours: "hours",
         day: "day", days: "days", month: "month", months: "months", year: "year", years: "years",
@@ -702,10 +626,6 @@ function setLang(lang) {
   localStorage.setItem("uiLang", lang);
 }
 
-// t("key", {name: value}) -- επιστρέφει το μεταφρασμένο string για την
-// τρέχουσα γλώσσα, με προαιρετική αντικατάσταση {placeholders}. Αν λείπει
-// το key από τη γλώσσα, πέφτει πίσω στα Αγγλικά, και μετά στο ίδιο το key
-// (ποτέ crash, ποτέ άδειο κείμενο).
 function t(key, vars) {
   const lang = getLang();
   const dict = TRANSLATIONS[lang] || TRANSLATIONS.en;
@@ -718,10 +638,6 @@ function t(key, vars) {
   return str;
 }
 
-// Εφαρμόζει τις μεταφράσεις σε όλο το στατικό HTML που έχει data-i18n
-// attributes -- καλείται μία φορά στο load κάθε σελίδας. Το δυναμικό
-// περιεχόμενο (λίστες, chat μηνύματα κ.λπ.) καλεί το t() απευθείας μέσα
-// στο δικό του JS, δεν περνάει από εδώ.
 function applyTranslations(root) {
   root = root || document;
   root.querySelectorAll("[data-i18n]").forEach((el) => {
@@ -740,10 +656,6 @@ function applyTranslations(root) {
   document.documentElement.lang = getLang();
 }
 
-// Στήνει το κουμπί εναλλαγής γλώσσας (EN | GR). Στο κλικ, αποθηκεύει τη
-// νέα γλώσσα και ξαναφορτώνει τη σελίδα -- σκόπιμα ΟΧΙ ζωντανή εναλλαγή,
-// ώστε όλο το δυναμικό περιεχόμενο (που ήδη περνάει από t() στο δικό του
-// render) να ξαναφτιαχτεί σωστά από την αρχή, χωρίς ρίσκο μισής ενημέρωσης.
 function initLangToggle(containerId) {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -758,8 +670,6 @@ function initLangToggle(containerId) {
   });
 }
 
-// "3 minutes ago" / "πριν 3 λεπτά" κ.λπ. -- για να διαβάζεται εύκολα η
-// λίστα εγγράφων στο editor, χωρίς ωμές ημερομηνίες ISO.
 function timeAgo(iso) {
   if (!iso) return "";
   const L = TIME_UNIT_LABELS[getLang()] || TIME_UNIT_LABELS.en;
@@ -779,10 +689,6 @@ function timeAgo(iso) {
   return fmt(years, L.year, L.years);
 }
 
-// "Expires in 3 days" / "Λήγει σε 3 ημέρες" -- μόνο για έγγραφα επισκεπτών
-// (workspaces εκτός του προστατευμένου), όπου κάθε ανενεργό έγγραφο έχει
-// αυτόματη λήξη. Επιστρέφει null όταν δεν υπάρχει expiresAt, ώστε το
-// frontend να μη δείξει τίποτα.
 function expiryLabel(expiresAt) {
   if (!expiresAt) return null;
   const diffMs = new Date(expiresAt).getTime() - Date.now();
@@ -791,8 +697,6 @@ function expiryLabel(expiresAt) {
   return t(days === 1 ? "expiresInDay" : "expiresInDays", { days });
 }
 
-// Μία κοινή, γλωσσο-ευαίσθητη μορφοποίηση ημερομηνίας -- χρησιμοποιείται
-// στο article.html (πριν είχε το δικό του, ξεχωριστό αντίγραφο).
 function formatDate(iso) {
   if (!iso) return "";
   const d = new Date(iso);

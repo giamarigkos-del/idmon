@@ -60,6 +60,13 @@
       openLabel: "Άνοιγμα βοηθού",
       closeLabel: "Κλείσιμο",
       fallbackContactPrompt: "Δεν βρήκες αυτό που ήθελες;",
+      // Section Q: pricing tiers -- γενικό μήνυμα προς τον επισκέπτη όταν ο
+      // πελάτης-ιδιοκτήτης έχει εξαντλήσει το μηνιαίο του όριο μηνυμάτων.
+      // Σκόπιμα ΧΩΡΙΣ καμία αναφορά σε "όριο"/"πλάνο"/Idmon -- ίδιο κείμενο
+      // με το limitReachedMessage του shared.js (index.html), κρατημένο
+      // εδώ σαν δικό του αντίγραφο επειδή το widget.js πρέπει να μείνει
+      // αυτόνομο, χωρίς εξάρτηση σε shared.js.
+      limitReached: "Αντιμετωπίζουμε προσωρινά τεχνικό πρόβλημα. Επικοινώνησε απευθείας μαζί μας:",
     },
     en: {
       disclosure: "AI-generated answers",
@@ -70,6 +77,7 @@
       openLabel: "Open assistant",
       closeLabel: "Close",
       fallbackContactPrompt: "Didn't find what you needed?",
+      limitReached: "We're experiencing technical difficulties right now. Please contact us directly:",
     },
   };
   var t = STRINGS[lang] || STRINGS.el;
@@ -125,8 +133,8 @@
 
   // Χρησιμοποιείται ΚΑΙ στο πάντα-ορατό contact-bar κάτω από τον τίτλο, ΚΑΙ
   // στο πιο έντονο μήνυμα που εμφανίζεται κάτω από κάθε "δεν γνωρίζω"
-  // απάντηση -- ίδιο HTML, δύο σημεία εμφάνισης (πάντα-ορατό + πιο έντονο
-  // σε fallback, σύμφωνα με τις βέλτιστες πρακτικές human handoff).
+  // απάντηση, ΚΑΙ (Section Q) στο μήνυμα ορίου -- ίδιο HTML, τρία σημεία
+  // εμφάνισης, μία υλοποίηση.
   function contactLinksHtml() {
     var parts = [];
     if (hasContactLink) {
@@ -218,6 +226,18 @@
     return el;
   }
 
+  // Section Q: το ίδιο "μήνυμα ορίου" με το index.html (showLimitReachedMessage),
+  // απλά χτισμένο απευθείας μέσα στο ήδη υπάρχον bot bubble (botEl) αντί για
+  // ξεχωριστό μήνυμα -- ο επισκέπτης βλέπει ΕΝΑ μήνυμα, όχι δύο διαδοχικά.
+  // Χρησιμοποιεί το ίδιο contactLinksHtml() με το fallback-contact prompt.
+  function renderLimitReachedInto(botEl) {
+    botEl.className = "msg bot";
+    var html = escapeHtml(t.limitReached);
+    var links = contactLinksHtml();
+    if (links) html += " " + links;
+    botEl.innerHTML = html;
+  }
+
   function setOpen(open) {
     panel.classList.toggle("open", open);
     if (open) inputEl.focus();
@@ -247,6 +267,25 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: question }),
       });
+
+      // Section Q: το backend επιστρέφει 429 + {limitReached:true} ΠΡΙΝ
+      // ξεκινήσει το SSE stream όταν ο πελάτης-ιδιοκτήτης έχει εξαντλήσει
+      // το μηνιαίο του όριο μηνυμάτων -- το ελέγχουμε εδώ, πριν το γενικό
+      // "!res.ok" branch παρακάτω, ώστε ο επισκέπτης να δει το σωστό,
+      // γενικό μήνυμα (με τα στοιχεία επικοινωνίας του καταστήματος) αντί
+      // για το ουδέτερο t.unavailable.
+      if (res.status === 429) {
+        var limitData = {};
+        try {
+          limitData = await res.json();
+        } catch (parseErr) {
+          // αγνόησε -- συνεχίζουμε στο γενικό unavailable branch παρακάτω
+        }
+        if (limitData.limitReached) {
+          renderLimitReachedInto(botEl);
+          return;
+        }
+      }
 
       if (!res.ok || !res.body) {
         botEl.innerHTML = escapeHtml(t.unavailable);

@@ -31,6 +31,22 @@ const VISITOR_DOC_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 ημέρες
 const RATE_LIMIT_WINDOW_SECONDS = 60 * 15; // 15 λεπτά
 const RATE_LIMIT_MAX_ATTEMPTS = 5;
 
+// Section Q: pricing tiers -- πραγματικά όρια μηνυμάτων/εγγράφων ανά plan,
+// αντικαθιστούν το παλιό ενιαίο MONTHLY_MESSAGE_LIMIT (που παρέμενε ίδιο
+// για όλους). Τα νούμερα ταιριάζουν με τα δημόσια tiers
+// (decisions-and-pricing): Free/Basic/Pro. docs: Infinity σημαίνει
+// "απεριόριστο" -- ελέγχεται ρητά παρακάτω πριν οποιαδήποτε σύγκριση.
+const PLAN_LIMITS = {
+  free:  { messages: 100,  docs: 5 },
+  basic: { messages: 500,  docs: 20 },
+  pro:   { messages: 2500, docs: Infinity },
+};
+// Ασφαλές fallback -- δεν θα έπρεπε ποτέ να χρειαστεί μετά το migration
+// 0006 (η D1 στήλη έχει δικό της DEFAULT 'basic'), αλλά ρητό εδώ επίσης,
+// ίδιο σκεπτικό με το LEGACY_PBKDF2_ITERATIONS παρακάτω.
+const DEFAULT_PLAN = "basic";
+const LIMIT_NOTIFY_COOLDOWN_SECONDS = 60 * 60 * 24; // 1 φορά/ημέρα, όχι ανά μήνυμα
+
 function clientIp(request) {
   // Cloudflare Workers βάζει πάντα το πραγματικό IP του επισκέπτη εδώ --
   // δεν εμπιστευόμαστε X-Forwarded-For (μπορεί να πλαστογραφηθεί από τον
@@ -55,77 +71,17 @@ async function clearRateLimit(env, bucket, identifier) {
   await env.DOCUMENT_REGISTRY.delete(`ratelimit:${bucket}:${identifier}`);
 }
 
-// Section N: βασικό μηνιαίο όριο μηνυμάτων ανά workspace -- ΔΕΝ είναι ακόμα
-// επιβολή pricing tier (δεν υπάρχει ακόμα πεδίο "plan" στους λογαριασμούς,
-// βλ. decisions-and-pricing), απλά ένα φρένο κόστους: αν κάποιος (bug, bot,
-// κακόβουλη χρήση) χτυπήσει το widget πολλές φορές, δεν πληρώνουμε απεριόριστο
-// Gemini API χωρίς όριο. 3000/μήνα είναι σκόπιμα ΠΑΝΩ από το πιο ακριβό tier
-// (Pro = 2.500 μηνύματα) ώστε να μην μπλοκάρει ποτέ έναν πραγματικό πελάτη
-// μέσα στα φυσιολογικά όρια χρήσης του, μόνο ασυνήθιστη κίνηση πάνω από αυτό.
-const MONTHLY_MESSAGE_LIMIT = 3000;
-const USAGE_KEY_TTL_SECONDS = 60 * 60 * 24 * 40; // 40 μέρες -- καλύπτει τον μήνα + περιθώριο, αυτο-καθαρίζεται
-
-// Section G: ρυθμίσεις widget ανά workspace (εμφάνιση + email ειδοποίησης).
-// Αποθηκεύονται σε ΕΝΑ KV record (όχι ξεχωριστό key ανά πεδίο) ώστε να μη
-// χρειάζονται πολλαπλά reads/writes για κάτι που πάντα διαβάζεται/γράφεται μαζί.
-const DEFAULT_WIDGET_SETTINGS = {
-  accentColor: "#6B7280",
-  botName: "Assistant",
-  logoUrl: null,
-  notifyEmail: null,
-  // Section J: human handoff -- ελεύθερο link (WhatsApp/email/ό,τι θέλει ο
-  // πελάτης) ΚΑΙ ξεχωριστό τηλέφωνο, γιατί το τηλέφωνο είναι το πιο
-  // καθολικά κατανοητό κανάλι (δεν χρειάζεται WhatsApp/email εγκατεστημένο).
-  contactLabel: null,
-  contactUrl: null,
-  contactPhone: null,
-};
-const SETTINGS_ALLOWED_FIELDS = [
-  "accentColor",
-  "botName",
-  "logoUrl",
-  "notifyEmail",
-  "contactLabel",
-  "contactUrl",
-  "contactPhone",
-];
-const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-// Section H: λογαριασμοί πελατών + sessions (D1).
-//
-// PBKDF2 μέσω του ενσωματωμένου Web Crypto του Workers -- καμία εξωτερική
-// βιβλιοθήκη δεν χρειάζεται.
-//
-// PBKDF2_ITERATIONS είναι ο αριθμός που παίρνουν ΝΕΟΙ hashes από εδώ και
-// πέρα (νέο signup, ή αλλαγή password).
-//
-// ΣΗΜΑΝΤΙΚΟ, βρέθηκε σε ζωντανό crash, Σεπτέμβριος 2026: το Cloudflare
-// Workers WebCrypto ΔΕΝ υποστηρίζει PBKDF2 πάνω από 100.000 iterations --
-// καθόλου, ανεξάρτητα από CPU time limit. Ρητό, μόνιμο όριο της
-// πλατφόρμας: "NotSupportedError: Pbkdf2 failed: iteration counts above
-// 100000 are not supported". Δοκιμάστηκε αρχικά 600.000 (το τρέχον OWASP
-// recommendation για PBKDF2-SHA256 γενικά, σε άλλα runtimes), αλλά αυτό
-// έσπαγε ΚΑΘΕ signup/password-reset αμέσως, 100% αναπαραγώγιμο -- όχι
-// περιστασιακό πρόβλημα. Η στήλη users.password_iterations (migration
-// 0005) και η υποδομή για διαφορετικό αριθμό ανά χρήστη παραμένουν χρήσιμα
-// -- αν το Cloudflare ποτέ ανεβάσει αυτό το όριο, μπορούμε να ανεβάσουμε
-// ξανά το PBKDF2_ITERATIONS με ασφάλεια, χωρίς να σπάσει το login των
-// ήδη υπαρχόντων λογαριασμών. Προς το παρόν, 100.000 είναι ήδη το ανώτατο
-// όριο που επιτρέπει η ίδια η πλατφόρμα -- δεν υπάρχει περιθώριο βελτίωσης
-// εδώ χωρίς να αλλάξει το ίδιο το Cloudflare Workers WebCrypto.
-const PBKDF2_ITERATIONS = 100000;
-const LEGACY_PBKDF2_ITERATIONS = 100000; // ίδιο νούμερο προς το παρόν -- βλ. σχόλιο παραπάνω
-const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 ημέρες
-
-// Section I: embed layer (domain allow-list).
-//
-// Απλή, αυστηρή μορφή "domain.tld" ή "sub.domain.tld" -- χωρίς πρωτόκολλο,
-// χωρίς path, χωρίς wildcards. Το "localhost" επιτρέπεται ξεχωριστά (δεν
-// έχει τελεία) για να μπορεί κάποιος να δοκιμάσει το embed script τοπικά
-// πριν το βάλει σε πραγματικό domain.
-const DOMAIN_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
-const MAX_EMBED_DOMAINS = 10;
+// Section Q: επιστρέφει το plan ενός workspace. Το προστατευμένο demo
+// workspace παίρνει "pro" (πρακτικά απεριόριστο, όπως ήταν εξαιρούμενο και
+// πριν). Πραγματικοί λογαριασμοί (Section H) κοιτάνε τη δική τους στήλη
+// plan στη D1. Οτιδήποτε άλλο -- Guest/Developer, χωρίς γραμμή στο users --
+// αντιμετωπίζεται ως "free": λογικό default για ανώνυμη δοκιμαστική χρήση.
+async function getPlanForWorkspace(env, workspaceId) {
+  if (workspaceId === PROTECTED_WORKSPACE_ID) return "pro";
+  const row = await env.DB.prepare("SELECT plan FROM users WHERE workspace_id = ?").bind(workspaceId).first();
+  if (row && row.plan && PLAN_LIMITS[row.plan]) return row.plan;
+  return "free";
+}
 
 function bufferToHex(buffer) {
   return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -196,6 +152,50 @@ function jsonError(status, message) {
   return new Response(JSON.stringify({ error: message }), { status, headers: JSON_HEADERS });
 }
 
+// Section Q: ίδιο σχήμα με jsonError, αλλά με το επιπλέον πεδίο
+// limitReached:true -- έτσι το frontend (index.html/widget.js) μπορεί να
+// ξεχωρίσει "έφτασες το όριο του πλάνου σου" από οποιοδήποτε άλλο 429
+// (π.χ. τον γενικό rate limiter login) και να δείξει το σωστό, γενικό
+// μήνυμα στον τελικό επισκέπτη αντί για τεχνικό σφάλμα.
+function limitReachedError(message) {
+  return new Response(JSON.stringify({ error: message, limitReached: true }), { status: 429, headers: JSON_HEADERS });
+}
+
+// Section N: γενικό, ασφαλές default μέγεθος αν κάποιο workspace δεν έχει
+// ακόμα ρυθμίσεις widget -- ΔΕΝ σχετίζεται με τα PLAN_LIMITS παραπάνω.
+const DEFAULT_WIDGET_SETTINGS = {
+  accentColor: "#6B7280",
+  botName: "Assistant",
+  logoUrl: null,
+  notifyEmail: null,
+  contactLabel: null,
+  contactUrl: null,
+  contactPhone: null,
+};
+const SETTINGS_ALLOWED_FIELDS = [
+  "accentColor",
+  "botName",
+  "logoUrl",
+  "notifyEmail",
+  "contactLabel",
+  "contactUrl",
+  "contactPhone",
+];
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Section H: λογαριασμοί πελατών + sessions (D1). PBKDF2 μέσω του
+// ενσωματωμένου Web Crypto του Workers. Cloudflare Workers WebCrypto ΔΕΝ
+// υποστηρίζει PBKDF2 πάνω από 100.000 iterations -- σκληρό, μόνιμο όριο
+// της πλατφόρμας (βρέθηκε σε ζωντανό crash, Σεπτέμβριος 2026).
+const PBKDF2_ITERATIONS = 100000;
+const LEGACY_PBKDF2_ITERATIONS = 100000;
+const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 ημέρες
+
+// Section I: embed layer (domain allow-list).
+const DOMAIN_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
+const MAX_EMBED_DOMAINS = 10;
+
 async function createSession(env, userId, workspaceId) {
   const token = randomHex(32); // 256-bit, αδύνατο να μαντευτεί
   const createdAt = new Date();
@@ -210,13 +210,10 @@ async function createSession(env, userId, workspaceId) {
 // ΔΕΝ το εμπιστευόμαστε απευθείας -- κάνουμε lookup στη D1 να δούμε σε ποιο
 // workspace αντιστοιχεί ΠΡΑΓΜΑΤΙΚΑ αυτό το token αυτή τη στιγμή (και αν έχει
 // λήξει). Αν το session είναι άκυρο/ληγμένο, επιστρέφουμε null -- ΔΕΝ
-// πέφτουμε πίσω σε ό,τι X-Workspace-Id έστειλε ο client, γιατί αυτό θα
-// ακύρωνε τελείως το νόημα του session (ο client θα μπορούσε να προσποιηθεί
-// οποιοδήποτε workspace απλά γράφοντας το header).
+// πέφτουμε πίσω σε ό,τι X-Workspace-Id έστειλε ο client.
 //
-// Χωρίς κανένα X-Session-Token (Developer password / Guest flow, όπως πριν
-// τα accounts), συνεχίζουμε να εμπιστευόμαστε το X-Workspace-Id header --
-// backward compatible, δεν σπάει τίποτα από το προηγούμενο demo/guest flow.
+// Χωρίς κανένα X-Session-Token (Developer password / Guest flow),
+// συνεχίζουμε να εμπιστευόμαστε το X-Workspace-Id header.
 async function resolveWorkspaceId(request, env) {
   const sessionToken = request.headers.get("X-Session-Token");
   if (!sessionToken) {
@@ -257,20 +254,20 @@ async function handleSignup(request, env) {
   const salt = randomHex(16);
   const passwordHash = await hashPassword(password, salt); // χρησιμοποιεί το τρέχον PBKDF2_ITERATIONS
   const workspaceId = `ws-${randomHex(12)}`;
-  // Ξεχωριστό από το workspaceId ρητά -- αυτό είναι το ΜΟΝΟ αναγνωριστικό
-  // που επιτρέπεται να εμφανίζεται σε δημόσιο <script> tag (βλ. Section I).
   const embedId = `emb-${randomHex(12)}`;
   const createdAt = new Date().toISOString();
 
+  // Section Q: ρητά plan='free' για κάθε νέα, self-service εγγραφή -- δεν
+  // βασιζόμαστε στο DEFAULT 'basic' της στήλης (αυτό υπάρχει μόνο σαν
+  // ασφαλές fallback για ΠΑΛΙΟΤΕΡΕΣ γραμμές από πριν το migration 0006).
+  // Πραγματικοί πληρωμένοι πελάτες αναβαθμίζονται χειροκίνητα (UPDATE users
+  // SET plan=... WHERE email=...) μέχρι να μπει αυτόματη χρέωση.
   const result = await env.DB.prepare(
-    "INSERT INTO users (email, password_hash, password_salt, password_iterations, workspace_id, embed_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  ).bind(email, passwordHash, salt, PBKDF2_ITERATIONS, workspaceId, embedId, createdAt).run();
+    "INSERT INTO users (email, password_hash, password_salt, password_iterations, workspace_id, embed_id, plan, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).bind(email, passwordHash, salt, PBKDF2_ITERATIONS, workspaceId, embedId, "free", createdAt).run();
 
   const session = await createSession(env, result.meta.last_row_id, workspaceId);
 
-  // Best-effort, δεν μπλοκάρει ποτέ το signup αν αργήσει/αποτύχει το email
-  // (ίδια φιλοσοφία με sendEmailViaResend -- "soft" verification, ο
-  // λογαριασμός ήδη δουλεύει κανονικά).
   await sendVerificationEmail(env, new URL(request.url).origin, result.meta.last_row_id, email, lang);
 
   return new Response(
@@ -300,17 +297,11 @@ async function handleLogin(request, env) {
     "SELECT id, password_hash, password_salt, password_iterations, workspace_id, embed_id, email_verified FROM users WHERE email = ?"
   ).bind(email).first();
 
-  // Το ΙΔΙΟ γενικό μήνυμα λάθους είτε δεν υπάρχει το email είτε το password
-  // είναι λάθος -- ΠΟΤΕ δεν αποκαλύπτουμε ποιο από τα δύο ίσχυε (θα βοηθούσε
-  // κάποιον να μαντέψει ποια emails είναι ήδη εγγεγραμμένα).
   if (!user) {
     await recordRateLimitAttempt(env, "login", ip);
     return jsonError(401, "Invalid email or password");
   }
 
-  // password_iterations: NULL για λογαριασμούς από πριν το migration 0005
-  // (η στήλη έχει DEFAULT 100000 στη D1, αλλά είμαστε ρητοί εδώ αντί να
-  // βασιστούμε σιωπηλά σε αυτό).
   const iterations = user.password_iterations || LEGACY_PBKDF2_ITERATIONS;
   const valid = await verifyPassword(password, user.password_salt, user.password_hash, iterations);
   if (!valid) {
@@ -340,14 +331,7 @@ async function handleLogout(request, env) {
   return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
 }
 
-// Section O: password reset -- token σε KV (όχι νέο D1 table, το ίδιο
-// pattern με το OAuth state), αυτο-καθαρίζεται μέσω TTL, μιας χρήσης
-// (διαγράφεται αμέσως μόλις χρησιμοποιηθεί).
 const PASSWORD_RESET_TTL_SECONDS = 60 * 30; // 30 λεπτά
-
-// Section O follow-up: email verification. 24 ώρες -- πιο γενναιόδωρο από
-// το password reset (30 λεπτά) γιατί δεν είναι time-critical σαν αλλαγή
-// κωδικού, ο χρήστης μπορεί εύλογα να μην ανοίξει το email αμέσως.
 const EMAIL_VERIFICATION_TTL_SECONDS = 60 * 60 * 24;
 
 async function sendVerificationEmail(env, origin, userId, userEmail, lang) {
@@ -365,9 +349,6 @@ async function sendVerificationEmail(env, origin, userId, userEmail, lang) {
   await sendEmailViaResend(env, userEmail, subject, text);
 }
 
-// ΠΑΝΤΑ το ΙΔΙΟ γενικό μήνυμα, ανεξάρτητα από το αν το email υπάρχει --
-// αλλιώς κάποιος θα μπορούσε να δοκιμάζει emails εδώ για να μάθει ποια
-// είναι ήδη εγγεγραμμένα (ίδια λογική με το login error message παραπάνω).
 async function handleForgotPassword(request, env) {
   const ip = clientIp(request);
   if (await isRateLimited(env, "forgot-password", ip)) {
@@ -382,7 +363,7 @@ async function handleForgotPassword(request, env) {
     return jsonError(400, "Invalid JSON body");
   }
   const email = (body.email || "").trim().toLowerCase();
-  const lang = body.lang === "el" ? "el" : "en"; // ίδια λογική με τη γλώσσα του bot -- default en
+  const lang = body.lang === "el" ? "el" : "en";
   const genericResponse = new Response(
     JSON.stringify({ ok: true, message: "If that email is registered, a reset link has been sent." }),
     { headers: JSON_HEADERS }
@@ -436,19 +417,11 @@ async function handleResetPassword(request, env) {
   if (!user) return jsonError(400, "This reset link is invalid or has expired.");
 
   const salt = randomHex(16);
-  // Νέο password -> νέο hash με το τρέχον (υψηλότερο) PBKDF2_ITERATIONS,
-  // ανεξάρτητα με τι είχε ο λογαριασμός πριν -- κάθε reset αναβαθμίζει
-  // αυτόματα και τον αριθμό iterations.
   const passwordHash = await hashPassword(newPassword, salt);
   await env.DB.prepare("UPDATE users SET password_hash = ?, password_salt = ?, password_iterations = ? WHERE id = ?")
     .bind(passwordHash, salt, PBKDF2_ITERATIONS, userId).run();
 
-  // Token μιας χρήσης -- διαγράφεται αμέσως, δεν ξαναχρησιμοποιείται.
   await env.DOCUMENT_REGISTRY.delete(`password-reset:${token}`);
-
-  // Ασφάλεια: ένας κωδικός που μόλις άλλαξε (π.χ. επειδή διέρρευσε ο παλιός)
-  // πρέπει να ακυρώσει ΚΑΘΕ υπάρχον session αυτού του χρήστη, όχι μόνο να
-  // επιτρέψει νέο login.
   await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId).run();
 
   const session = await createSession(env, userId, user.workspace_id);
@@ -487,14 +460,11 @@ async function handleVerifyEmail(request, env) {
   const { userId } = JSON.parse(raw);
 
   await env.DB.prepare("UPDATE users SET email_verified = 1 WHERE id = ?").bind(userId).run();
-  // Token μιας χρήσης -- διαγράφεται αμέσως, όπως και το password-reset token.
   await env.DOCUMENT_REGISTRY.delete(`email-verify:${token}`);
 
   return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
 }
 
-// Απαιτεί ενεργό session (σε αντίθεση με forgot-password) -- το "resend"
-// είναι πάντα για τον ΔΙΚΟ σου λογαριασμό, όχι για οποιοδήποτε email δοθεί.
 async function handleResendVerification(request, env) {
   const ip = clientIp(request);
   if (await isRateLimited(env, "resend-verification", ip)) {
@@ -520,7 +490,7 @@ async function handleResendVerification(request, env) {
   try {
     body = await request.json();
   } catch (err) {
-    // lang είναι προαιρετικό εδώ -- αν λείψει/είναι άκυρο, απλά default en.
+    // lang είναι προαιρετικό
   }
   const lang = body.lang === "el" ? "el" : "en";
 
@@ -528,12 +498,6 @@ async function handleResendVerification(request, env) {
   return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
 }
 
-// Section P: account deletion / data export (GDPR δικαιώματα διαγραφής +
-// φορητότητας δεδομένων).
-
-// Γενικό βοηθητικό -- διαγράφει ΟΛΑ τα KV keys κάτω από ένα prefix, με
-// pagination (το list() γυρνάει το πολύ ~1000 keys ανά κλήση, χρειάζεται
-// cursor loop για workspaces με πολλά δεδομένα).
 async function deleteAllByPrefix(env, prefix) {
   let cursor;
   do {
@@ -543,19 +507,7 @@ async function deleteAllByPrefix(env, prefix) {
   } while (cursor);
 }
 
-// Πλήρης καθαρισμός ΟΛΩΝ των δεδομένων ενός workspace -- αγγίζει ΚΑΘΕ
-// σύστημα που κρατάει κάτι scoped σε αυτό το workspace: KV (έγγραφα,
-// ρυθμίσεις, analytics, usage, fallback ερωτήσεις, contradictions),
-// Vectorize (embeddings των εγγράφων), D1 (embed_domains, connections --
-// με best-effort revoke στον εξωτερικό provider πρώτα, ίδια λογική με το
-// disconnect endpoint). ΔΕΝ αγγίζει users/sessions -- αυτό είναι ευθύνη
-// του caller (handleDeleteAccount), ώστε αυτή η function να μπορεί κάποια
-// στιγμή να ξαναχρησιμοποιηθεί και για κάτι άλλο εκτός από πλήρη διαγραφή
-// λογαριασμού (π.χ. "reset workspace" χωρίς διαγραφή account).
 async function deleteAllWorkspaceData(env, workspaceId) {
-  // -- Έγγραφα + τα δικά τους vectors (χρειάζεται το chunkCount ΚΑΘΕ
-  // εγγράφου για να ξαναφτιάξει τα ίδια vector IDs, ίδιο pattern με το
-  // publish/delete/republish παραπάνω) --
   const docPrefix = `session:${workspaceId}:doc:`;
   let cursor;
   do {
@@ -576,16 +528,14 @@ async function deleteAllWorkspaceData(env, workspaceId) {
     cursor = list.list_complete ? undefined : list.cursor;
   } while (cursor);
 
-  // -- Υπόλοιπα KV δεδομένα scoped στο workspace --
   await deleteAllByPrefix(env, `session:${workspaceId}:contradiction:`);
   await deleteAllByPrefix(env, `session:${workspaceId}:fallback:`);
   await deleteAllByPrefix(env, `analytics:${workspaceId}:`);
   await deleteAllByPrefix(env, `usage:${workspaceId}:`);
   await env.DOCUMENT_REGISTRY.delete(`workspace:${workspaceId}:settings`);
   await env.DOCUMENT_REGISTRY.delete(`session:${workspaceId}:notify-cooldown`);
+  await env.DOCUMENT_REGISTRY.delete(`session:${workspaceId}:limit-notify-cooldown`);
 
-  // -- Συνδέσεις τρίτων (π.χ. Google Drive) -- best-effort revoke στον
-  // πάροχο πρώτα, ίδια λογική με το handleDisconnectGoogleDrive.
   const connections = await env.DB.prepare(
     "SELECT provider, refresh_token FROM connections WHERE workspace_id = ?"
   ).bind(workspaceId).all();
@@ -599,7 +549,7 @@ async function deleteAllWorkspaceData(env, workspaceId) {
           body: new URLSearchParams({ token: refreshToken }),
         });
       } catch (err) {
-        // Best-effort -- η διαγραφή προχωράει ούτως ή άλλως.
+        // Best-effort
       }
     }
   }
@@ -607,12 +557,6 @@ async function deleteAllWorkspaceData(env, workspaceId) {
   await env.DB.prepare("DELETE FROM embed_domains WHERE workspace_id = ?").bind(workspaceId).run();
 }
 
-// GET /account/export -- κατεβάζει ΟΛΑ τα δεδομένα του λογαριασμού σε ένα
-// JSON αρχείο (δικαίωμα φορητότητας). ΔΕΝ περιλαμβάνει raw analytics/usage
-// counters ή contradiction/fallback logs -- αυτά είναι λειτουργικά logs,
-// όχι περιεχόμενο που "ανήκει" στον χρήστη· η εξαγωγή εστιάζει σε ό,τι
-// πραγματικά δημιούργησε/ρύθμισε ο ίδιος: στοιχεία λογαριασμού, έγγραφα,
-// ρυθμίσεις widget, allow-listed domains.
 async function handleExportAccountData(request, env) {
   const sessionToken = request.headers.get("X-Session-Token");
   if (!sessionToken) return jsonError(401, "Not logged in");
@@ -669,9 +613,6 @@ async function handleExportAccountData(request, env) {
   });
 }
 
-// POST /account/delete -- ΜΟΝΙΜΗ διαγραφή. Απαιτεί επανάληψη του κωδικού
-// (standard πρακτική πριν από κάθε καταστροφική ενέργεια -- προστασία από
-// π.χ. κλεμμένο/ξεχασμένο ανοιχτό session σε κοινόχρηστο υπολογιστή).
 async function handleDeleteAccount(request, env) {
   const ip = clientIp(request);
   if (await isRateLimited(env, "delete-account", ip)) {
@@ -707,9 +648,6 @@ async function handleDeleteAccount(request, env) {
   }
 
   const workspaceId = session.workspace_id;
-  // Διπλός έλεγχος ασφαλείας -- το πραγματικό demo/developer workspace δεν
-  // είναι account-based, δεν θα έπρεπε καν να φτάσει εδώ, αλλά καλύτερα να
-  // μην υπάρχει ΚΑΝΕΝΑ σενάριο όπου διαγράφεται κατά λάθος.
   if (workspaceId === PROTECTED_WORKSPACE_ID) return jsonError(400, "This workspace cannot be deleted");
 
   await deleteAllWorkspaceData(env, workspaceId);
@@ -719,10 +657,6 @@ async function handleDeleteAccount(request, env) {
   return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
 }
 
-// Δέχεται είτε σκέτο domain ("pelatis.gr") είτε ολόκληρο URL
-// ("https://www.pelatis.gr/"), και επιστρέφει πάντα το ίδιο, καθαρό
-// αποτέλεσμα ("www.pelatis.gr"). Ο χρήστης δεν χρειάζεται να ξέρει ποια
-// μορφή είναι "σωστή" -- το καθαρίζουμε εμείς πριν το validation.
 function normalizeDomain(raw) {
   let domain = String(raw || "").trim().toLowerCase();
   domain = domain.replace(/^https?:\/\//, "");
@@ -732,8 +666,6 @@ function normalizeDomain(raw) {
   return domain;
 }
 
-// embedId + domains μαζί -- το editor τα δείχνει πάντα μαζί (χωρίς domain
-// δεν εμφανίζεται καν το embedId/script), οπότε ένα endpoint αρκεί.
 async function getEmbedSettings(env, workspaceId) {
   const user = await env.DB.prepare(
     "SELECT embed_id FROM users WHERE workspace_id = ?"
@@ -754,11 +686,6 @@ async function handleGetEmbedDomains(request, env) {
   return new Response(JSON.stringify(settings), { headers: JSON_HEADERS });
 }
 
-// PATCH αντικαθιστά ΟΛΟΚΛΗΡΗ τη λίστα (ο client στέλνει το πλήρες, τελικό
-// σύνολο domains) -- ίδια λογική με το ήδη υπάρχον whitelist pattern των
-// widget settings, απλά εφαρμοσμένη σε λίστα αντί για μεμονωμένα πεδία.
-// env.DB.batch() εκτελεί DELETE+INSERT σαν ΜΙΑ atomic πράξη -- είτε
-// περάσουν όλα είτε καμία αλλαγή, ποτέ ενδιάμεση/μισή κατάσταση.
 async function handlePatchEmbedDomains(request, env) {
   const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
@@ -798,14 +725,8 @@ async function handlePatchEmbedDomains(request, env) {
   return new Response(JSON.stringify(settings), { headers: JSON_HEADERS });
 }
 
-// Ειδοποίηση email όταν το bot απαντάει "δεν γνωρίζω" -- ΤΟ ΠΟΛΥ μία φορά
-// την ώρα ανά workspace, ώστε μια σειρά αναπάντητων ερωτήσεων να μη γεμίσει
-// το inbox του πελάτη με ένα email ανά ερώτηση.
 const NOTIFY_COOLDOWN_SECONDS = 60 * 60; // 1 ώρα
 
-// Ελέγχει αν αυτό το workspace ανήκει σε πραγματικό, εγγεγραμμένο λογαριασμό
-// (users.workspace_id) -- σε αντίθεση με έναν ανώνυμο Guest, που δεν έχει
-// καμία γραμμή στο users table, μόνο ένα τυχαίο localStorage ID.
 async function isRealAccountWorkspace(env, workspaceId) {
   const row = await env.DB.prepare(
     "SELECT id FROM users WHERE workspace_id = ?"
@@ -813,15 +734,6 @@ async function isRealAccountWorkspace(env, workspaceId) {
   return !!row;
 }
 
-// Επιστρέφει τα options που πρέπει να περάσουν στο env.DOCUMENT_REGISTRY.put(),
-// και το ισοδύναμο expiresAt (για να το δείχνουμε στο frontend). ΤΡΕΙΣ
-// κατηγορίες workspace, όχι δύο: το προστατευμένο demo workspace ΚΑΙ κάθε
-// πραγματικός λογαριασμός (Account) δεν λήγουν ΠΟΤΕ -- μόνο οι ανώνυμοι
-// Guest επισκέπτες παίρνουν την προσωρινή λήξη 7 ημερών. Πριν αυτή η
-// function δεν ήξερε καν ότι υπάρχουν πραγματικοί λογαριασμοί (γράφτηκε πριν
-// το Section H) -- πραγματικοί πελάτες έχαναν έγγραφα μετά από 7 μέρες
-// αδράνειας, αντίθετα με το "permanent workspace" που υπόσχεται το landing
-// page. Βρέθηκε σε πλήρες audit, Σεπτέμβριος 2026.
 async function docTtlFor(env, workspaceId) {
   if (workspaceId === PROTECTED_WORKSPACE_ID) {
     return { putOptions: {}, expiresAt: null };
@@ -835,9 +747,6 @@ async function docTtlFor(env, workspaceId) {
   };
 }
 
-// Διαβάζει τις ρυθμίσεις widget ενός workspace, με τα defaults σαν βάση
-// (ώστε ένα workspace που ποτέ δεν έκανε save να παίρνει πάντα πλήρες,
-// έγκυρο αντικείμενο -- όχι undefined πεδία που σπάνε το frontend).
 async function getWorkspaceSettings(env, workspaceId) {
   const raw = await env.DOCUMENT_REGISTRY.get(`workspace:${workspaceId}:settings`);
   if (!raw) return { ...DEFAULT_WIDGET_SETTINGS };
@@ -874,8 +783,6 @@ async function handlePatchSettings(request, env) {
 
   const current = await getWorkspaceSettings(env, workspaceId);
 
-  // Whitelist -- αγνοούμε οτιδήποτε άλλο πεδίο σταλεί, ποτέ δεν κάνουμε
-  // spread ολόκληρου του body πάνω στο αποθηκευμένο αντικείμενο.
   for (const field of SETTINGS_ALLOWED_FIELDS) {
     if (field in body) current[field] = body[field];
   }
@@ -905,19 +812,12 @@ async function handlePatchSettings(request, env) {
     );
   }
   if (current.contactUrl && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(current.contactUrl)) {
-    // Χαλαρός έλεγχος -- απλά ζητάμε ένα κανονικό URI scheme (https:,
-    // mailto:, tel:, whatsapp: κλπ), όχι αυστηρή επαλήθευση domain. Ο
-    // πελάτης μπορεί να βάλει ό,τι link χρησιμοποιεί πραγματικά.
     return new Response(
       JSON.stringify({ error: "contactUrl must start with a scheme, e.g. https:// or mailto:" }),
       { status: 400, headers: JSON_HEADERS }
     );
   }
   if (current.contactUrl && /^\s*(javascript|vbscript|data):/i.test(current.contactUrl)) {
-    // Αυτά τα schemes δεν είναι ποτέ έγκυρα contact links -- μόνο τρόπος να
-    // τρέξει κώδικας στον browser του επισκέπτη του widget (XSS), αν το
-    // href γίνει click. Ο παραπάνω γενικός έλεγχος scheme τα αφήνει περνάνε
-    // (είναι έγκυρα URI schemes), γι' αυτό ξεχωριστός, ρητός αποκλεισμός.
     return new Response(
       JSON.stringify({ error: "contactUrl scheme not allowed" }),
       { status: 400, headers: JSON_HEADERS }
@@ -930,22 +830,12 @@ async function handlePatchSettings(request, env) {
     );
   }
 
-  // Ίδια πολιτική TTL με τα υπόλοιπα δεδομένα του workspace: το προστατευμένο
-  // demo workspace δεν λήγει ποτέ, οι επισκέπτες παίρνουν 7 ημέρες που
-  // ανανεώνονται αυτόματα σε κάθε save.
   const { putOptions } = await docTtlFor(env, workspaceId);
   await env.DOCUMENT_REGISTRY.put(`workspace:${workspaceId}:settings`, JSON.stringify(current), putOptions);
 
   return new Response(JSON.stringify(current), { headers: JSON_HEADERS });
 }
 
-// Στέλνει ένα απλό transactional email μέσω Resend (https://resend.com).
-// Best-effort: ΠΟΤΕ δεν πετάει exception προς τα έξω -- μια αποτυχία στέλνοντας
-// email δεν πρέπει ποτέ να χαλάσει την απάντηση προς τον χρήστη. Αν δεν έχει
-// ρυθμιστεί ακόμα το RESEND_API_KEY secret, απλά δεν στέλνει τίποτα (σιωπηλά).
-//
-// Κοινό σημείο για ΟΛΑ τα transactional emails (fallback notification, password
-// reset) -- ένα σημείο να ρυθμίσεις/αλλάξεις τον πάροχο, όχι δύο αντίγραφα.
 async function sendEmailViaResend(env, toEmail, subject, text) {
   if (!env.RESEND_API_KEY) return;
 
@@ -962,7 +852,7 @@ async function sendEmailViaResend(env, toEmail, subject, text) {
       body: JSON.stringify({ from: fromHeader, to: [toEmail], subject, text }),
     });
   } catch (err) {
-    // Σκόπιμα καταπίνουμε το error -- βλ. σχόλιο πάνω από τη function.
+    // Σκόπιμα καταπίνουμε το error
   }
 }
 
@@ -975,11 +865,29 @@ async function sendFallbackNotificationEmail(env, toEmail, question, workspaceId
   );
 }
 
-// Section M: URL sync -- προσθήκη εγγράφου διαβάζοντας μια δημόσια σελίδα
-// αντί για copy-paste. Απλή, "αρκετά καλή" εξαγωγή κειμένου από HTML: όχι
-// πλήρης parser, μόνο αφαίρεση script/style/σχολίων + βασικών tags,
-// μετατροπή block-level στοιχείων σε νέες γραμμές πριν αφαιρεθούν οι
-// υπόλοιπες ετικέτες, αποκωδικοποίηση των πιο κοινών HTML entities.
+// Section Q: ειδοποίηση όταν ο πελάτης εξαντλήσει το μηνιαίο του όριο
+// μηνυμάτων -- ίδιο "best-effort, ποτέ δεν σπάει το query" σκεπτικό με το
+// sendFallbackNotificationEmail, ξεχωριστό cooldown key ώστε να μην
+// μπερδεύεται με τις ειδοποιήσεις fallback ερωτήσεων.
+async function notifyLimitReached(env, workspaceId, plan, limit) {
+  try {
+    const settings = await getWorkspaceSettings(env, workspaceId);
+    if (!settings.notifyEmail) return;
+    const cooldownKey = `session:${workspaceId}:limit-notify-cooldown`;
+    const onCooldown = await env.DOCUMENT_REGISTRY.get(cooldownKey);
+    if (onCooldown) return;
+    await env.DOCUMENT_REGISTRY.put(cooldownKey, "1", { expirationTtl: LIMIT_NOTIFY_COOLDOWN_SECONDS });
+    await sendEmailViaResend(
+      env,
+      settings.notifyEmail,
+      "Έφτασες το μηνιαίο όριο μηνυμάτων",
+      `Ο AI βοηθός σου έφτασε το μηνιαίο όριο μηνυμάτων του πλάνου σου (${plan}, ${limit} μηνύματα/μήνα).\n\nΟι επισκέπτες του site σου θα βλέπουν προσωρινά ένα γενικό μήνυμα με τα δικά σου στοιχεία επικοινωνίας, αντί για απαντήσεις από τον βοηθό, μέχρι να ανανεωθεί ο μήνας ή να αναβαθμίσεις το πλάνο σου.\n\n(workspace: ${workspaceId})`
+    );
+  } catch (err) {
+    // best-effort, όπως και το sendFallbackNotificationEmail
+  }
+}
+
 function extractTitleFromHtml(html) {
   const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   return match ? match[1].replace(/\s+/g, " ").trim() : null;
@@ -991,9 +899,6 @@ function extractTextFromHtml(html) {
   text = text.replace(/<script[\s\S]*?<\/script>/gi, " ");
   text = text.replace(/<style[\s\S]*?<\/style>/gi, " ");
   text = text.replace(/<!--[\s\S]*?-->/g, " ");
-  // Ευριστική αφαίρεση nav/header/footer -- συχνά κουβαλάνε μενού/copyright,
-  // όχι πραγματικό περιεχόμενο. Δεν πιάνει 100% τις περιπτώσεις, αλλά
-  // βελτιώνει σημαντικά την ποιότητα σε τυπικές σελίδες.
   text = text.replace(/<(nav|header|footer)[^>]*>[\s\S]*?<\/\1>/gi, " ");
   text = text.replace(/<\/(p|div|li|h[1-6]|tr)>/gi, "\n");
   text = text.replace(/<br\s*\/?>/gi, "\n");
@@ -1010,11 +915,6 @@ function extractTextFromHtml(html) {
   return text.trim();
 }
 
-// Ελαφρύ slug (λατινικοί χαρακτήρες μόνο) + τυχαία κατάληξη, ώστε το
-// documentId να είναι πάντα μη-κενό και μοναδικό ακόμα κι αν ο τίτλος
-// είναι εξ ολοκλήρου στα ελληνικά (τα ελληνικά γράμματα δεν περνάνε το
-// φίλτρο a-z0-9, οπότε μένει μόνο η τυχαία κατάληξη -- αποδεκτό, το
-// documentId είναι εσωτερικό κλειδί, δεν το βλέπει ποτέ ο χρήστης).
 function slugifyForDocId(str) {
   const base = String(str || "")
     .toLowerCase()
@@ -1061,16 +961,6 @@ async function getEmbedding(text, apiKey) {
   return data.embedding.values;
 }
 
-// Section P: εξαγωγή κειμένου από PDF μέσω του native document understanding
-// του Gemini (inlineData, application/pdf) -- η ΙΔΙΑ γενική δυνατότητα που
-// χρησιμοποιεί ήδη το Invoice Extractor (Tool #3) για την ανάγνωση
-// τιμολογίων, εδώ σε ολόκληρα έγγραφα/πολιτικές. Επιβεβαιωμένο ότι δουλεύει
-// σε όλη την οικογένεια μοντέλων Gemini μέσω generateContent (όχι κάτι
-// αποκλειστικό σε συγκεκριμένη έκδοση) -- χρησιμοποιούμε το ίδιο
-// gemini-3.6-flash με το askGemini(), όχι ξεχωριστό μοντέλο μόνο γι' αυτό.
-// Το Gemini δέχεται inline PDF data μέχρι 20MB συνολικού request -- το δικό
-// μας MAX_UPLOAD_BYTES (2MB) είναι ήδη πολύ πιο αυστηρό, οπότε δεν
-// χρειάζεται ξεχωριστός έλεγχος εδώ.
 async function extractTextFromPdfViaGemini(pdfBytes, apiKey) {
   const prompt = "Μετέγραψε ΟΛΟΚΛΗΡΟ το περιεχόμενο αυτού του εγγράφου σε απλό κείμενο (plain text). Διατήρησε τη δομή (επικεφαλίδες, λίστες, παραγράφους) όσο πιο πιστά γίνεται, αλλά ΧΩΡΙΣ markdown συμβολισμό -- μόνο το κείμενο, γραμμή προς γραμμή, όπως θα το διάβαζε ένας άνθρωπος. Μην προσθέσεις δικό σου σχόλιο, περίληψη, ή εισαγωγή -- μόνο την ίδια τη μεταγραφή.";
 
@@ -1127,12 +1017,6 @@ ${context}
   return answer;
 }
 
-// Section L: streaming.
-//
-// Ίδιο prompt/model με το askGemini(), αλλά καλεί το streamGenerateContent
-// endpoint (alt=sse) και επιστρέφει τα κομμάτια κειμένου ΚΑΘΩΣ φτάνουν, όχι
-// όλα μαζί στο τέλος. async generator -- ο καλών κάνει "for await (const
-// piece of ...)" για να τα διαβάσει ένα-ένα.
 async function* streamGeminiChunks(context, question, apiKey) {
   const prompt = `Απάντησε στην ερώτηση χρησιμοποιώντας ΜΟΝΟ τις παρακάτω πληροφορίες. Αν η απάντηση δεν βρίσκεται στις πληροφορίες, πες ότι δεν γνωρίζεις. Απάντησε στην ίδια γλώσσα με την ερώτηση.
 
@@ -1155,13 +1039,6 @@ ${context}
     throw new Error("Gemini streaming failed: " + errText);
   }
 
-  // Το Google SSE format είναι ίδιο με το δικό μας: γραμμές "data: {...}",
-  // χωρισμένες με κενή γραμμή. Κάθε JSON κομμάτι κουβαλάει ΝΕΟ κείμενο
-  // (incremental), όχι το σωρευμένο μέχρι τώρα -- ο καλών είναι υπεύθυνος
-  // να τα ενώσει. ΣΗΜΑΝΤΙΚΟ: κανονικοποιούμε \r\n σε \n πριν το boundary
-  // detection -- το Google στέλνει CRLF, όχι σκέτο \n (βρέθηκε live, μετά
-  // από debugging: χωρίς αυτό ο parser δεν έβρισκε ΠΟΤΕ πλήρες "data:"
-  // event, οπότε ΚΑΝΕΝΑ κομμάτι κειμένου δεν έβγαινε ποτέ).
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -1200,25 +1077,21 @@ ${context}
   }
 }
 
-// Αφαιρεί τα σύμβολα markdown (#, **, _, [](), κλπ) ώστε τα σύντομα
-// αποσπάσματα (preview) στις κάρτες λίστας να δείχνουν καθαρό κείμενο,
-// όχι raw σύνταξη. Χρησιμοποιείται ΜΟΝΟ για preview -- το πλήρες κείμενο
-// συνεχίζει να αποθηκεύεται/εμφανίζεται ως markdown παντού αλλού.
 function stripMarkdownForPreview(text) {
   return text
-    .replace(/^#{1,6}\s+/gm, "")           // επικεφαλίδες: # ## ### ...
-    .replace(/```[\s\S]*?```/g, " ")        // code blocks
-    .replace(/`([^`]+)`/g, "$1")            // inline code
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1") // εικόνες -> alt text
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")  // links -> κείμενο
-    .replace(/^\s*>\s?/gm, "")              // blockquote >
-    .replace(/^\s*[-*+]\s+/gm, "")          // bullet lists
-    .replace(/^\s*\d+\.\s+/gm, "")          // αριθμημένες λίστες
-    .replace(/\*\*([^*]+)\*\*/g, "$1")      // **bold**
-    .replace(/__([^_]+)__/g, "$1")          // __bold__
-    .replace(/\*([^*]+)\*/g, "$1")          // *italic*
-    .replace(/_([^_]+)_/g, "$1")            // _italic_
-    .replace(/^\s*[-*_]{3,}\s*$/gm, "")     // οριζόντιες γραμμές ---
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s*>\s?/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/_([^_]+)_/g, "$1")
+    .replace(/^\s*[-*_]{3,}\s*$/gm, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1229,9 +1102,6 @@ function makePreview(text, maxWords = 18) {
   return words.length > maxWords ? preview + "…" : preview;
 }
 
-// Καταγράφει μια ερώτηση που δεν βρήκε απάντηση, με αυτόματη λήξη μετά
-// από FALLBACK_TTL_SECONDS -- καμία ενεργή διαδικασία καθαρισμού δεν
-// χρειάζεται, το KV το κάνει μόνο του (passive TTL, όχι background cron).
 async function logFallbackQuestion(env, workspaceId, question) {
   const key = `session:${workspaceId}:fallback:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   await env.DOCUMENT_REGISTRY.put(
@@ -1240,83 +1110,97 @@ async function logFallbackQuestion(env, workspaceId, question) {
     { expirationTtl: FALLBACK_TTL_SECONDS }
   );
 
-  // Ειδοποίηση email, best-effort -- ΠΟΤΕ δεν πρέπει να μπλοκάρει ή να σπάσει
-  // την απάντηση προς τον χρήστη του widget αν κάτι πάει στραβά εδώ.
   try {
     const settings = await getWorkspaceSettings(env, workspaceId);
     if (settings.notifyEmail) {
       const cooldownKey = `session:${workspaceId}:notify-cooldown`;
       const onCooldown = await env.DOCUMENT_REGISTRY.get(cooldownKey);
       if (!onCooldown) {
-        // Το cooldown key μπαίνει ΠΡΙΝ σταλεί το email, όχι μετά -- έτσι
-        // ακόμα κι αν δύο ερωτήσεις έρθουν ταυτόχρονα (race condition), η
-        // χειρότερη περίπτωση είναι δύο emails κοντά στο όριο, ποτέ μηδέν.
         await env.DOCUMENT_REGISTRY.put(cooldownKey, "1", { expirationTtl: NOTIFY_COOLDOWN_SECONDS });
         await sendFallbackNotificationEmail(env, settings.notifyEmail, question, workspaceId);
       }
     }
   } catch (err) {
-    // Σκόπιμα καταπίνουμε το error -- δες σχόλιο πάνω.
+    // Σκόπιμα καταπίνουμε το error
   }
 }
 
-// Section K: analytics.
-//
-// "YYYY-MM-DD" σε UTC -- σταθερό, χωρίς εξάρτηση από timezone του server ή
-// του χρήστη. Το offsetDays=0 είναι σήμερα, offsetDays=1 είναι χθες, κλπ.
 function dateKeyFor(offsetDays) {
   const d = new Date(Date.now() - offsetDays * 24 * 60 * 60 * 1000);
   return d.toISOString().slice(0, 10);
 }
 
-// Section N: επιστρέφει "YYYY-MM" σε UTC -- ίδια λογική με το dateKeyFor
-// του analytics, απλά σε επίπεδο μήνα αντί για ημέρα.
 function monthKeyFor() {
   return new Date().toISOString().slice(0, 7);
 }
 
-// Ελέγχει (ΚΑΙ αυξάνει, αν επιτρέπεται) τον μετρητή μηνυμάτων του μήνα για
-// αυτό το workspace. Το PROTECTED_WORKSPACE_ID (το πραγματικό demo/developer
-// workspace) εξαιρείται -- δεν είναι πελάτης προς προστασία από κόστος, το
-// ελέγχει ο ίδιος ο Giannis.
-//
-// ΣΚΟΠΙΜΑ ελέγχεται ΠΡΙΝ από οποιοδήποτε κλήση προς το Gemini API (βλ. πού
-// καλείται παρακάτω) -- αν το όριο έχει ήδη χτυπηθεί, δεν πληρώνουμε κόστος
-// embedding/generation για μια ερώτηση που έτσι κι αλλιώς θα απορριφθεί.
-//
-// Ίδιο αποδεκτό ρίσκο race condition με το recordAnalytics (KV χωρίς atomic
-// increment) -- σε πολύ σπάνιο ταυτόχρονο traffic το όριο μπορεί να ξεπεραστεί
-// κατά λίγο, αποδεκτό για ένα φρένο κόστους σε αυτή την κλίμακα.
+// Section Q: ξαναγραμμένο -- χρησιμοποιεί πλέον το πραγματικό όριο του plan
+// (PLAN_LIMITS) αντί για το παλιό ενιαίο MONTHLY_MESSAGE_LIMIT. Το
+// MONTHLY_MESSAGE_LIMIT_OVERRIDE (μόνο .dev.vars, τοπικά tests) παραμένει
+// σαν έλεγχος πάνω από ΟΤΙΔΗΠΟΤΕ plan, όχι μόνο basic -- βολικό να δοκιμάσεις
+// τη συμπεριφορά cutoff χωρίς να χρειάζεται πραγματικά 100/500/2500
+// μηνύματα. Το ίδιο ΠΡΙΝ από κάθε κλήση Gemini όπως και πριν -- αν το όριο
+// έχει ήδη χτυπηθεί, δεν πληρώνουμε κόστος embedding/generation.
 async function checkAndIncrementUsage(env, workspaceId) {
   if (workspaceId === PROTECTED_WORKSPACE_ID) return { allowed: true };
 
-  // MONTHLY_MESSAGE_LIMIT_OVERRIDE: ΜΟΝΟ για τοπικά tests (μπαίνει στο
-  // .dev.vars, ποτέ στο wrangler.toml/production) -- έτσι ένα test μπορεί να
-  // ελέγξει το "χτύπημα" του ορίου με π.χ. 3 ερωτήσεις αντί για 3000
-  // πραγματικά (και ακριβά) Gemini calls.
+  const plan = await getPlanForWorkspace(env, workspaceId);
+  const planLimit = PLAN_LIMITS[plan] ? PLAN_LIMITS[plan].messages : PLAN_LIMITS[DEFAULT_PLAN].messages;
   const limit = env.MONTHLY_MESSAGE_LIMIT_OVERRIDE
     ? parseInt(env.MONTHLY_MESSAGE_LIMIT_OVERRIDE, 10)
-    : MONTHLY_MESSAGE_LIMIT;
+    : planLimit;
 
   const key = `usage:${workspaceId}:${monthKeyFor()}`;
   const raw = await env.DOCUMENT_REGISTRY.get(key);
   const count = raw ? parseInt(raw, 10) : 0;
 
   if (count >= limit) {
-    return { allowed: false };
+    await notifyLimitReached(env, workspaceId, plan, limit);
+    return { allowed: false, plan, limit };
   }
 
   await env.DOCUMENT_REGISTRY.put(key, String(count + 1), { expirationTtl: USAGE_KEY_TTL_SECONDS });
-  return { allowed: true };
+  return { allowed: true, plan, limit };
 }
 
-// Best-effort, ΠΟΤΕ δεν πρέπει να μπλοκάρει ή να σπάσει την απάντηση προς
-// τον χρήστη -- ίδια φιλοσοφία με το logFallbackQuestion. ΔΕΝ αποθηκεύεται
-// το ίδιο το κείμενο της ερώτησης εδώ, μόνο μετρητές ανά ημέρα.
-//
-// KV δεν έχει atomic increment -- get+put με πιθανό race condition σε πολύ
-// σπάνια ταυτόχρονα requests. Αποδεκτό ρίσκο για αυτή την κλίμακα (demo/
-// μικρή επιχείρηση), ίδιο επίπεδο συνέπειας με άλλα σημεία του κώδικα.
+// Section Q: ίδιο TTL scheme με πριν (40 μέρες -- καλύπτει τον μήνα +
+// περιθώριο, αυτο-καθαρίζεται).
+const USAGE_KEY_TTL_SECONDS = 60 * 60 * 24 * 40;
+
+// Section Q: μετράει πόσα ΜΗ-διαγραμμένα έγγραφα έχει ένα workspace αυτή
+// τη στιγμή (draft + published, όχι deleted -- τα deleted είναι ήδη
+// "αόρατα" παντού αλλού στο app, το ίδιο εδώ). Χρησιμοποιείται και από το
+// document-limit enforcement (checkDocumentLimit) και από το status endpoint
+// (handleGetUsageStatus) -- μία υλοποίηση.
+async function countActiveDocuments(env, workspaceId) {
+  const prefix = `session:${workspaceId}:doc:`;
+  let cursor;
+  let count = 0;
+  do {
+    const list = await env.DOCUMENT_REGISTRY.list({ prefix, cursor });
+    for (const key of list.keys) {
+      const raw = await env.DOCUMENT_REGISTRY.get(key.name);
+      if (!raw) continue;
+      const doc = JSON.parse(raw);
+      if (doc.status !== "deleted") count++;
+    }
+    cursor = list.list_complete ? undefined : list.cursor;
+  } while (cursor);
+  return count;
+}
+
+// Section Q: ελέγχεται ΠΡΙΝ τη δημιουργία ενός ΝΕΟΥ εγγράφου (όχι σε edit
+// υπάρχοντος -- η επεξεργασία δεν αυξάνει το πλήθος). Το προστατευμένο demo
+// workspace εξαιρείται, όπως και τα υπόλοιπα plan checks.
+async function checkDocumentLimit(env, workspaceId) {
+  if (workspaceId === PROTECTED_WORKSPACE_ID) return { allowed: true };
+  const plan = await getPlanForWorkspace(env, workspaceId);
+  const limit = PLAN_LIMITS[plan] ? PLAN_LIMITS[plan].docs : PLAN_LIMITS[DEFAULT_PLAN].docs;
+  if (limit === Infinity) return { allowed: true, limit: null };
+  const count = await countActiveDocuments(env, workspaceId);
+  return { allowed: count < limit, count, limit, plan };
+}
+
 async function recordAnalytics(env, workspaceId, isFallback) {
   try {
     const key = `analytics:${workspaceId}:${dateKeyFor(0)}`;
@@ -1326,14 +1210,10 @@ async function recordAnalytics(env, workspaceId, isFallback) {
     if (isFallback) current.fallback += 1;
     await env.DOCUMENT_REGISTRY.put(key, JSON.stringify(current), { expirationTtl: ANALYTICS_TTL_SECONDS });
   } catch (err) {
-    // Σκόπιμα καταπίνουμε το error -- τα analytics ΠΟΤΕ δεν πρέπει να
-    // σπάσουν μια πραγματική απάντηση προς τον χρήστη.
+    // Σκόπιμα καταπίνουμε το error
   }
 }
 
-// Διαβάζει τις τελευταίες `days` ημέρες (πιο παλιά→πιο πρόσφατη, βολικό για
-// γράφημα), γεμίζει με {total:0, fallback:0} τις ημέρες χωρίς καμία
-// ερώτηση, και υπολογίζει τα συνολικά νούμερα.
 async function readAnalyticsSummary(env, workspaceId, days) {
   const daily = [];
   for (let offset = days - 1; offset >= 0; offset--) {
@@ -1364,10 +1244,37 @@ async function handleGetAnalyticsSummary(request, env) {
   return new Response(JSON.stringify(summary), { headers: JSON_HEADERS });
 }
 
-// Χειροκίνητος έλεγχος αντιφάσεων: ο editor επιλέγει 2-3 έγγραφα, ΕΝΑ ΜΟΝΟ
-// Gemini call τα συγκρίνει όλα μαζί (όχι ζευγάρι-ζευγάρι -- πιο φθηνό, και ο
-// agent βλέπει όλο το context μαζί, οπότε μπορεί να πιάσει και αντιφάσεις
-// που εμπλέκουν και τα 3 έγγραφα ταυτόχρονα, όχι μόνο ζεύγη).
+// Section Q: GET /usage/status -- πηγή αλήθειας που διαβάζει το editor.html
+// για να δείξει το usage-limit banner, και που θα μπορούσε αργότερα να
+// τροφοδοτήσει ένα πιο αναλυτικό "πλάνο & χρήση" panel. Επιστρέφει και τα
+// δύο όρια (μηνύματα + έγγραφα) μαζί, μία κλήση.
+async function handleGetUsageStatus(request, env) {
+  const workspaceId = await resolveWorkspaceId(request, env);
+  if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
+
+  const plan = await getPlanForWorkspace(env, workspaceId);
+  const limits = PLAN_LIMITS[plan] || PLAN_LIMITS[DEFAULT_PLAN];
+
+  const key = `usage:${workspaceId}:${monthKeyFor()}`;
+  const raw = await env.DOCUMENT_REGISTRY.get(key);
+  const messagesUsed = raw ? parseInt(raw, 10) : 0;
+
+  const docsUsed = await countActiveDocuments(env, workspaceId);
+
+  return new Response(
+    JSON.stringify({
+      plan,
+      messagesUsed,
+      messagesLimit: limits.messages,
+      messagesLimitReached: workspaceId !== PROTECTED_WORKSPACE_ID && messagesUsed >= limits.messages,
+      docsUsed,
+      docsLimit: limits.docs === Infinity ? null : limits.docs,
+      docsLimitReached: workspaceId !== PROTECTED_WORKSPACE_ID && limits.docs !== Infinity && docsUsed >= limits.docs,
+    }),
+    { headers: JSON_HEADERS }
+  );
+}
+
 const COMPARE_MIN_DOCS = 2;
 const COMPARE_MAX_DOCS = 3;
 
@@ -1376,9 +1283,6 @@ async function askGeminiForContradictions(documents, apiKey, lang) {
     .map((doc, i) => `--- Document ${i + 1}: "${doc.title}" ---\n${doc.text}`)
     .join("\n\n");
 
-  // Η περιγραφή ακολουθεί τη γλώσσα του UI editor (EN/GR) που στέλνει το
-  // frontend -- ΟΧΙ αυτόματα τη γλώσσα των ίδιων των εγγράφων, ώστε να
-  // ταιριάζει πάντα με το υπόλοιπο περιβάλλον (τίτλοι κουμπιών, μηνύματα).
   const descriptionLanguage = lang === "el" ? "Greek" : "English";
 
   const prompt = `You are reviewing internal operational documents for contradictions or inconsistencies -- cases where two or more documents give conflicting instructions, numbers, or rules about the same situation.
@@ -1408,8 +1312,6 @@ If you find no contradictions, respond with exactly: []`;
     throw new Error("Gemini comparison failed: " + JSON.stringify(data));
   }
 
-  // Ο Gemini μερικές φορές τυλίγει το JSON σε ```json ... ``` code fence
-  // παρά τη ρητή οδηγία -- το αφαιρούμε πριν το parse.
   const cleaned = rawText
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
@@ -1430,9 +1332,6 @@ If you find no contradictions, respond with exactly: []`;
   return findings;
 }
 
-// Ίδια λογική ανάγνωσης με το handleGetDocument (fullText πρώτα, fallback σε
-// ανακατασκευή από chunks για παλιά έγγραφα χωρίς fullText) -- ξεχωριστό
-// helper, ώστε να μην αγγίξουμε το ήδη δουλεμένο handleGetDocument.
 async function getDocumentForCompare(env, workspaceId, documentId) {
   const kvKey = `session:${workspaceId}:doc:${documentId}`;
   const raw = await env.DOCUMENT_REGISTRY.get(kvKey);
@@ -1506,13 +1405,8 @@ async function handleCompareDocuments(request, env) {
     lang
   );
 
-  // Χαρτογράφηση τίτλων -> documentIds, ώστε το frontend να μπορεί να δείχνει
-  // links προς τα σχετικά έγγραφα, όχι μόνο ονόματα.
   const titleToId = new Map(documents.map((d) => [d.title.trim().toLowerCase(), d.documentId]));
 
-  // Ίδια πολιτική λήξης με τα ίδια τα έγγραφα (docTtlFor) -- ΟΧΙ το σύντομο
-  // fallback TTL. Ένα εύρημα αντίφασης είναι πραγματικό, χρήσιμο περιεχόμενο
-  // που μπορεί να θες να κρατήσεις μέχρι να το λύσεις, όχι "θόρυβος".
   const { putOptions, expiresAt } = await docTtlFor(env, workspaceId);
   const savedFindings = [];
 
@@ -1581,14 +1475,19 @@ async function handleDeleteContradiction(request, env, id) {
   return new Response(JSON.stringify({ id, deleted: true }), { headers: JSON_HEADERS });
 }
 
-// Section M: φτιάχνει ΝΕΟ έγγραφο διαβάζοντας μια δημόσια σελίδα. Πάντα
-// ξεκινάει ως "draft" -- ΙΔΙΑ πολιτική με τα χειροκίνητα uploads (Section
-// D), ώστε ο πελάτης να μπορεί να ελέγξει το αυτόματα εξαγμένο κείμενο
-// πριν το δημοσιεύσει. Καμία κλήση Gemini/Vectorize εδώ -- αυτές γίνονται
-// μόνο στο ρητό "Δημοσίευση", όπως και στα κανονικά uploads.
 async function handleUploadFromUrl(request, env) {
   const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
+
+  // Section Q: κάθε URL sync δημιουργεί ΠΑΝΤΑ νέο έγγραφο -- ελέγχουμε το
+  // όριο εγγράφων του πλάνου ΠΡΙΝ κάνουμε καν fetch στο URL, ώστε να μη
+  // σπαταλάμε τίποτα σε μια εισαγωγή που θα απορριφθεί ούτως ή άλλως.
+  const docLimitCheck = await checkDocumentLimit(env, workspaceId);
+  if (!docLimitCheck.allowed) {
+    return limitReachedError(
+      `Έχεις φτάσει το όριο εγγράφων του πλάνου σου (${docLimitCheck.limit}). Διάγραψε κάποιο έγγραφο ή αναβάθμισε το πλάνο σου.`
+    );
+  }
 
   let body;
   try {
@@ -1630,10 +1529,6 @@ async function handleUploadFromUrl(request, env) {
   const html = await pageResponse.text();
   const text = extractTextFromHtml(html);
 
-  // 10 λέξεις είναι αρκετές για να ξεχωρίσουμε μια πραγματική σελίδα από
-  // μια άδεια/σπασμένη (π.χ. SPA που δεν αποδίδει τίποτα server-side).
-  // ΔΕΝ απαιτούμε "μεγάλο" περιεχόμενο -- πολλές πραγματικές σελίδες
-  // (π.χ. ένα σύντομο FAQ) είναι νόμιμα σύντομες.
   if (!text || text.split(/\s+/).filter(Boolean).length < 10) {
     return jsonError(400, "Could not extract enough readable text from this page");
   }
@@ -1673,19 +1568,20 @@ async function handleUploadFromUrl(request, env) {
   );
 }
 
-// Section P: φτιάχνει ΝΕΟ έγγραφο από ένα ανεβασμένο αρχείο (.txt/.md/.pdf).
-// ΙΔΙΑ πολιτική draft-πρώτα με το URL sync (Section M) και τα χειροκίνητα
-// uploads (Section D) -- ο πελάτης ελέγχει το εξαγμένο κείμενο πριν το
-// δημοσιεύσει, καμία κλήση Vectorize εδώ.
-//
-// .txt/.md: διαβάζεται απευθείας, καμία εξωτερική κλήση.
-// .pdf: extractTextFromPdfViaGemini() -- native document understanding του
-// Gemini, ίδια δυνατότητα με το Invoice Extractor (Tool #3).
-// .docx και άλλα: ΔΕΝ υποστηρίζονται ακόμα (planned, βλ. cloudflare-docx-parser
-// -- βρέθηκε φτιαγμένο ειδικά για Workers, θα προστεθεί σε επόμενο γύρο).
 async function handleUploadFile(request, env) {
   const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
+
+  // Section Q: ίδιος έλεγχος με το URL sync -- κάθε upload αρχείου
+  // δημιουργεί νέο έγγραφο, ελέγχουμε πριν από οτιδήποτε άλλο (πριν καν
+  // διαβάσουμε/επεξεργαστούμε το αρχείο, ειδικά σημαντικό για .pdf που
+  // κοστίζει μια κλήση Gemini).
+  const docLimitCheck = await checkDocumentLimit(env, workspaceId);
+  if (!docLimitCheck.allowed) {
+    return limitReachedError(
+      `Έχεις φτάσει το όριο εγγράφων του πλάνου σου (${docLimitCheck.limit}). Διάγραψε κάποιο έγγραφο ή αναβάθμισε το πλάνο σου.`
+    );
+  }
 
   let formData;
   try {
@@ -1711,9 +1607,6 @@ async function handleUploadFile(request, env) {
     );
   }
 
-  // Έλεγχος μεγέθους ΠΡΙΝ οποιαδήποτε επεξεργασία -- ειδικά σημαντικό για
-  // .pdf, ώστε να μη σπαταλάμε μια (σχετικά ακριβή) κλήση Gemini σε αρχείο
-  // που θα απορριπτόταν ούτως ή άλλως.
   if (file.size > MAX_UPLOAD_BYTES) {
     return jsonError(
       400,
@@ -1791,9 +1684,6 @@ async function handleUpload(request, env) {
     );
   }
 
-  // Όριο μεγέθους -- προστασία δημόσιου demo από ακραία/κατά λάθος μεγάλα
-  // uploads. Ελέγχεται ΠΡΙΝ το chunking/embedding, ώστε να μη σπαταλάμε
-  // κλήσεις στο Gemini για κείμενο που θα απορριφθεί ούτως ή άλλως.
   const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
   const byteSize = new TextEncoder().encode(text).length;
 
@@ -1811,11 +1701,18 @@ async function handleUpload(request, env) {
   const existingRaw = await env.DOCUMENT_REGISTRY.get(kvKey);
   const existing = existingRaw ? JSON.parse(existingRaw) : null;
 
-  // Section D: νέο έγγραφο -> ξεκινάει πάντα ως "draft" (κανείς εκτός από
-  // τον editor δεν το βλέπει, δεν μπαίνει καν στο Vectorize ακόμα -- γλιτώνουμε
-  // τις κλήσεις Gemini μέχρι να δημοσιευτεί ρητά). Υπάρχον έγγραφο -> κρατάει
-  // το status που είχε ήδη (παλιά έγγραφα χωρίς πεδίο status θεωρούνται ήδη
-  // δημοσιευμένα, για συμβατότητα προς τα πίσω).
+  // Section Q: το όριο εγγράφων μετράει μόνο ΝΕΑ έγγραφα -- αν το
+  // documentId ήδη υπάρχει (επεξεργασία), δεν αυξάνεται το πλήθος, άρα δεν
+  // χρειάζεται έλεγχος. Ελέγχουμε ΜΟΝΟ όταν existing είναι null.
+  if (!existing) {
+    const docLimitCheck = await checkDocumentLimit(env, workspaceId);
+    if (!docLimitCheck.allowed) {
+      return limitReachedError(
+        `Έχεις φτάσει το όριο εγγράφων του πλάνου σου (${docLimitCheck.limit}). Διάγραψε κάποιο έγγραφο ή αναβάθμισε το πλάνο σου.`
+      );
+    }
+  }
+
   const status = existing ? (existing.status || "published") : "draft";
 
   if (existing) {
@@ -1847,14 +1744,7 @@ async function handleUpload(request, env) {
     await env.VECTORIZE.upsert(vectors);
     chunkCount = chunks.length;
   }
-  // status "draft" ή "deleted" -- καμία δουλειά στο Vectorize, το έγγραφο
-  // δεν είναι (ακόμα) αναζητήσιμο από το bot.
 
-  // Αποθηκεύουμε το κείμενο όπως ακριβώς το έστειλε ο editor (παράγραφοι,
-  // κενές γραμμές, τίτλοι -- ό,τι δομή είχε ήδη) μία φορά, αυτούσιο.
-  // Το chunking παραπάνω παραμένει ξεχωριστό και χρησιμεύει ΜΟΝΟ για
-  // embeddings/αναζήτηση -- ποτέ πια δεν το χρησιμοποιούμε για να δείξουμε
-  // κείμενο σε άνθρωπο.
   const { putOptions, expiresAt } = await docTtlFor(env, workspaceId);
   await env.DOCUMENT_REGISTRY.put(
     kvKey,
@@ -1898,13 +1788,6 @@ async function handleGetDocument(request, env, documentId) {
 
   const existing = JSON.parse(existingRaw);
 
-  // Διαβάζουμε απευθείας το αυτούσιο κείμενο από το KV -- καμία ανακατασκευή
-  // από chunks πλέον, άρα καμία απώλεια δομής (παράγραφοι, κενές γραμμές κ.λπ.).
-  //
-  // Fallback: έγγραφα που ανέβηκαν ΠΡΙΝ αυτή την αλλαγή δεν έχουν ακόμα
-  // αποθηκευμένο fullText. Γι' αυτά κάνουμε την παλιά ανακατασκευή από τα
-  // chunks, ώστε να μη σπάσουν -- μέχρι να ξανα-ανέβουν και να αποκτήσουν
-  // κανονικό fullText.
   let fullText = existing.fullText;
 
   if (!fullText) {
@@ -1957,17 +1840,11 @@ async function handleListDocuments(request, env) {
         sourceUrl: meta.sourceUrl || null,
         status: meta.status || "published",
         expiresAt: meta.expiresAt || null,
-        // ΝΕΟ: μικρό απόσπασμα του περιεχομένου, ώστε ο editor να αναγνωρίζει
-        // το έγγραφο "με το μάτι" στη λίστα, όχι μόνο από τον τίτλο/documentId.
-        // Reuse του ήδη υπάρχοντος makePreview() -- τίποτα καινούριο.
         preview: meta.fullText ? makePreview(meta.fullText) : "",
       };
     })
   );
 
-  // Πιο πρόσφατα ενημερωμένα πρώτα -- προεπιλεγμένη ταξινόμηση για το
-  // editor dashboard (αυτό που άγγιξες τελευταία είναι το πιο πιθανό
-  // να ψάχνεις τώρα).
   documents.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
 
   return new Response(
@@ -1995,8 +1872,6 @@ async function handleSearchDocuments(request, env) {
     );
   }
 
-  // Ίδιο search με το /query, αλλά topK μεγαλύτερο -- θέλουμε αρκετά chunks
-  // ώστε να καλύψουμε πολλά διαφορετικά έγγραφα, όχι μόνο το κορυφαίο ένα.
   const queryEmbedding = await getEmbedding(query, env.GEMINI_API_KEY);
   const matches = await env.VECTORIZE.query(queryEmbedding, {
     topK: 12,
@@ -2008,8 +1883,6 @@ async function handleSearchDocuments(request, env) {
     return new Response(JSON.stringify({ documents: [] }), { headers: JSON_HEADERS });
   }
 
-  // Ομαδοποίηση chunks ανά έγγραφο -- κρατάμε μόνο το καλύτερο score
-  // και το καλύτερο απόσπασμα (preview) ανά documentId.
   const byDocument = new Map();
   for (const m of matches.matches) {
     const docId = m.metadata.documentId;
@@ -2038,9 +1911,6 @@ async function handleSearchDocuments(request, env) {
   return new Response(JSON.stringify({ documents }), { headers: JSON_HEADERS });
 }
 
-// Μικρό cache ώστε να μη διαβάζουμε το ίδιο έγγραφο δύο φορές από το KV
-// μέσα στο ίδιο request. Χρησιμοποιείται τόσο στο handleQuery όσο και στο
-// handleSearchDocuments -- μία κοινή υλοποίηση αντί για δύο πανομοιότυπες.
 function createDocMetaCache(env, workspaceId) {
   const cache = new Map();
   return async function getDocMeta(documentId) {
@@ -2067,11 +1937,11 @@ async function handleQuery(request, env) {
   return new Response(JSON.stringify(result.body), { status: result.status, headers: JSON_HEADERS });
 }
 
-// Η πραγματική ροή RAG (embedding → semantic search → Gemini), ξεχωρισμένη
-// από το πώς φτάνουμε στο workspaceId. Έτσι το ΙΔΙΟ pipeline εξυπηρετεί
-// τόσο το υπάρχον /query (session/X-Workspace-Id, editor + demo σελίδα)
-// όσο και το νέο δημόσιο /embed/{embedId}/query (Section I, embedded
-// widget σε ξένο site) -- καμία λογική δεν γράφεται δύο φορές.
+// Section Q: το ΜΟΝΟ σημείο που άλλαξε εδώ μέσα είναι το usage-not-allowed
+// branch -- τώρα επιστρέφει limitReached:true και ένα ελληνικό μήνυμα, ώστε
+// το frontend (index.html/widget.js) να δείξει το σωστό γενικό μήνυμα στον
+// επισκέπτη. Η υπόλοιπη ροή (embedding -> Vectorize -> Gemini -> fallback
+// detection) είναι ΑΚΡΙΒΩΣ ίδια με πριν.
 async function runQuery(env, workspaceId, question) {
   if (!question) {
     return { status: 400, body: { error: "question is required" } };
@@ -2079,19 +1949,14 @@ async function runQuery(env, workspaceId, question) {
 
   const usage = await checkAndIncrementUsage(env, workspaceId);
   if (!usage.allowed) {
-    return { status: 429, body: { error: "Monthly message limit reached for this workspace.", limitReached: true } };
+    return {
+      status: 429,
+      body: { error: "Το μηνιαίο όριο μηνυμάτων εξαντλήθηκε.", limitReached: true },
+    };
   }
 
-  // Βήμα 1: embedding της ερώτησης
   const questionEmbedding = await getEmbedding(question, env.GEMINI_API_KEY);
 
-  // Βήμα 2: semantic search στο Vectorize, μόνο μέσα στο σωστό workspace.
-  //
-  // Ένα workspace που ΠΟΤΕ δεν πήρε κανένα δημοσιευμένο έγγραφο δεν έχει
-  // καν δημιουργηθεί σαν namespace στο Vectorize ακόμα -- το Vectorize
-  // πετάει σφάλμα σε αυτή την περίπτωση, ΔΕΝ επιστρέφει απλά άδεια
-  // αποτελέσματα. Το αντιμετωπίζουμε ακριβώς σαν "καμία σχετική
-  // τεκμηρίωση", ίδια συμπεριφορά με το ήδη υπάρχον fallback παρακάτω.
   let matches;
   try {
     matches = await env.VECTORIZE.query(questionEmbedding, {
@@ -2117,17 +1982,12 @@ async function runQuery(env, workspaceId, question) {
     };
   }
 
-  // Βήμα 3: χτίσε το context από τα πιο σχετικά chunks
   const context = matches.matches
     .map((m) => m.metadata.text)
     .join("\n\n---\n\n");
 
-  // Βήμα 4: ρώτα το Gemini
   const answer = await askGemini(context, question, env.GEMINI_API_KEY);
 
-  // Βήμα 5: εντόπισε αν η απάντηση είναι "δεν γνωρίζω" (fallback). Ελέγχουμε
-  // ΚΑΙ τις δύο γλώσσες -- τώρα που ο Gemini απαντάει στη γλώσσα της
-  // ερώτησης, μια αγγλική ερώτηση μπορεί να φέρει αγγλική άρνηση γνώσης.
   const normalizedAnswer = answer.toLowerCase();
   const isFallback =
     normalizedAnswer.includes("δεν γνωρίζω") ||
@@ -2140,10 +2000,8 @@ async function runQuery(env, workspaceId, question) {
   }
   await recordAnalytics(env, workspaceId, isFallback);
 
-  // Βήμα 6: ταξινόμηση κατά score (το Vectorize συνήθως το κάνει ήδη, αλλά το εξασφαλίζουμε)
   const sortedMatches = [...matches.matches].sort((a, b) => b.score - a.score);
 
-  // Η πιο σχετική πηγή -- αυτή που "κουβαλάει" κυρίως την απάντηση
   const topMatch = sortedMatches[0];
 
   let primarySource = null;
@@ -2161,23 +2019,11 @@ async function runQuery(env, workspaceId, question) {
     };
   }
 
-  // Σημείωση: παλιότερα υπολογίζαμε εδώ και "σχετικές ενότητες" (τα
-  // υπόλοιπα matches εκτός του πρώτου), αλλά κανένα frontend δεν τις
-  // δείχνει πια -- αφαιρέθηκε ο υπολογισμός για να μη γίνονται άσκοπα
-  // KV reads σε κάθε ερώτηση. Το πεδίο μένει άδειο για συμβατότητα.
   const relatedSections = [];
 
   return { status: 200, body: { answer, isFallback, primarySource, relatedSections } };
 }
 
-// Section L: streaming version του runQuery(). ΙΔΙΟ pipeline (embedding →
-// semantic search → Gemini), αλλά το βήμα Gemini στέλνει το κείμενο
-// σταδιακά αντί να περιμένουμε ολόκληρη την απάντηση. Χρησιμοποιεί δικό
-// του, απλό SSE πρωτόκολλο (ΟΧΙ το raw format του Google) ώστε το frontend
-// να μη χρειάζεται να ξέρει τίποτα για τα εσωτερικά του Gemini:
-//   {type:"chunk", text} -- ένα νέο κομμάτι κειμένου προς προσθήκη
-//   {type:"done", isFallback, primarySource, relatedSections} -- τέλος
-//   {type:"error", message} -- κάτι πήγε στραβά, το frontend δείχνει γενικό μήνυμα
 function encodeSSE(obj) {
   return new TextEncoder().encode(`data: ${JSON.stringify(obj)}\n\n`);
 }
@@ -2217,12 +2063,6 @@ function buildStreamingQueryResponse(env, workspaceId, question) {
 
         const context = matches.matches.map((m) => m.metadata.text).join("\n\n---\n\n");
 
-        // Δοκιμάζουμε πρώτα το πραγματικό streaming. Αν για οποιονδήποτε
-        // λόγο δεν αποδώσει ΚΑΝΕΝΑ κομμάτι κειμένου (π.χ. προσωρινό
-        // πρόβλημα δικτύου στο ενδιάμεσο fetch προς το Gemini), κάνουμε
-        // fallback στο ήδη δοκιμασμένο, μη-streaming askGemini() -- ο
-        // επισκέπτης παίρνει ΟΠΩΣΔΗΠΟΤΕ απάντηση, έστω μονομιάς αντί για
-        // σταδιακά.
         let fullAnswer = "";
         try {
           for await (const piece of streamGeminiChunks(context, question, env.GEMINI_API_KEY)) {
@@ -2272,7 +2112,7 @@ function buildStreamingQueryResponse(env, workspaceId, question) {
         try {
           controller.enqueue(encodeSSE({ type: "error", message: "Κάτι πήγε στραβά." }));
         } catch (enqueueErr) {
-          // το stream μπορεί να έχει ήδη κλείσει/σπάσει -- αγνόησέ το
+          // το stream μπορεί να έχει ήδη κλείσει/σπάσει
         }
         controller.close();
       }
@@ -2280,6 +2120,10 @@ function buildStreamingQueryResponse(env, workspaceId, question) {
   });
 }
 
+// Section Q: μόνο το usage-not-allowed branch άλλαξε (limitReachedError
+// αντί για jsonError, ίδιο μήνυμα/σχήμα με το runQuery παραπάνω) -- αυτό
+// επιστρέφεται ΠΡΙΝ ξεκινήσει καν το SSE stream, οπότε το frontend το
+// βλέπει σαν κανονικό JSON response, όχι σαν μέρος του stream.
 async function handleQueryStream(request, env) {
   const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
@@ -2292,7 +2136,7 @@ async function handleQueryStream(request, env) {
   }
 
   const usage = await checkAndIncrementUsage(env, workspaceId);
-  if (!usage.allowed) return jsonError(429, "Monthly message limit reached for this workspace.");
+  if (!usage.allowed) return limitReachedError("Το μηνιαίο όριο μηνυμάτων εξαντλήθηκε.");
 
   const stream = buildStreamingQueryResponse(env, workspaceId, body.question);
   return new Response(stream, {
@@ -2300,11 +2144,6 @@ async function handleQueryStream(request, env) {
   });
 }
 
-// Section I: CORS + embed-id → workspaceId, για το δημόσιο embed endpoint.
-//
-// Το Origin header έχει μορφή "https://www.site.gr" (ΧΩΡΙΣ path) -- το
-// URL API μας δίνει καθαρά το hostname χωρίς να χρειάζεται χειροκίνητο
-// parsing με regex.
 function hostnameFromOrigin(origin) {
   try {
     return new URL(origin).hostname.toLowerCase();
@@ -2329,11 +2168,6 @@ async function isOriginAllowedForWorkspace(env, workspaceId, origin) {
   return !!row;
 }
 
-// ΠΡΟΣΟΧΗ: αυτά τα headers μπαίνουν ΜΟΝΟ όταν το origin έχει ήδη περάσει
-// το isOriginAllowedForWorkspace έλεγχο. Ποτέ δεν επιστρέφουμε
-// Access-Control-Allow-Origin σε μη-επιτρεπόμενο origin -- έτσι ο browser
-// του επισκέπτη μπλοκάρει μόνος του την ανάγνωση της απάντησης, ακόμα κι
-// αν το request έφτασε μέχρι τον Worker.
 function corsHeaders(origin) {
   return {
     "Access-Control-Allow-Origin": origin,
@@ -2343,11 +2177,6 @@ function corsHeaders(origin) {
   };
 }
 
-// Preflight: ο browser στέλνει ΠΡΩΤΑ ένα OPTIONS request (χωρίς body) πριν
-// το πραγματικό POST, ακριβώς επειδή το request έχει Content-Type:
-// application/json. Το embedId έρχεται από το ΙΔΙΟ path -- ΟΧΙ από body ή
-// custom header -- ακριβώς επειδή στο preflight δεν υπάρχει καθόλου body
-// να διαβάσουμε.
 async function handleEmbedQueryPreflight(request, env, embedId) {
   const origin = request.headers.get("Origin");
   if (!origin) return new Response(null, { status: 204 });
@@ -2367,9 +2196,6 @@ async function handleEmbedQuery(request, env, embedId) {
   const workspaceId = await resolveWorkspaceIdFromEmbedId(env, embedId);
   if (!workspaceId) return jsonError(404, "Unknown embed id");
 
-  // ΧΩΡΙΣ Origin header καθόλου (π.χ. ένα script/server, όχι πραγματικός
-  // browser) απορρίπτεται ρητά -- ένα embedded widget ΠΑΝΤΑ τρέχει μέσα σε
-  // browser σε ξένο domain, άρα ΠΑΝΤΑ στέλνει Origin.
   if (!origin) return jsonError(403, "Missing Origin header");
 
   const allowed = await isOriginAllowedForWorkspace(env, workspaceId, origin);
@@ -2389,9 +2215,10 @@ async function handleEmbedQuery(request, env, embedId) {
   );
 }
 
-// Streaming εκδοχή του παραπάνω -- ΙΔΙΑ CORS/embed-id λογική, διαφορετικό
-// pipeline (buildStreamingQueryResponse αντί για runQuery) και response
-// (SSE stream αντί για ένα JSON σώμα).
+// Section Q: ίδιο edit με το handleQueryStream -- limitReachedError αντί
+// για jsonError στο usage-not-allowed branch, με τα σωστά CORS headers
+// μαζί (η δημόσια embed έκδοση χρειάζεται πάντα corsHeaders(origin) στο
+// response, σε αντίθεση με το εσωτερικό /query/stream).
 async function handleEmbedQueryStream(request, env, embedId) {
   const origin = request.headers.get("Origin");
 
@@ -2411,7 +2238,12 @@ async function handleEmbedQueryStream(request, env, embedId) {
   }
 
   const usage = await checkAndIncrementUsage(env, workspaceId);
-  if (!usage.allowed) return jsonError(429, "Monthly message limit reached for this workspace.");
+  if (!usage.allowed) {
+    return new Response(
+      JSON.stringify({ error: "Το μηνιαίο όριο μηνυμάτων εξαντλήθηκε.", limitReached: true }),
+      { status: 429, headers: { ...JSON_HEADERS, ...corsHeaders(origin) } }
+    );
+  }
 
   const stream = buildStreamingQueryResponse(env, workspaceId, body.question);
   return new Response(stream, {
@@ -2444,8 +2276,6 @@ async function handleGetFallbackQuestions(request, env) {
     })
   );
 
-  // Πιο πρόσφατες πρώτα -- αυτό που ρωτήθηκε τελευταία είναι το πιο
-  // πιθανό να θέλεις να δεις πρώτο.
   const cleaned = questions
     .filter(Boolean)
     .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
@@ -2456,9 +2286,6 @@ async function handleGetFallbackQuestions(request, env) {
   );
 }
 
-// Ο editor διαχειρίστηκε ήδη μια ερώτηση χωρίς απάντηση (π.χ. πρόσθεσε
-// περιεχόμενο γι' αυτήν) -- τη διαγράφει από τη λίστα χειροκίνητα, χωρίς
-// να περιμένει το 7ήμερο TTL να τη σβήσει μόνο του.
 async function handleDeleteFallbackQuestion(request, env, id) {
   const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
@@ -2474,15 +2301,6 @@ async function handleDeleteFallbackQuestion(request, env, id) {
   return new Response(JSON.stringify({ id, deleted: true }), { headers: JSON_HEADERS });
 }
 
-// Section D: "Δημοσίευση" -- παίρνει το ήδη αποθηκευμένο fullText ενός
-// πρόχειρου εγγράφου και κάνει (τώρα πρώτη φορά) chunking + embeddings +
-// upsert στο Vectorize. Ίδιο ακριβώς μοτίβο με το /upload, απλά χωρίς νέο
-// κείμενο -- ο χρήστης απλά εγκρίνει αυτό που ήδη έγραψε.
-// Section M: ξαναδιαβάζει το ΗΔΗ αποθηκευμένο sourceUrl ενός εγγράφου (π.χ.
-// η σελίδα του πελάτη άλλαξε μετά το αρχικό sync). Αν το έγγραφο ήταν ήδη
-// δημοσιευμένο, ξανακάνει chunking/embedding ώστε το bot να βλέπει αμέσως
-// το νέο περιεχόμενο -- ΙΔΙΑ λογική με το handlePublishDocument. Αν είναι
-// ακόμα draft, απλά ενημερώνει το fullText, χωρίς καμία κλήση Gemini.
 async function handleRefreshFromUrl(request, env, documentId) {
   const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
@@ -2568,8 +2386,6 @@ async function handlePublishDocument(request, env, documentId) {
 
   const doc = JSON.parse(raw);
 
-  // Defensive καθάρισμα -- κανονικά δεν θα υπάρχουν ήδη vectors αφού ήταν
-  // draft, αλλά δεν κοστίζει τίποτα να το εξασφαλίσουμε.
   if (doc.chunkCount) {
     const idsToDelete = [];
     for (let i = 0; i < doc.chunkCount; i++) idsToDelete.push(`${documentId}-chunk-${i}`);
@@ -2603,8 +2419,6 @@ async function handlePublishDocument(request, env, documentId) {
   );
 }
 
-// Section D: "Διαγραφή" (soft-delete) -- σβήνει τα vectors (το bot σταματάει
-// αμέσως να το ξέρει) αλλά ΔΕΝ σβήνει το KV record, ώστε να υπάρχει "Undo".
 async function handleDeleteDocument(request, env, documentId) {
   const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
@@ -2644,9 +2458,6 @@ async function handleDeleteDocument(request, env, documentId) {
   );
 }
 
-// Section D: "Επαναφορά" -- ξαναφέρνει ένα διαγραμμένο έγγραφο σαν πρόχειρο.
-// Σκόπιμα ΔΕΝ το ξαναδημοσιεύει αυτόματα -- ο χρήστης πρέπει να πατήσει
-// ρητά "Δημοσίευση" ξανά, ώστε να μην ξαναγίνει κάτι ζωντανό χωρίς έλεγχο.
 async function handleRestoreDocument(request, env, documentId) {
   const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
@@ -2667,15 +2478,20 @@ async function handleRestoreDocument(request, env, documentId) {
 
   const doc = JSON.parse(raw);
 
-  // Μόνο πραγματικά διαγραμμένα έγγραφα μπορούν να γίνουν restore. Χωρίς
-  // αυτό τον έλεγχο, ένα POST απευθείας στο endpoint (όχι μέσω editor.html,
-  // που δείχνει το κουμπί μόνο για status "deleted") θα μπορούσε να γυρίσει
-  // ένα ήδη-published έγγραφο σε "draft" κατά λάθος, χάνοντας το δημοσιευμένο
-  // status του χωρίς προειδοποίηση. Βρέθηκε σε πλήρες audit, Σεπτέμβριος 2026.
   if (doc.status !== "deleted") {
     return new Response(
       JSON.stringify({ error: "Only deleted documents can be restored" }),
       { status: 400, headers: JSON_HEADERS }
+    );
+  }
+
+  // Section Q: η επαναφορά ενός διαγραμμένου εγγράφου ουσιαστικά ξαναφέρνει
+  // ένα ενεργό έγγραφο -- ίδιο σκεπτικό με νέο έγγραφο, ελέγχουμε το όριο
+  // πριν το κάνουμε ξανά "μετρήσιμο".
+  const docLimitCheck = await checkDocumentLimit(env, workspaceId);
+  if (!docLimitCheck.allowed) {
+    return limitReachedError(
+      `Έχεις φτάσει το όριο εγγράφων του πλάνου σου (${docLimitCheck.limit}). Διάγραψε κάποιο άλλο έγγραφο πρώτα, ή αναβάθμισε το πλάνο σου.`
     );
   }
 
@@ -2691,44 +2507,11 @@ async function handleRestoreDocument(request, env, documentId) {
   );
 }
 
-// Section N: Google Drive OAuth connector.
-//
-// Δύο endpoints: /oauth/google/start ξεκινάει τη ροή (redirect στη Google),
-// /oauth/google/callback την ολοκληρώνει (ανταλλάσσει το code για tokens
-// και τα αποθηκεύει κρυπτογραφημένα στη D1). Ο workspaceId περνάει σαν
-// query param -- αυτό είναι top-level browser navigation (ο χρήστης
-// ανοίγει ένα link, δεν υπάρχει X-Session-Token header σε redirect flow),
-// ίδιο μοντέλο εμπιστοσύνης με το ήδη υπάρχον Guest/Developer flow (βλ.
-// Known limitations στο README).
-//
-// CSRF protection: ένα τυχαίο "state" αποθηκεύεται στο KV με σύντομη λήξη
-// (10 λεπτά), δείχνοντας ποιο workspaceId ξεκίνησε τη ροή. Το callback το
-// ελέγχει και το διαγράφει αμέσως μετά τη χρήση -- ένα state δεν
-// ξαναχρησιμοποιείται ποτέ, ίδια passive-TTL φιλοσοφία με τα υπόλοιπα
-// δεδομένα του project (καμία cron διαδικασία).
 const OAUTH_STATE_TTL_SECONDS = 60 * 10; // 10 λεπτά
-// openid + email δεν είναι ευαίσθητα scopes -- χρειάζονται μόνο για να
-// μπορούμε να καλέσουμε το userinfo endpoint και να δείξουμε ποιος
-// λογαριασμός συνδέθηκε (connected_by_email). Χωρίς αυτά, το drive.readonly
-// access token δεν έχει δικαίωμα να διαβάσει καν το email του χρήστη.
 const GOOGLE_DRIVE_SCOPE_REQUIRED = "https://www.googleapis.com/auth/drive.readonly";
 const GOOGLE_DRIVE_SCOPE =
   `${GOOGLE_DRIVE_SCOPE_REQUIRED} openid email`;
 
-// Ειδική εκδοχή του resolveWorkspaceId() για ΑΥΤΟ το ένα endpoint: το
-// /oauth/google/start ανοίγει με πραγματική πλοήγηση browser (όχι fetch),
-// άρα δεν μπορεί να στείλει το X-Session-Token header -- ο μόνος τρόπος να
-// περάσει έγκυρο session είναι μέσω query param. ΠΟΤΕ δεν εμπιστευόμαστε
-// απευθείας ένα raw workspace_id σε αυτό το endpoint όταν υπάρχει
-// session_token -- κάνουμε το ΙΔΙΟ D1 lookup με το resolveWorkspaceId, ώστε
-// να μην μπορεί κάποιος να "δέσει" τη δική του σύνδεση Google Drive σε
-// workspace άλλου απλά γράφοντας ένα workspace_id που έμαθε/μάντεψε.
-//
-// Χωρίς session_token (Guest/Developer flow, χωρίς λογαριασμό), συνεχίζουμε
-// να εμπιστευόμαστε το raw workspace_id -- ίδιο backward-compatible σκεπτικό
-// με το resolveWorkspaceId. Βρέθηκε σε πλήρες audit, Σεπτέμβριος 2026: πριν
-// αυτή τη διόρθωση, ΚΑΘΕ /oauth/google/start δεχόταν οποιοδήποτε workspace_id
-// χωρίς κανέναν έλεγχο.
 async function resolveWorkspaceIdForOAuthStart(request, env) {
   const url = new URL(request.url);
   const sessionToken = url.searchParams.get("session_token");
@@ -2759,8 +2542,8 @@ async function handleOAuthGoogleStart(request, env) {
   authUrl.searchParams.set("redirect_uri", env.GOOGLE_REDIRECT_URI);
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("scope", GOOGLE_DRIVE_SCOPE);
-  authUrl.searchParams.set("access_type", "offline"); // ζητάμε refresh_token
-  authUrl.searchParams.set("prompt", "consent select_account"); // πάντα ζητά consent ΚΑΙ επιλογή λογαριασμού (ποτέ σιωπηλή παράλειψη λόγω ενεργού session)
+  authUrl.searchParams.set("access_type", "offline");
+  authUrl.searchParams.set("prompt", "consent select_account");
   authUrl.searchParams.set("state", state);
 
   return Response.redirect(authUrl.toString(), 302);
@@ -2773,7 +2556,6 @@ async function handleOAuthGoogleCallback(request, env) {
   const errorParam = url.searchParams.get("error");
 
   if (errorParam) {
-    // Ο χρήστης πάτησε "Deny" στη Google, ή κάτι άλλο ακυρώθηκε εκεί.
     return Response.redirect(new URL("/editor.html?google_drive_error=denied", url).toString(), 302);
   }
 
@@ -2784,12 +2566,10 @@ async function handleOAuthGoogleCallback(request, env) {
   const stateKey = `oauth:state:${state}`;
   const workspaceId = await env.DOCUMENT_REGISTRY.get(stateKey);
   if (!workspaceId) {
-    // Άκυρο, ληγμένο, ή ήδη χρησιμοποιημένο state -- ποτέ δεν προχωράμε.
     return Response.redirect(new URL("/editor.html?google_drive_error=invalid_state", url).toString(), 302);
   }
-  await env.DOCUMENT_REGISTRY.delete(stateKey); // ένα state, μία χρήση
+  await env.DOCUMENT_REGISTRY.delete(stateKey);
 
-  // Ανταλλαγή του authorization code για access_token + refresh_token.
   const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -2807,28 +2587,15 @@ async function handleOAuthGoogleCallback(request, env) {
     return Response.redirect(new URL("/editor.html?google_drive_error=token_exchange_failed", url).toString(), 302);
   }
 
-  // refresh_token λείπει αν ο χρήστης έχει ΞΑΝΑδώσει consent στο παρελθόν
-  // και για κάποιο λόγο το prompt=consent δεν το ανάγκασε -- σε αυτή την
-  // περίπτωση δεν μπορούμε να ανανεώσουμε αργότερα, οπότε το αντιμετωπίζουμε
-  // ως αποτυχία και ζητάμε να ξαναδοκιμάσει τη σύνδεση.
   if (!tokenData.refresh_token) {
     return Response.redirect(new URL("/editor.html?google_drive_error=no_refresh_token", url).toString(), 302);
   }
 
-  // Η Google επιστρέφει το πραγματικά εγκεκριμένο scope στο ίδιο το token
-  // response (πεδίο "scope", χωρισμένο με κενά). ΠΟΤΕ δεν το εμπιστευόμαστε
-  // σιωπηλά -- η νεότερη, πιο αναλυτική οθόνη συναίνεσης της Google επιτρέπει
-  // στον χρήστη να ξε-τσεκάρει μεμονωμένα δικαιώματα (π.χ. να εγκρίνει μόνο
-  // το email αλλά όχι το Drive). Αν λείπει το scope που χρειαζόμαστε, δεν
-  // αποθηκεύουμε καθόλου σύνδεση -- θα ήταν άχρηστη και θα απέτυχε αργότερα
-  // με ασαφές σφάλμα στο πρώτο πραγματικό API call.
   const grantedScopes = (tokenData.scope || "").split(/\s+/);
   if (!grantedScopes.includes(GOOGLE_DRIVE_SCOPE_REQUIRED)) {
     return Response.redirect(new URL("/editor.html?google_drive_error=missing_drive_scope", url).toString(), 302);
   }
 
-  // Ποιος Google λογαριασμός συνδέθηκε -- μόνο για εμφάνιση στο UI
-  // ("Συνδεδεμένο ως x@gmail.com"), ποτέ για authorization logic.
   let connectedByEmail = null;
   try {
     const userInfoResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
@@ -2837,7 +2604,7 @@ async function handleOAuthGoogleCallback(request, env) {
     const userInfo = await userInfoResponse.json();
     connectedByEmail = userInfo.email || null;
   } catch (err) {
-    // Best-effort -- η σύνδεση δουλεύει κανονικά ακόμα κι αν αυτό αποτύχει.
+    // Best-effort
   }
 
   const encryptedAccessToken = await encryptToken(tokenData.access_token, env.TOKEN_ENCRYPTION_KEY);
@@ -2870,13 +2637,7 @@ async function handleOAuthGoogleCallback(request, env) {
   return Response.redirect(new URL("/editor.html?google_drive_connected=1", url).toString(), 302);
 }
 
-// Section N (συνέχεια): χρήση της σύνδεσης Google Drive.
-//
-// getValidGoogleDriveAccessToken() είναι το ΜΟΝΟ σημείο που διαβάζει την
-// D1, αποκρυπτογραφεί, και -- αν χρειάζεται -- ανανεώνει το access token.
-// Κάθε άλλος handler που χρειάζεται να μιλήσει στο Drive API περνάει από
-// εδώ, ποτέ δεν διαβάζει το connections table απευθείας.
-const TOKEN_REFRESH_BUFFER_MS = 60 * 1000; // ανανεώνουμε 1 λεπτό πριν τη λήξη, όχι ακριβώς πάνω στη λήξη
+const TOKEN_REFRESH_BUFFER_MS = 60 * 1000;
 
 async function getValidGoogleDriveAccessToken(env, workspaceId) {
   const row = await env.DB.prepare(
@@ -2889,15 +2650,11 @@ async function getValidGoogleDriveAccessToken(env, workspaceId) {
     throw err;
   }
 
-  // Ακόμα έγκυρο -- δεν χρειάζεται καμία κλήση στη Google.
   if (row.expires_at - TOKEN_REFRESH_BUFFER_MS > Date.now()) {
     const accessToken = await decryptToken(row.access_token, env.TOKEN_ENCRYPTION_KEY);
     return { accessToken, connectedByEmail: row.connected_by_email };
   }
 
-  // Έληξε (ή κοντεύει) -- ανανέωση μέσω του refresh_token. Το refresh_token
-  // ΔΕΝ αλλάζει σε αυτή τη ροή (η Google συνήθως δεν στέλνει καινούργιο),
-  // οπότε ενημερώνουμε ΜΟΝΟ το access_token/expires_at στη D1.
   const refreshToken = await decryptToken(row.refresh_token, env.TOKEN_ENCRYPTION_KEY);
 
   const refreshResponse = await fetch("https://oauth2.googleapis.com/token", {
@@ -2913,9 +2670,6 @@ async function getValidGoogleDriveAccessToken(env, workspaceId) {
 
   const refreshData = await refreshResponse.json();
   if (!refreshResponse.ok || !refreshData.access_token) {
-    // Το refresh token μπορεί να έχει ανακληθεί χειροκίνητα από τον χρήστη
-    // (Google Account settings) -- σε αυτή την περίπτωση δεν υπάρχει τίποτα
-    // άλλο να κάνουμε εκτός από το να ζητήσουμε νέα σύνδεση.
     const err = new Error("Η ανανέωση του Google Drive token απέτυχε, χρειάζεται νέα σύνδεση");
     err.code = "refresh_failed";
     throw err;
@@ -2932,11 +2686,6 @@ async function getValidGoogleDriveAccessToken(env, workspaceId) {
   return { accessToken: newAccessToken, connectedByEmail: row.connected_by_email };
 }
 
-// Section N (συνέχεια): αποσύνδεση. Καλεί το revoke endpoint της Google
-// (best-effort -- ακόμα κι αν αποτύχει, π.χ. το token είχε ήδη ανακληθεί
-// χειροκίνητα, συνεχίζουμε ούτως ή άλλως να διαγράψουμε τη γραμμή μας)
-// ΚΑΙ διαγράφει τη γραμμή από τη D1. Μετά την αποσύνδεση, ο χρήστης βλέπει
-// ξανά την αρχική οθόνη "Σύνδεση Google Drive".
 async function handleDisconnectGoogleDrive(request, env) {
   const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
@@ -2954,7 +2703,7 @@ async function handleDisconnectGoogleDrive(request, env) {
         body: new URLSearchParams({ token: refreshToken }),
       });
     } catch (err) {
-      // Best-effort -- η τοπική αποσύνδεση προχωράει ούτως ή άλλως παρακάτω.
+      // Best-effort
     }
   }
 
@@ -2965,11 +2714,6 @@ async function handleDisconnectGoogleDrive(request, env) {
   return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
 }
 
-// Ποια Google Workspace mimeTypes υποστηρίζουμε, και πώς εξάγεται η καθεμία
-// σε απλό κείμενο κατάλληλο για το ίδιο draft-then-publish pipeline που
-// έχουν ήδη τα χειροκίνητα uploads και το URL sync (Section D/M). Το Sheets
-// export βγάζει ΜΟΝΟ το πρώτο φύλλο σαν CSV -- γνωστός περιορισμός, αρκετό
-// για πρώτη έκδοση.
 const GOOGLE_DRIVE_EXPORT_MIME_TYPES = {
   "application/vnd.google-apps.document": "text/plain",
   "application/vnd.google-apps.spreadsheet": "text/csv",
@@ -2987,8 +2731,6 @@ async function handleListGoogleDriveFiles(request, env) {
     return jsonError(502, err.message);
   }
 
-  // Μόνο Google Docs/Sheets, όχι folders/PDFs/εικόνες κλπ -- αυτά είναι τα
-  // δύο τύποι που ξέρουμε να εξάγουμε σε καθαρό κείμενο (βλ. πίνακα πάνω).
   const query =
     "(mimeType='application/vnd.google-apps.document' or mimeType='application/vnd.google-apps.spreadsheet') and trashed=false";
 
@@ -3029,6 +2771,19 @@ async function handleImportGoogleDriveFiles(request, env) {
   }
   if (body.files.length > 20) {
     return jsonError(400, "Maximum 20 files per import request");
+  }
+
+  // Section Q: εισαγωγή από Drive δημιουργεί επίσης ΝΕΑ έγγραφα -- ελέγχουμε
+  // το όριο ΜΙΑ φορά πριν την εισαγωγή, με βάση το πόσα ζητάει να εισάγει
+  // ο χρήστης, ώστε να μην ξεφύγει το πλήθος ενδιάμεσα σε ένα batch import.
+  const docLimitCheck = await checkDocumentLimit(env, workspaceId);
+  if (docLimitCheck.limit !== null && docLimitCheck.limit !== undefined) {
+    const currentCount = await countActiveDocuments(env, workspaceId);
+    if (currentCount >= docLimitCheck.limit) {
+      return limitReachedError(
+        `Έχεις φτάσει το όριο εγγράφων του πλάνου σου (${docLimitCheck.limit}). Διάγραψε κάποιο έγγραφο ή αναβάθμισε το πλάνο σου.`
+      );
+    }
   }
 
   let accessToken;
@@ -3110,10 +2865,6 @@ async function handleImportGoogleDriveFiles(request, env) {
   return new Response(JSON.stringify({ imported, failed }), { headers: JSON_HEADERS });
 }
 
-// Απλός έλεγχος κωδικού για τη λειτουργία "Developer" στη landing page.
-// Ο πραγματικός κωδικός ζει ΜΟΝΟ σαν Worker secret (env.DEVELOPER_PASSWORD),
-// ποτέ μέσα στον κώδικα. Καμία session/cookie/token -- το frontend απλά
-// θυμάται την επιτυχία τοπικά (localStorage) μετά από αυτόν τον έλεγχο.
 async function handleDeveloperLogin(request, env) {
   const ip = clientIp(request);
   if (await isRateLimited(env, "developer-login", ip)) {
@@ -3216,6 +2967,13 @@ export default {
       return handlePatchSettings(request, env);
     }
 
+    // Section Q: usage/plan status -- διαβάζεται από το editor.html για να
+    // αποφασίσει αν θα δείξει το usage-limit banner (και μελλοντικά,
+    // πιθανό αναλυτικό "πλάνο & χρήση" panel).
+    if (url.pathname === "/usage/status" && request.method === "GET") {
+      return handleGetUsageStatus(request, env);
+    }
+
     if (url.pathname === "/embed/domains" && request.method === "GET") {
       return handleGetEmbedDomains(request, env);
     }
@@ -3228,9 +2986,6 @@ export default {
       return handleGetAnalyticsSummary(request, env);
     }
 
-    // Public embed endpoint -- ΔΕΝ χρησιμοποιεί resolveWorkspaceId (session/
-    // X-Workspace-Id). Το embedId έρχεται από το path, το CORS middleware
-    // ελέγχει το Origin πριν προχωρήσει καθόλου στη λογική RAG.
     const embedQueryMatch = url.pathname.match(/^\/embed\/([^/]+)\/query$/);
     if (embedQueryMatch) {
       const embedId = embedQueryMatch[1];
@@ -3238,9 +2993,6 @@ export default {
       if (request.method === "POST") return handleEmbedQuery(request, env, embedId);
     }
 
-    // Section L: streaming -- ίδιο path pattern, /stream στο τέλος. Το
-    // preflight είναι το ΙΔΙΟ (ελέγχει μόνο Origin/embedId, δεν διαφέρει
-    // ανάλογα με streaming ή όχι), απλά καλείται και για τα δύο paths.
     const embedQueryStreamMatch = url.pathname.match(/^\/embed\/([^/]+)\/query\/stream$/);
     if (embedQueryStreamMatch) {
       const embedId = embedQueryStreamMatch[1];
@@ -3283,17 +3035,12 @@ export default {
     }
 
     if (url.pathname.startsWith("/document/") && request.method === "GET") {
-      // Safety net: αν το documentId περιέχει κενά ή ειδικούς χαρακτήρες
-      // (π.χ. "Verification process" -> "Verification%20process" στο URL),
-      // αποκωδικοποιούμε πριν το χρησιμοποιήσουμε ως KV key. Χωρίς αυτό,
-      // το lookup αποτυγχάνει σιωπηλά με "Document not found" ακόμα κι όταν
-      // το έγγραφο υπάρχει.
       const rawId = url.pathname.split("/document/")[1];
       let documentId = rawId;
       try {
         documentId = decodeURIComponent(rawId);
       } catch (err) {
-        // Αν το decode αποτύχει (κατεστραμμένη ακολουθία), προχωράμε με το raw.
+        // Αν το decode αποτύχει, προχωράμε με το raw.
       }
       return handleGetDocument(request, env, documentId);
     }

@@ -49,6 +49,7 @@
   .msg.user{align-self:flex-end;background:var(--accent-soft);color:var(--accent);padding:8px 11px;border-radius:10px 10px 2px 10px;}
   .msg.bot{background:var(--surface-2);border:1px solid var(--border);padding:8px 11px;border-radius:2px 10px 10px 10px;}
   .msg.bot.fallback{border-color:var(--warn-border);background:var(--warn-bg);}
+  .msg.bot.fallback a{color:var(--text);font-weight:600;}
   .composer{display:flex;gap:6px;}
   .composer input{flex:1;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;}
   .composer button{border:none;background:var(--accent);color:var(--on-accent);border-radius:4px;padding:0 12px;font-size:13px;cursor:pointer;}
@@ -118,6 +119,12 @@
   applyTranslations();
   initLangToggle("langToggle");
 
+  // Section Q: κρατάει τα στοιχεία επικοινωνίας του workspace (human handoff,
+  // Section J) ώστε το showLimitReachedMessage() παρακάτω να μπορεί να τα
+  // χρησιμοποιήσει -- ο επισκέπτης πρέπει να βλέπει τα ΔΙΚΑ ΤΟΥ στοιχεία
+  // επικοινωνίας του καταστήματος, όχι κάτι hardcoded του Idmon.
+  let currentContactSettings = { contactLabel: null, contactUrl: null, contactPhone: null };
+
   // Section G: εφαρμόζει τις ρυθμίσεις widget (χρώμα, όνομα, λογότυπο) του
   // συγκεκριμένου workspace -- best-effort, αν αποτύχει το fetch το widget
   // απλά μένει στα defaults (δεν μπλοκάρει τίποτα άλλο στη σελίδα).
@@ -126,6 +133,12 @@
       const res = await fetch("/workspace/settings", { headers: HEADERS });
       if (!res.ok) return;
       const settings = await res.json();
+
+      currentContactSettings = {
+        contactLabel: settings.contactLabel || null,
+        contactUrl: settings.contactUrl || null,
+        contactPhone: settings.contactPhone || null,
+      };
 
       if (settings.accentColor) {
         document.documentElement.style.setProperty("--accent", settings.accentColor);
@@ -152,8 +165,6 @@
     try {
       const res = await fetch("/documents", { headers: HEADERS });
       const data = await res.json();
-      // Section D: ο απλός χρήστης βλέπει ΜΟΝΟ δημοσιευμένα έγγραφα -- τα
-      // πρόχειρα/διαγραμμένα υπάρχουν μόνο στο editor.
       const documents = (data.documents || []).filter(d => d.status === "published");
 
       if (!documents.length) {
@@ -209,6 +220,22 @@
     thread.scrollTop = thread.scrollHeight;
   }
 
+  // Section Q: μήνυμα προς τον ΤΕΛΙΚΟ επισκέπτη όταν ο πελάτης-ιδιοκτήτης
+  // έχει εξαντλήσει το μηνιαίο του όριο μηνυμάτων. Σκόπιμα γενικό (καμία
+  // αναφορά σε "όριο", "πλάνο", ή Idmon) -- μόνο τα στοιχεία επικοινωνίας
+  // που έχει ήδη δηλώσει ο ίδιος ο πελάτης (Section J, human handoff),
+  // όπως είχε συμφωνηθεί.
+  function showLimitReachedMessage(botDiv) {
+    let html = escapeHtml(t("limitReachedMessage"));
+    if (currentContactSettings.contactLabel && currentContactSettings.contactUrl) {
+      html += ` <a href="${escapeHtml(currentContactSettings.contactUrl)}" target="_blank" rel="noopener">${escapeHtml(currentContactSettings.contactLabel)}</a>`;
+    } else if (currentContactSettings.contactPhone) {
+      html += ` ${escapeHtml(currentContactSettings.contactPhone)}`;
+    }
+    botDiv.innerHTML = html;
+    botDiv.classList.add("fallback");
+  }
+
   async function askQuestion() {
     const input = el("questionInput");
     const question = input.value.trim();
@@ -227,6 +254,19 @@
         headers: HEADERS,
         body: JSON.stringify({ question }),
       });
+
+      // Section Q: το backend επιστρέφει 429 + {limitReached:true} ΠΡΙΝ
+      // ξεκινήσει το SSE stream όταν εξαντληθεί το μηνιαίο όριο -- το
+      // ελέγχουμε εδώ, πριν καν προσπαθήσουμε streamSSE(), ώστε να δείξουμε
+      // το σωστό γενικό μήνυμα αντί για το γενικό "connectionErrorPrefix".
+      if (res.status === 429) {
+        let limitData = {};
+        try { limitData = await res.json(); } catch (parseErr) { /* αγνόησε */ }
+        if (limitData.limitReached) {
+          showLimitReachedMessage(botDiv);
+          return;
+        }
+      }
 
       if (!res.ok || !res.body) {
         throw new Error("bad response");

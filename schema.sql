@@ -10,6 +10,12 @@
 -- φτιαγμένο ρητά για να είναι δημόσιο -- μπαίνει μέσα στο <script> tag που
 -- θα βλέπει ο καθένας αν κάνει view-source στο site του πελάτη. Ο Worker
 -- το μεταφράζει εσωτερικά σε workspace_id.
+--
+-- plan: Section Q -- free/basic/pro, ελέγχει τα πραγματικά όρια μηνυμάτων/
+-- εγγράφων (βλ. PLAN_LIMITS στο src/index.js). Default 'basic' εδώ είναι
+-- ασφαλές fallback για γραμμές χωρίς ρητή τιμή· το handleSignup εισάγει
+-- πάντα ρητά plan='free' για νέες εγγραφές.
+--
 -- ΣΗΜΕΙΩΣΗ συντήρησης: αυτό το αρχείο είναι το πλήρες, τρέχον schema για
 -- φρέσκο τοπικό setup (π.χ. νέο wrangler dev D1). Η production D1 φτάνει
 -- στο ίδιο σημείο μέσω των migrations/*.sql, ένα-ένα, με σειρά. Κάθε φορά
@@ -25,6 +31,7 @@ CREATE TABLE IF NOT EXISTS users (
   workspace_id TEXT UNIQUE NOT NULL,
   embed_id TEXT UNIQUE NOT NULL,
   email_verified INTEGER NOT NULL DEFAULT 0,
+  plan TEXT NOT NULL DEFAULT 'basic',
   created_at TEXT NOT NULL
 );
 
