@@ -212,8 +212,8 @@ Unless noted otherwise, endpoints resolve the workspace from `X-Session-Token` i
 **Prerequisites:** a Cloudflare account, [Wrangler](https://developers.cloudflare.com/workers/wrangler/) installed, a Gemini API key, and (optionally, for email) a [Resend](https://resend.com) account.
 
 ```bash
-git clone https://github.com/giamarigkos-del/rag-demo-tool.git
-cd rag-demo-tool
+git clone https://github.com/giamarigkos-del/idmon.git
+cd idmon
 ```
 
 Create the required Cloudflare resources (or reuse existing ones and update `wrangler.toml`):
@@ -273,7 +273,7 @@ Tests live in `tests/` and run with Node (`node tests/<file>.mjs`). There are tw
 ## Project structure
 
 ```
-rag-demo-tool/
+idmon/
 ├── src/
 │   ├── index.js            # Worker entry point: all API routes and business logic
 │   └── crypto-helpers.js   # AES-GCM encrypt/decrypt for stored OAuth tokens
