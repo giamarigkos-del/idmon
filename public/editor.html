@@ -368,6 +368,14 @@
     <span id="usageLimitBannerText" data-i18n="usageLimitBannerText">You've reached this month's message limit for your plan.</span>
   </div>
 
+  <!-- Section R: μήνυμα "η πληρωμή σου επεξεργάζεται" -- εμφανίζεται ΜΟΝΟ όταν
+       ο browser ξέρει ότι έγινε πληρωμή (βλ. readPaymentPending() στο script)
+       αλλά ο server δεν έχει ακόμα δει τη συνδρομή (το webhook του Paddle
+       δεν έχει φτάσει). Κρύβεται μόνη της μόλις το πλάνο ενημερωθεί. -->
+  <div class="verify-banner" id="paymentPendingBanner" style="display:none;">
+    <span data-i18n="paymentPendingBanner">Your payment is being processed. Your plan will update in a moment.</span>
+  </div>
+
   <div class="layout">
     <div class="sidebar">
       <div class="sidebar-section">
@@ -2111,21 +2119,90 @@
   // Section R: αναβάθμιση πλάνου μέσω Paddle.
   // Ο server (GET /usage/status -> πεδίο "upgrade") αποφασίζει ΑΝ φαίνεται το
   // κουμπί και ΤΙ πλάνα προσφέρονται· εδώ απλά το εμφανίζουμε. Το Paddle.js
-  // φορτώνεται μόνο όταν χρειαστεί (πάνελ ή checkout), όχι για όλους. Ο
-  // πραγματικός υποβιβασμός/αναβάθμιση του πλάνου γίνεται ΜΟΝΟ από το webhook
-  // (POST /paddle/webhook), ποτέ από αυτό το script -- το checkout.completed
-  // που ακούμε εδώ είναι καθαρά για το μήνυμα προς τον χρήστη.
+  // φορτώνεται μόνο όταν χρειαστεί (πάνελ ή checkout), όχι για όλους.
+  //
+  // ΠΟΤΕ δεν γράφουμε πλάνο από τον browser. Το μοναδικό σημείο που αλλάζει το
+  // plan είναι το webhook (POST /paddle/webhook). Το checkout.completed που
+  // ακούμε εδώ χρησιμεύει ΜΟΝΟ για να δείξει τη σωστή εικόνα στον χρήστη όσο
+  // περιμένουμε το webhook, που μπορεί να αργήσει (retries του Paddle, πρόβλημα
+  // στη βάση κ.λπ.). Γι' αυτό υπάρχουν τρεις καταστάσεις, όχι δύο:
+  //   pending   -- πληρώθηκε, περιμένουμε τον server. Κανένα κουμπί αγοράς.
+  //   confirmed -- ο server είδε τη συνδρομή. Δείχνουμε το νέο πλάνο.
+  //   slow      -- πέρασαν ~30", ο server δεν έχει ακόμα δει τη συνδρομή. ΔΕΝ
+  //                επαναφέρουμε κουμπιά αγοράς (κίνδυνος δεύτερης συνδρομής).
+  // Η κατάσταση "πληρώθηκε" θυμάται στο localStorage για λίγα λεπτά (ανά
+  // workspace), ώστε ούτε reload ούτε δεύτερο tab να ξαναπροσφέρουν αγορά.
+  const UPGRADE_POLL_INTERVAL_MS = 3000;
+  const UPGRADE_POLL_MAX_TRIES = 10; // 10 x 3" = 30"
+  const PAYMENT_PENDING_KEY = "idmonPaymentPending";
+  const PAYMENT_PENDING_TTL_MS = 10 * 60 * 1000;
+
   let upgradeOffer = null;
   let paddleReady = null;
   let upgradePollTimer = null;
+  let lastChosenPlan = null;
 
   function planLabel(plan) {
     return t("planName_" + plan);
   }
 
+  // Ρυθμίσεις polling -- το window.__UPGRADE_POLL_CONFIG__ υπάρχει μόνο για τα
+  // headless tests (ώστε να μη περιμένουν 30" πραγματικού χρόνου).
+  function upgradePollConfig() {
+    const c = window.__UPGRADE_POLL_CONFIG__ || {};
+    return {
+      intervalMs: c.intervalMs || UPGRADE_POLL_INTERVAL_MS,
+      maxTries: c.maxTries || UPGRADE_POLL_MAX_TRIES,
+    };
+  }
+
+  function readPaymentPending() {
+    try {
+      const raw = localStorage.getItem(PAYMENT_PENDING_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      const fresh = parsed && typeof parsed.at === "number" && Date.now() - parsed.at <= PAYMENT_PENDING_TTL_MS;
+      if (!fresh) {
+        localStorage.removeItem(PAYMENT_PENDING_KEY);
+        return null;
+      }
+      // Άλλο workspace (π.χ. άλλος λογαριασμός στον ίδιο browser): αγνοείται.
+      if (parsed.workspaceId !== WORKSPACE_ID) return null;
+      return parsed;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function writePaymentPending(plan) {
+    try {
+      localStorage.setItem(PAYMENT_PENDING_KEY, JSON.stringify({ plan, workspaceId: WORKSPACE_ID, at: Date.now() }));
+    } catch (err) {
+      // best-effort: χωρίς storage χάνουμε μόνο την προστασία του reload
+    }
+  }
+
+  function clearPaymentPending() {
+    try {
+      localStorage.removeItem(PAYMENT_PENDING_KEY);
+    } catch (err) {
+      // best-effort
+    }
+  }
+
+  // Εμφάνιση κουμπιού/banner ανάλογα με το τι λέει ο server ΚΑΙ αν ο browser
+  // ξέρει ότι έγινε πληρωμή που ο server δεν έχει δει ακόμα.
   function applyUpgradeOffer(offer) {
     upgradeOffer = offer && Array.isArray(offer.offers) && offer.offers.length ? offer : null;
-    el("upgradeBtn").style.display = upgradeOffer ? "" : "none";
+    const pending = readPaymentPending();
+    // Ο server δεν προσφέρει πια αναβάθμιση (ζωντανή συνδρομή, ή δεν ισχύει
+    // για τον λογαριασμό): δεν υπάρχει τίποτα να περιμένουμε.
+    if (!upgradeOffer && pending) clearPaymentPending();
+    const waiting = !!(upgradeOffer && pending);
+    el("upgradeBtn").style.display = upgradeOffer && !waiting ? "" : "none";
+    el("paymentPendingBanner").style.display = waiting ? "flex" : "none";
+    // Reload μέσα στο παράθυρο αναμονής: συνεχίζουμε να ρωτάμε τον server.
+    if (waiting && !upgradePollTimer) startUpgradePolling();
   }
 
   function setUpgradeStatus(text) {
@@ -2161,15 +2238,55 @@
   }
 
   function onPaddleEvent(event) {
-    if (event && event.name === "checkout.completed") handleCheckoutCompleted();
+    if (!event) return;
+    if (event.name === "checkout.completed") handleCheckoutCompleted();
+    else if (event.name === "checkout.payment_failed") setUpgradeStatus(t("upgradePaymentFailed"));
   }
 
-  // Το webhook ενημερώνει το plan λίγα δευτερόλεπτα μετά την πληρωμή. Ρωτάμε
-  // τον server κάθε 3" (μέχρι 10 φορές) μέχρι να πάψει να προσφέρει αναβάθμιση,
-  // δηλαδή μέχρι να δει ζωντανή συνδρομή στον λογαριασμό.
-  function handleCheckoutCompleted() {
-    setUpgradeStatus(t("upgradeProcessing"));
+  // Είναι ακόμα ανοιχτό το πάνελ αναβάθμισης; Αν ο χρήστης έχει πάει αλλού,
+  // δεν του αλλάζουμε την οθόνη κάτω από τα χέρια.
+  function upgradePanelVisible() {
+    return !!el("mainPanel").querySelector(".plan-grid, #upgradeStateView");
+  }
+
+  function renderPaymentStateView(state, plan) {
+    const title = state === "confirmed" ? t("upgradeDoneTitle", { plan }) : t("upgradePendingTitle");
+    const text = state === "confirmed" ? t("upgradeDoneText") : state === "slow" ? t("upgradeSlow") : t("upgradeProcessing");
+    const back = state === "confirmed"
+      ? `<button type="button" id="upgradeBackBtn" style="margin-top:16px;">${escapeHtml(t("upgradeBackToDocs"))}</button>`
+      : "";
+    return `
+      <div class="edit-form" id="upgradeStateView" data-state="${state}" style="max-width:640px;">
+        <h2 style="margin:0 0 6px;font-size:16px;">${escapeHtml(title)}</h2>
+        <p style="margin:0;font-size:13px;color:var(--text-soft);">${escapeHtml(text)}</p>
+        ${back}
+      </div>
+    `;
+  }
+
+  function showPaymentState(state, plan) {
+    if (!upgradePanelVisible()) return;
+    el("mainPanel").innerHTML = renderPaymentStateView(state, plan);
+    const back = el("upgradeBackBtn");
+    if (back) back.addEventListener("click", () => el("topAllDocsBtn").click());
+  }
+
+  function onPaymentConfirmed(data) {
     clearInterval(upgradePollTimer);
+    upgradePollTimer = null;
+    clearPaymentPending();
+    applyUpgradeOffer(null);
+    el("usageLimitBanner").style.display = data.messagesLimitReached ? "flex" : "none";
+    showPaymentState("confirmed", planLabel(data.plan));
+  }
+
+  // Ρωτάμε τον server μέχρι να πάψει να προσφέρει αναβάθμιση, δηλαδή μέχρι το
+  // webhook να γράψει τη συνδρομή στον λογαριασμό. Αν δεν γίνει μέσα στο
+  // όριο, δείχνουμε "slow" και σταματάμε (το flag μένει, οπότε ένα reload
+  // ξαναρχίζει την αναμονή).
+  function startUpgradePolling() {
+    clearInterval(upgradePollTimer);
+    const cfg = upgradePollConfig();
     let tries = 0;
     upgradePollTimer = setInterval(async () => {
       tries++;
@@ -2178,26 +2295,34 @@
         if (res.ok) {
           const data = await res.json();
           if (!data.upgrade) {
-            clearInterval(upgradePollTimer);
-            applyUpgradeOffer(null);
-            el("usageLimitBanner").style.display = data.messagesLimitReached ? "flex" : "none";
-            setUpgradeStatus(t("upgradeDone", { plan: planLabel(data.plan) }));
+            onPaymentConfirmed(data);
             return;
           }
         }
       } catch (err) {
         // best-effort: θα ξαναδοκιμάσει στον επόμενο γύρο
       }
-      if (tries >= 10) {
+      if (tries >= cfg.maxTries) {
         clearInterval(upgradePollTimer);
-        setUpgradeStatus(t("upgradeSlow"));
+        upgradePollTimer = null;
+        showPaymentState("slow");
       }
-    }, 3000);
+    }, cfg.intervalMs);
+  }
+
+  function handleCheckoutCompleted() {
+    writePaymentPending(lastChosenPlan);
+    el("upgradeBtn").style.display = "none";
+    el("paymentPendingBanner").style.display = "flex";
+    showPaymentState("pending");
+    startUpgradePolling();
   }
 
   async function startCheckout(planKey) {
+    if (readPaymentPending()) return; // ασφάλεια: ήδη πληρώθηκε, περιμένουμε
     const chosen = upgradeOffer && upgradeOffer.offers.find((o) => o.plan === planKey);
     if (!chosen) return;
+    lastChosenPlan = planKey;
     setUpgradeStatus("");
     try {
       const paddle = await loadPaddle(upgradeOffer);
@@ -2268,7 +2393,7 @@
   }
 
   function renderUpgradePanel() {
-    if (!upgradeOffer) return;
+    if (!upgradeOffer || readPaymentPending()) return;
     if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
     currentSelectedId = null;
     const main = el("mainPanel");

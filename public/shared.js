@@ -238,6 +238,12 @@ const TRANSLATIONS = {
     planName_free: "Free",
     planName_basic: "Basic",
     planName_pro: "Pro",
+    upgradePendingTitle: "Activating your plan",
+    upgradeDoneTitle: "Your plan is now {plan}",
+    upgradeDoneText: "Your new limits are already active. Thank you!",
+    upgradeBackToDocs: "Back to documents",
+    upgradePaymentFailed: "The payment didn't go through. You can try again or use another card.",
+    paymentPendingBanner: "Your payment is being processed. Your plan will update in a moment.",
 
     // landing.html
     landingDocTitle: "Idmon — Welcome",
@@ -501,6 +507,12 @@ const TRANSLATIONS = {
     planName_free: "Free",
     planName_basic: "Basic",
     planName_pro: "Pro",
+    upgradePendingTitle: "Ενεργοποιούμε το πλάνο σου",
+    upgradeDoneTitle: "Το πλάνο σου είναι τώρα {plan}",
+    upgradeDoneText: "Τα νέα όρια ισχύουν ήδη. Ευχαριστούμε!",
+    upgradeBackToDocs: "Πίσω στα έγγραφα",
+    upgradePaymentFailed: "Η πληρωμή δεν ολοκληρώθηκε. Μπορείς να δοκιμάσεις ξανά ή με άλλη κάρτα.",
+    paymentPendingBanner: "Η πληρωμή σου επεξεργάζεται. Το πλάνο σου θα ενημερωθεί σε λίγο.",
 
     landingDocTitle: "Idmon — Καλωσόρισες",
     landingIntro: "Επέλεξε πώς θέλεις να συνδεθείς.",
