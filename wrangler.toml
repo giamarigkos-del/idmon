@@ -51,3 +51,11 @@ NOTIFY_FROM_EMAIL = "notifications@idmon.app"
 #   wrangler secret put GOOGLE_CLIENT_SECRET
 GOOGLE_CLIENT_ID = "532047777604-98qlf4jfdp3kic0i7ko7pniteo89gaau.apps.googleusercontent.com"
 GOOGLE_REDIRECT_URI = "https://app.idmon.app/oauth/google/callback"
+
+# --- Paddle billing (Section R) ---
+# Το webhook secret ΔΕΝ μπαίνει εδώ -- είναι secret:
+#   wrangler secret put PADDLE_WEBHOOK_SECRET
+# Τα price IDs δεν είναι μυστικά. Τα τρέχοντα είναι του Paddle SANDBOX --
+# όταν περάσουμε σε live αλλάζουν οι δύο τιμές εδώ, όχι ο κώδικας.
+PADDLE_PRICE_BASIC = "pri_01m2x1f5kfbt7h0dxmm10knzxe"
+PADDLE_PRICE_PRO = "pri_01m2x1dep88bhsjw8qcstdtfhv"

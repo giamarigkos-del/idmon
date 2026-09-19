@@ -3337,6 +3337,214 @@ async function handleDeveloperLogin(request, env) {
   return new Response(JSON.stringify({ ok: true, workspaceId: PROTECTED_WORKSPACE_ID }), { headers: JSON_HEADERS });
 }
 
+// Section R: Paddle billing -- webhook που ενημερώνει το plan ενός λογαριασμού
+// όταν αλλάζει η συνδρομή του στο Paddle (merchant of record).
+//
+// Το Paddle στέλνει POST στο /paddle/webhook κάθε φορά που αλλάζει μια
+// συνδρομή. Επειδή ΟΠΟΙΟΣΔΗΠΟΤΕ μπορεί να στείλει POST εκεί, κάθε μήνυμα
+// έχει υπογραφή (header Paddle-Signature): HMAC-SHA256 του "ts:ακατέργαστο
+// σώμα" με ένα secret που ξέρουμε μόνο εμείς και το Paddle. ΠΟΤΕ δεν
+// αγγίζουμε τη βάση πριν επαληθευτεί η υπογραφή.
+//
+// Κρίσιμο: η υπογραφή υπολογίζεται πάνω στο ΑΚΑΤΕΡΓΑΣΤΟ σώμα, γι' αυτό το
+// διαβάζουμε πρώτα ως κείμενο (request.text()) και το κάνουμε JSON ΜΟΝΟ
+// μετά την επαλήθευση. Αν το κάναμε JSON και ξαναγράφαμε σε κείμενο, θα
+// μπορούσαν να αλλάξουν κενά/σειρά και ένα νόμιμο μήνυμα θα απορριπτόταν.
+//
+// Το secret μπαίνει με `wrangler secret put PADDLE_WEBHOOK_SECRET`. Τα price
+// IDs (sandbox ή live) μπαίνουν ως απλά [vars] στο wrangler.toml:
+// PADDLE_PRICE_BASIC, PADDLE_PRICE_PRO -- έτσι η μετάβαση σε live αλλάζει
+// ρύθμιση, όχι κώδικα.
+const PADDLE_SIGNATURE_TOLERANCE_SECONDS = 5; // ίδια ανοχή με τα επίσημα SDKs του Paddle -- προστασία από replay
+
+// Το header έχει τη μορφή "ts=1671552777;h1=eb4d0d...". Μπορεί να έχει
+// ΠΑΝΩ ΑΠΟ ένα h1 όταν το Paddle αλλάζει secret (rotation), γι' αυτό
+// κρατάμε λίστα.
+function parsePaddleSignatureHeader(header) {
+  if (!header) return null;
+  let ts = null;
+  const h1 = [];
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    const key = part.slice(0, idx).trim();
+    const value = part.slice(idx + 1).trim();
+    if (key === "ts") ts = value;
+    else if (key === "h1") h1.push(value);
+  }
+  if (!ts || h1.length === 0) return null;
+  return { ts, h1 };
+}
+
+async function hmacSha256Hex(secret, message) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
+  return bufferToHex(signature);
+}
+
+// nowMs είναι παράμετρος (default Date.now()) ΜΟΝΟ για να μπορεί να
+// δοκιμαστεί η ανοχή χρόνου χωρίς να περιμένουμε πραγματικά δευτερόλεπτα.
+async function verifyPaddleSignature(rawBody, header, secret, nowMs = Date.now()) {
+  if (!secret) return false;
+  const parsed = parsePaddleSignatureHeader(header);
+  if (!parsed) return false;
+
+  const tsSeconds = Number(parsed.ts);
+  if (!Number.isFinite(tsSeconds)) return false;
+  if (Math.abs(nowMs / 1000 - tsSeconds) > PADDLE_SIGNATURE_TOLERANCE_SECONDS) return false;
+
+  const expected = await hmacSha256Hex(secret, `${parsed.ts}:${rawBody}`);
+  // Ελέγχουμε ΟΛΑ τα h1 πάντα (χωρίς πρόωρη έξοδο) και με σύγκριση σταθερού
+  // χρόνου -- ίδιος λόγος με το verifyPassword.
+  let match = false;
+  for (const candidate of parsed.h1) {
+    if (timingSafeEqual(expected, candidate.toLowerCase())) match = true;
+  }
+  return match;
+}
+
+// price ID του Paddle -> plan του Idmon. Επιστρέφει null για άγνωστο price
+// (π.χ. κάτι που δεν ξέρουμε) -- ο καλών ΔΕΝ αλλάζει plan σε αυτή την
+// περίπτωση, αντί να μαντέψει.
+function planFromPaddleSubscription(env, subscription) {
+  const items = Array.isArray(subscription.items) ? subscription.items : [];
+  const plans = new Set();
+  for (const item of items) {
+    const priceId = item && item.price && item.price.id;
+    if (!priceId) continue;
+    if (env.PADDLE_PRICE_PRO && priceId === env.PADDLE_PRICE_PRO) plans.add("pro");
+    else if (env.PADDLE_PRICE_BASIC && priceId === env.PADDLE_PRICE_BASIC) plans.add("basic");
+  }
+  // Αν (θεωρητικά) υπάρχουν και τα δύο, κερδίζει το ανώτερο.
+  if (plans.has("pro")) return "pro";
+  if (plans.has("basic")) return "basic";
+  return null;
+}
+
+// Το status της συνδρομής αποφασίζει τι κάνουμε στο plan:
+//   active / trialing -> το plan που αντιστοιχεί στο price (αν το ξέρουμε)
+//   canceled / paused -> "free" (χάνει την πρόσβαση)
+//   past_due          -> ΚΑΜΙΑ αλλαγή. Το Paddle ξαναδοκιμάζει την πληρωμή
+//                        μόνο του· υποβιβάζουμε μόνο αν τελικά ακυρωθεί.
+// Ακύρωση "στο τέλος της περιόδου" έρχεται ως subscription.updated με
+// status ακόμα "active" και scheduled_change -- άρα το plan μένει όπως
+// είναι μέχρι να έρθει το πραγματικό subscription.canceled.
+// Επιστρέφει το νέο plan, ή null = "μην αλλάξεις το plan".
+function decidePlanForPaddleSubscription(env, subscription) {
+  const status = subscription.status;
+  if (status === "active" || status === "trialing") return planFromPaddleSubscription(env, subscription);
+  if (status === "canceled" || status === "paused") return "free";
+  return null;
+}
+
+function paddleOk(extra) {
+  return new Response(JSON.stringify({ ok: true, ...extra }), { headers: JSON_HEADERS });
+}
+
+async function handlePaddleWebhook(request, env) {
+  const rawBody = await request.text();
+
+  const valid = await verifyPaddleSignature(
+    rawBody,
+    request.headers.get("Paddle-Signature"),
+    env.PADDLE_WEBHOOK_SECRET
+  );
+  if (!valid) return jsonError(401, "Invalid signature");
+
+  let event;
+  try {
+    event = JSON.parse(rawBody);
+  } catch (err) {
+    return jsonError(400, "Invalid JSON body");
+  }
+
+  // Απαντάμε 200 σε ό,τι δεν μας αφορά, ώστε το Paddle να μην το ξαναστέλνει.
+  const eventType = event && event.event_type;
+  if (typeof eventType !== "string" || !eventType.startsWith("subscription.")) {
+    return paddleOk({ ignored: "event_type" });
+  }
+  const subscription = event.data;
+  const occurredMs = Date.parse(event.occurred_at);
+  if (!subscription || !subscription.id || !Number.isFinite(occurredMs)) {
+    return paddleOk({ ignored: "malformed_event" });
+  }
+
+  try {
+    // Ποιος λογαριασμός είναι; Πρώτα από το subscription ID που έχουμε ήδη
+    // αποθηκεύσει, και αν δεν υπάρχει (πρώτη φορά), από το workspace_id που
+    // περάσαμε στο checkout ως custom_data.
+    const selectCols = "id, plan, paddle_subscription_id, paddle_status, paddle_event_at";
+    let user = await env.DB.prepare(
+      `SELECT ${selectCols} FROM users WHERE paddle_subscription_id = ?`
+    ).bind(subscription.id).first();
+
+    if (!user) {
+      const workspaceId = subscription.custom_data && subscription.custom_data.workspace_id;
+      if (workspaceId) {
+        user = await env.DB.prepare(
+          `SELECT ${selectCols} FROM users WHERE workspace_id = ?`
+        ).bind(String(workspaceId)).first();
+      }
+    }
+
+    if (!user) {
+      // 200 και όχι σφάλμα: ξαναστέλνοντας το ίδιο μήνυμα δεν θα βρεθεί ποτέ
+      // λογαριασμός, οπότε το retry δεν βοηθάει.
+      console.warn("Paddle webhook: no matching account for subscription", subscription.id);
+      return paddleOk({ matched: false });
+    }
+
+    // Το Paddle δεν εγγυάται σειρά αφίξεως. Αγνοούμε ό,τι είναι ΠΑΛΑΙΟΤΕΡΟ
+    // από το τελευταίο γεγονός που έχουμε ήδη εφαρμόσει (το ίδιο μήνυμα
+    // ξανά, ίδια ώρα, εφαρμόζεται ξανά ακίνδυνα -- δίνει το ίδιο αποτέλεσμα).
+    if (user.paddle_event_at) {
+      const storedMs = Date.parse(user.paddle_event_at);
+      if (Number.isFinite(storedMs) && occurredMs < storedMs) {
+        return paddleOk({ ignored: "stale_event" });
+      }
+    }
+
+    // Ο λογαριασμός έχει ΗΔΗ άλλη συνδρομή. Ένα καθυστερημένο γεγονός της
+    // ΠΑΛΙΑΣ (π.χ. "canceled") δεν πρέπει να χαλάσει τη νέα. Μόνο μια νέα
+    // ενεργή συνδρομή παίρνει τη θέση της παλιάς.
+    if (user.paddle_subscription_id && user.paddle_subscription_id !== subscription.id) {
+      const takesOver = subscription.status === "active" || subscription.status === "trialing";
+      if (!takesOver) return paddleOk({ ignored: "other_subscription" });
+    }
+
+    const newPlan = decidePlanForPaddleSubscription(env, subscription) || user.plan;
+
+    await env.DB.prepare(
+      `UPDATE users
+         SET plan = ?,
+             paddle_customer_id = COALESCE(?, paddle_customer_id),
+             paddle_subscription_id = ?,
+             paddle_status = ?,
+             paddle_event_at = ?
+       WHERE id = ?`
+    ).bind(
+      newPlan,
+      subscription.customer_id || null,
+      subscription.id,
+      subscription.status || null,
+      event.occurred_at,
+      user.id
+    ).run();
+
+    return paddleOk({ matched: true, plan: newPlan });
+  } catch (err) {
+    // 500 -> το Paddle ξαναδοκιμάζει αργότερα (σωστό για πρόβλημα βάσης).
+    console.error("Paddle webhook processing failed:", err && err.message);
+    return jsonError(500, "Internal error");
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -3432,6 +3640,13 @@ export default {
     // αποφασίσει αν θα δείξει το usage-limit banner.
     if (url.pathname === "/usage/status" && request.method === "GET") {
       return handleGetUsageStatus(request, env);
+    }
+
+    // Section R: Paddle webhook -- ΔΕΝ έχει session/X-Workspace-Id (το καλεί
+    // το Paddle, όχι ο browser του χρήστη)· η αυθεντικότητα ελέγχεται με την
+    // υπογραφή του μηνύματος μέσα στο handlePaddleWebhook.
+    if (url.pathname === "/paddle/webhook" && request.method === "POST") {
+      return handlePaddleWebhook(request, env);
     }
 
     // Public embed endpoint -- ΔΕΝ χρησιμοποιεί resolveWorkspaceId (session/
