@@ -224,7 +224,7 @@ const TRANSLATIONS = {
 
     // landing.html
     landingDocTitle: "Idmon — Welcome",
-    landingIntro: "Before you continue, choose how you'll enter.",
+    landingIntro: "Choose how you'd like to sign in.",
     guestTitle: "Guest",
     guestDesc: "Freely try the tool in your own separate space. Nobody else sees what you upload, and it's automatically deleted after 7 days.",
     accountTitle: "Account",
@@ -469,7 +469,7 @@ const TRANSLATIONS = {
     usageLimitBannerText: "Έφτασες το μηνιαίο όριο μηνυμάτων του πλάνου σου. Οι επισκέπτες βλέπουν προσωρινά ένα γενικό μήνυμα \"τεχνικό πρόβλημα\" αντί για απαντήσεις, μέχρι τον επόμενο μήνα ή μέχρι να αναβαθμίσεις.",
 
     landingDocTitle: "Idmon — Καλωσόρισες",
-    landingIntro: "Πριν συνεχίσεις, διάλεξε πώς θα μπεις.",
+    landingIntro: "Επέλεξε πώς θέλεις να συνδεθείς.",
     guestTitle: "Επισκέπτης / Guest",
     guestDesc: "Δοκίμασε ελεύθερα το εργαλείο σε έναν δικό σου, ξεχωριστό χώρο. Ό,τι ανεβάσεις δεν το βλέπει κανείς άλλος, και σβήνεται μόνο του μετά από 7 μέρες.",
     accountTitle: "Λογαριασμός",
