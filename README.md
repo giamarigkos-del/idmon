@@ -63,7 +63,7 @@ Three ways to get a workspace ID, in increasing order of permanence:
 
 | Path | How you get a workspace ID | Expiry |
 |---|---|---|
-| Developer | Shared password (`DEVELOPER_PASSWORD` secret) via a hidden URL (`/landing.html?developer`) to the one protected demo workspace | Never |
+| Developer | Shared password (`DEVELOPER_PASSWORD` secret) to the one protected demo workspace | Never |
 | Guest | Random UUID generated client-side, stored in `localStorage` | 7-day rolling TTL on the workspace's data |
 | Account | Email/password signup or login (D1-backed) to a permanent workspace tied to that account | 30-day session, workspace data itself never expires |
 
@@ -74,7 +74,7 @@ Sessions are opaque, cryptographically random 256-bit tokens stored server-side 
 Other account behavior:
 - **Email verification** on signup (24-hour token, bilingual email). It is "soft": an unverified account is never blocked from logging in or using the product, it just sees a dismissible banner. Accounts created before this feature were grandfathered in as verified
 - **Password reset** via a time-limited token (30 minutes) sent by email in the user's selected UI language. A successful reset invalidates all of that account's sessions
-- **Rate limiting** on login, developer login, signup, and forgot-password: 5 attempts per 15 minutes per client IP (`CF-Connecting-IP`)
+- **Rate limiting** on login, developer login, signup, forgot-password, and reset-password: 5 attempts per 15 minutes per client IP (`CF-Connecting-IP`)
 - **Data export** (`GET /account/export`) returns a JSON file with the account info, documents (full content), widget settings, and embed domains
 - **Account deletion** (`POST /account/delete`) requires password re-confirmation and removes everything scoped to the workspace: documents and their embeddings, contradictions, fallback questions, settings, analytics and usage counters, third-party connections, embed domains, sessions, and finally the user row
 
@@ -149,6 +149,7 @@ Unless noted otherwise, endpoints resolve the workspace from `X-Session-Token` i
 | `POST` | `/account/login` | `{email, password}` to a new `{sessionToken, workspaceId}` (rate limited) |
 | `POST` | `/account/logout` | Invalidate the session behind `X-Session-Token` |
 | `POST` | `/account/forgot-password` | Send a password reset email (rate limited) |
+| `POST` | `/account/reset-password` | Complete a password reset with the token from the email and set a new password (rate limited) |
 | `POST` | `/account/verify-email` | Confirm an email verification token |
 | `POST` | `/account/resend-verification` | Resend the verification email (session required) |
 | `GET` | `/account/export` | Download all account data as JSON (session required) |
@@ -190,12 +191,14 @@ Unless noted otherwise, endpoints resolve the workspace from `X-Session-Token` i
 | `GET` | `/analytics/summary?days=N` | Daily question and fallback counts for the last N days |
 | `GET` | `/usage/status` | Current plan, limits, and usage for the workspace |
 
-**Workspace settings**
+**Workspace settings and embed**
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/workspace/settings` | Get widget settings (bot name, accent color, logo, contact fields, notification email) |
 | `PATCH` | `/workspace/settings` | Update widget settings (whitelisted fields, validated; `contactUrl` rejects `javascript:`, `vbscript:`, and `data:` schemes) |
+| `GET` | `/embed/domains` | List the domain allow-list for the workspace's embed widget |
+| `PATCH` | `/embed/domains` | Update the domain allow-list (there is a maximum number of domains per workspace) |
 
 **Google Drive connector** (implemented, currently hidden in the editor UI, see [Known limitations](#known-limitations))
 
