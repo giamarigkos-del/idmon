@@ -227,11 +227,17 @@ npx wrangler vectorize create operations-portal-rag-index --dimensions=768 --met
 npx wrangler d1 create rag-demo-tool-accounts
 ```
 
-Apply the D1 schema and every migration, **both remote and local**. `wrangler dev` uses its own local copy of D1, so a migration applied only with `--remote` will still be missing locally:
+Apply the D1 schema, **both remote and local**. `wrangler dev` uses its own local copy of D1, so a schema applied only with `--remote` will still be missing locally:
 
 ```bash
 npx wrangler d1 execute rag-demo-tool-accounts --remote --file=schema.sql
 npx wrangler d1 execute rag-demo-tool-accounts --local --file=schema.sql
+```
+
+`schema.sql` is the complete, current schema (users, sessions, embed domains, connections), so a fresh setup needs nothing else. **Do not also run the files in `migrations/` on a fresh database:** their changes are already part of `schema.sql`, and re-applying them fails with `duplicate column name`. The migrations exist for databases created earlier that need to catch up. For those, list what is pending and apply it in order:
+
+```bash
+npx wrangler d1 migrations list rag-demo-tool-accounts --remote
 npx wrangler d1 migrations apply rag-demo-tool-accounts --remote
 npx wrangler d1 migrations apply rag-demo-tool-accounts --local
 ```
@@ -290,9 +296,9 @@ idmon/
 │   ├── widget.js           # Embeddable chat widget (Shadow DOM)
 │   ├── shared.css          # Design tokens, shared component styles, scrollbar styling, i18n toggle
 │   └── shared.js           # Shared frontend logic: workspace/session resolution, i18n, markdown rendering, slugs
-├── migrations/             # D1 migrations (0002 onward): connections, email verification, password iterations, plans
+├── migrations/             # D1 migrations (0002 onward), for upgrading databases created earlier
 ├── tests/                  # Integration and headless tests, see Testing
-├── schema.sql              # Base D1 schema: users, sessions
+├── schema.sql              # Complete current D1 schema for fresh setups: users, sessions, embed_domains, connections
 └── wrangler.toml
 ```
 

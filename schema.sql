@@ -16,6 +16,14 @@
 -- ασφαλές fallback για γραμμές χωρίς ρητή τιμή· το handleSignup εισάγει
 -- πάντα ρητά plan='free' για νέες εγγραφές.
 --
+-- paddle_*: τα IDs και η κατάσταση της συνδρομής στο Paddle (merchant of
+-- record). Όλα NULL για λογαριασμούς χωρίς πληρωμένη συνδρομή. Το
+-- paddle_event_at κρατάει την ώρα (ISO 8601) του τελευταίου webhook που
+-- επεξεργαστήκαμε, ώστε ένα παλιό γεγονός που φτάνει καθυστερημένα να
+-- αγνοείται αντί να γυρίζει το plan πίσω. Το paddle_subscription_id είναι
+-- μοναδικό, το paddle_customer_id όχι (ένας πελάτης μπορεί να αλλάξει
+-- συνδρομή). Προστέθηκαν με τη migration 0007.
+--
 -- ΣΗΜΕΙΩΣΗ συντήρησης: αυτό το αρχείο είναι το πλήρες, τρέχον schema για
 -- φρέσκο τοπικό setup (π.χ. νέο wrangler dev D1). Η production D1 φτάνει
 -- στο ίδιο σημείο μέσω των migrations/*.sql, ένα-ένα, με σειρά. Κάθε φορά
@@ -32,8 +40,15 @@ CREATE TABLE IF NOT EXISTS users (
   embed_id TEXT UNIQUE NOT NULL,
   email_verified INTEGER NOT NULL DEFAULT 0,
   plan TEXT NOT NULL DEFAULT 'basic',
+  paddle_customer_id TEXT,
+  paddle_subscription_id TEXT,
+  paddle_status TEXT,
+  paddle_event_at TEXT,
   created_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_users_paddle_customer ON users(paddle_customer_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_paddle_subscription ON users(paddle_subscription_id);
 
 -- sessions: το token είναι το μόνο πράγμα που κρατάει ο browser. ΠΟΤΕ δεν
 -- ξαναδημιουργείται/μαντεύεται από τον client -- υπάρχει ΜΟΝΟ αν το server
@@ -65,3 +80,24 @@ CREATE TABLE IF NOT EXISTS embed_domains (
 );
 
 CREATE INDEX IF NOT EXISTS idx_embed_domains_workspace ON embed_domains(workspace_id);
+
+-- connections: οι OAuth συνδέσεις κάθε workspace με κάθε εξωτερικό provider
+-- (Google Drive πρώτα, Notion/Slack/κλπ αργότερα με την ίδια δομή). Τα
+-- access_token/refresh_token αποθηκεύονται κρυπτογραφημένα (AES-GCM, βλ.
+-- src/crypto-helpers.js), ποτέ σε απλό κείμενο. Προστέθηκε με τη migration
+-- 0003.
+CREATE TABLE IF NOT EXISTS connections (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  access_token TEXT NOT NULL,
+  refresh_token TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  connected_by_email TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- Ένα workspace μπορεί να έχει μόνο μία ενεργή σύνδεση ανά provider
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connections_workspace_provider
+  ON connections (workspace_id, provider);
