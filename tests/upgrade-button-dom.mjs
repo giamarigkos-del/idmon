@@ -1,5 +1,6 @@
-// Headless έλεγχος του κουμπιού "Αναβάθμιση", των καταστάσεων πληρωμής και της
-// "συμφωνίας" με το Paddle (POST /billing/reconcile) στο editor.html (Section R), με jsdom και ψεύτικο Paddle.js -- χωρίς browser,
+// Headless έλεγχος του κουμπιού "Αναβάθμιση", των καταστάσεων πληρωμής, της "συμφωνίας"
+// με το Paddle (POST /billing/reconcile) και της διαχείρισης της ΥΠΑΡΧΟΥΣΑΣ συνδρομής
+// (Αλλαγή σε Pro, portal) στο editor.html (Section R), με jsdom και ψεύτικο Paddle.js -- χωρίς browser,
 // χωρίς δίκτυο, χωρίς wrangler.
 // Χρήση (PowerShell, από τον φάκελο idmon):
 //   node tests/upgrade-button-dom.mjs
@@ -49,17 +50,23 @@ function pendingFlag(overrides) {
 // Χτίζει τη σελίδα: το shared.js μπαίνει inline, τα εξωτερικά scripts/CSS
 // (CDN) αφαιρούνται και τα ελάχιστα globals που περιμένει ο editor ορίζονται
 // ως stubs -- δεν τα χρειάζεται καμία λειτουργία του κουμπιού.
-async function boot({ usage, lang = "en", session = true, paddle = "mock", paddleInitThrows = false, local = {}, reconcile = null }) {
+async function boot({ usage, lang = "en", session = true, paddle = "mock", paddleInitThrows = false, local = {}, reconcile = null, blockPopups = false }) {
   const html = editorHtml
     .replace(/<link[^>]*>/g, "")
     .replace('<script src="/shared.js"></script>', () => "<script>" + sharedJs + "</script>")
     .replace(/<script src="https?:[^>]*><\/script>/g, "");
 
-  const calls = { initialize: [], environment: [], checkoutOpen: [], pricePreview: [], statusFetches: 0, allDocsClicks: 0, reconcile: [] };
+  const calls = { initialize: [], environment: [], checkoutOpen: [], pricePreview: [], statusFetches: 0, allDocsClicks: 0, reconcile: [], preview: [], change: [], portal: [], opened: [], navigated: [] };
+  const popup = { opener: "original-opener", location: { href: "" }, closed: false, close() { this.closed = true; } };
   let currentUsage = usage;
   // Ο "server" για το /billing/reconcile· κάθε test το αλλάζει ανάλογα με το σενάριο.
   const api = { setUsage: (u) => { currentUsage = u; } };
-  const handlers = { reconcile: reconcile || (() => ({ status: 200, json: {} })) };
+  const handlers = {
+    reconcile: reconcile || (() => ({ status: 200, json: {} })),
+    preview: () => ({ status: 200, json: {} }),
+    change: () => ({ status: 200, json: {} }),
+    portal: () => ({ status: 200, json: {} }),
+  };
 
   const dom = new JSDOM(html, {
     runScripts: "dangerously",
@@ -71,10 +78,21 @@ async function boot({ usage, lang = "en", session = true, paddle = "mock", paddl
       window.localStorage.setItem("uiLang", lang);
       for (const [k, v] of Object.entries(local)) window.localStorage.setItem(k, v);
       window.__UPGRADE_POLL_CONFIG__ = POLL;
+      window.open = (u, target) => { calls.opened.push({ u, target }); return blockPopups ? null : popup; };
       window.marked = { parse: (s) => s, use() {}, setOptions() {} };
       window.DOMPurify = { sanitize: (s) => s };
       window.toastui = { Editor: function () {} };
       window.fetch = async (url, init = {}) => {
+        for (const name of ["portal", "change-plan/preview", "change-plan"]) {
+          if (String(url) === "/billing/" + name) {
+            const key = name === "portal" ? "portal" : name === "change-plan" ? "change" : "preview";
+            calls[key].push({ body: init.body ? JSON.parse(init.body) : null, method: init.method, headers: init.headers, at: calls.opened.length });
+            const r = handlers[key](calls[key].length, api);
+            if (r === "throw") throw new TypeError("network down");
+            if (r && r.delayMs) await new Promise((res) => setTimeout(res, r.delayMs));
+            return { ok: r.status >= 200 && r.status < 300, status: r.status, json: async () => r.json };
+          }
+        }
         if (String(url).startsWith("/billing/reconcile")) {
           const body = JSON.parse(init.body);
           calls.reconcile.push({ body, method: init.method, headers: init.headers });
@@ -110,7 +128,9 @@ async function boot({ usage, lang = "en", session = true, paddle = "mock", paddl
   await sleep(80);
   // Μετράει τα κλικ στο "All documents" (το χρησιμοποιεί το "Back to documents").
   dom.window.document.getElementById("topAllDocsBtn").addEventListener("click", () => calls.allDocsClicks++);
-  return { dom, window: dom.window, document: dom.window.document, calls, handlers, setUsage: (u) => { currentUsage = u; } };
+  dom.window.navigateTo = (u) => calls.navigated.push(u); // ο jsdom δεν μπορεί να αλλάξει σελίδα
+  const returned = { popup };
+  return { dom, window: dom.window, document: dom.window.document, calls, handlers, popup, setUsage: (u) => { currentUsage = u; } };
 }
 
 const btnVisible = (doc) => doc.getElementById("upgradeBtn").style.display !== "none";
@@ -365,6 +385,211 @@ console.log("reconcile: the server asks Paddle, so a late webhook does not matte
   await sleep(POLL.intervalMs * (POLL.maxTries + 3));
   check("reconcile asks at most once per polling round", t.calls.reconcile.length === POLL.maxTries, "calls: " + t.calls.reconcile.length);
   check("still ends in the slow message with no buy buttons", stateView(t.document).dataset.state === "slow" && chooseButtons(t.document) === 0);
+  t.window.close();
+}
+
+
+const SUB_MANAGE = { canManage: true, canChangeToPro: true };
+const visible = (doc, id) => doc.getElementById(id).style.display !== "none";
+const text = (doc) => doc.getElementById("mainPanel").textContent;
+const PREVIEW_OK = { status: 200, json: { toPlan: "pro", currency: "EUR", chargeToday: "2990", recurring: "5900", nextBilledAt: "2026-10-19T19:00:00Z" } };
+
+console.log("existing subscription: which buttons the server allows");
+{
+  const both = await boot({ usage: usageBody({ plan: "basic", upgrade: null, manage: SUB_MANAGE }) });
+  check("basic + active: both buttons visible", visible(both.document, "manageSubBtn") && visible(both.document, "changePlanBtn"));
+  check("Upgrade (new checkout) stays hidden, so no second subscription", !btnVisible(both.document));
+  check("English labels", both.document.getElementById("manageSubBtn").textContent === "Manage subscription" && both.document.getElementById("changePlanBtn").textContent === "Switch to Pro");
+  both.window.close();
+  const proOnly = await boot({ usage: usageBody({ plan: "pro", upgrade: null, manage: { canManage: true, canChangeToPro: false } }) });
+  check("pro: only Manage subscription", visible(proOnly.document, "manageSubBtn") && !visible(proOnly.document, "changePlanBtn"));
+  proOnly.window.close();
+  const none = await boot({ usage: usageBody({ plan: "free", upgrade: OFFER_FREE, manage: null }) });
+  check("no live subscription: neither button", !visible(none.document, "manageSubBtn") && !visible(none.document, "changePlanBtn"));
+  none.window.close();
+  const old = await boot({ usage: usageBody({ plan: "basic", upgrade: null }) });
+  check("older backend without the manage field: neither button", !visible(old.document, "manageSubBtn") && !visible(old.document, "changePlanBtn"));
+  old.window.close();
+  const el = await boot({ usage: usageBody({ plan: "basic", upgrade: null, manage: SUB_MANAGE }), lang: "el" });
+  check("Greek labels", el.document.getElementById("manageSubBtn").textContent === "Διαχείριση συνδρομής" && el.document.getElementById("changePlanBtn").textContent === "Αλλαγή σε Pro");
+  el.window.close();
+}
+
+console.log("switch to Pro: preview first, change only after an explicit confirmation");
+{
+  const t = await boot({ usage: usageBody({ plan: "basic", upgrade: null, manage: SUB_MANAGE }) });
+  t.handlers.preview = () => PREVIEW_OK;
+  t.handlers.change = (n, api) => { api.setUsage(usageBody({ plan: "pro", upgrade: null, manage: { canManage: true, canChangeToPro: false } })); return { status: 200, delayMs: 80, json: { status: "applied", plan: "pro" } }; };
+  t.document.getElementById("changePlanBtn").click();
+  await sleep(80);
+  check("clicking asks the server for a PREVIEW (POST, session token, plan pro)", t.calls.preview.length === 1 && t.calls.preview[0].method === "POST" && t.calls.preview[0].body.plan === "pro" && t.calls.preview[0].headers["X-Session-Token"] === "tok123");
+  check("the amount charged today is shown", t.document.getElementById("changePlanToday").textContent.includes("29.90"), t.document.getElementById("changePlanToday").textContent);
+  check("the monthly price and the date are shown", t.document.getElementById("changePlanRecurring").textContent.includes("59.00") && t.document.getElementById("changePlanRecurring").textContent.includes("2026"), t.document.getElementById("changePlanRecurring").textContent);
+  check("the confirm button states the amount", t.document.getElementById("changePlanConfirmBtn").textContent.includes("29.90"));
+  check("NOTHING has been changed yet", t.calls.change.length === 0);
+  // δύο γρήγορα κλικ = μία μόνο χρέωση
+  const confirmBtn = t.document.getElementById("changePlanConfirmBtn");
+  confirmBtn.click(); confirmBtn.click();
+  await sleep(20);
+  check("the confirm button is disabled at once and shows progress", confirmBtn.disabled && t.document.getElementById("changePlanStatus").textContent.includes("Switching"));
+  await sleep(200);
+  check("a double click sends ONE change request", t.calls.change.length === 1 && t.calls.change[0].body.plan === "pro");
+  check("the panel says the plan is now Pro", text(t.document).includes("Your plan is now Pro") && !!t.document.getElementById("upgradeBackBtn"));
+  check("the Switch to Pro button disappears, Manage stays", !visible(t.document, "changePlanBtn") && visible(t.document, "manageSubBtn"));
+  t.document.getElementById("upgradeBackBtn").click();
+  check("Back to documents works", t.calls.allDocsClicks === 1);
+  t.window.close();
+}
+{
+  const t = await boot({ usage: usageBody({ plan: "basic", upgrade: null, manage: SUB_MANAGE }) });
+  t.handlers.preview = () => PREVIEW_OK;
+  t.document.getElementById("changePlanBtn").click();
+  await sleep(80);
+  t.document.getElementById("changePlanCancelBtn").click();
+  await sleep(40);
+  check("Cancel goes back and never changes anything", t.calls.allDocsClicks === 1 && t.calls.change.length === 0);
+  t.window.close();
+}
+{
+  const t = await boot({ usage: usageBody({ plan: "basic", upgrade: null, manage: SUB_MANAGE }), lang: "el" });
+  t.handlers.preview = () => PREVIEW_OK;
+  t.document.getElementById("changePlanBtn").click();
+  await sleep(80);
+  check("Greek: amounts use Greek formatting", t.document.getElementById("changePlanToday").textContent.includes("29,90"), t.document.getElementById("changePlanToday").textContent);
+  check("Greek: texts are Greek", text(t.document).includes("Χρέωση σήμερα") && t.document.getElementById("changePlanConfirmBtn").textContent.startsWith("Επιβεβαίωση και πληρωμή"));
+  t.window.close();
+}
+{
+  const t = await boot({ usage: usageBody({ plan: "basic", upgrade: null, manage: SUB_MANAGE }) });
+  t.handlers.preview = () => ({ status: 200, json: { toPlan: "pro", currency: "EUR", chargeToday: "2990", recurring: "5900", nextBilledAt: null } });
+  t.document.getElementById("changePlanBtn").click();
+  await sleep(80);
+  check("without a next billing date the text still makes sense", t.document.getElementById("changePlanRecurring").textContent.startsWith("Then"), t.document.getElementById("changePlanRecurring").textContent);
+  t.window.close();
+}
+
+console.log("switch to Pro: when the preview fails");
+for (const [label, resp, expectText, expectRetry] of [
+  ["past due", { status: 409, json: { code: "past_due" } }, "last payment didn't go through", false],
+  ["pending scheduled change", { status: 409, json: { code: "pending_changes" } }, "pending change", false],
+  ["too close to renewal", { status: 409, json: { code: "locked_renewal" } }, "about to renew", false],
+  ["not eligible", { status: 409, json: { code: "not_eligible" } }, "isn't available", false],
+  ["billing unavailable (503)", { status: 503, json: { code: "unavailable" } }, "couldn't confirm", true],
+  ["provider error (502)", { status: 502, json: { code: "provider_error" } }, "couldn't confirm", true],
+  ["network down", "throw", "couldn't confirm", true],
+  ["rate limited (429)", { status: 429, json: { code: "rate_limited" } }, "couldn't confirm", false],
+]) {
+  const t = await boot({ usage: usageBody({ plan: "basic", upgrade: null, manage: SUB_MANAGE }) });
+  t.handlers.preview = () => resp;
+  t.document.getElementById("changePlanBtn").click();
+  await sleep(80);
+  check(`${label}: a clear message, no confirm button, nothing charged`, text(t.document).includes(expectText) && !t.document.getElementById("changePlanConfirmBtn") && t.calls.change.length === 0, text(t.document));
+  check(`${label}: retry is ${expectRetry ? "offered" : "not offered"}`, !!t.document.getElementById("changePlanRetryBtn") === expectRetry);
+  t.window.close();
+}
+{
+  const t = await boot({ usage: usageBody({ plan: "basic", upgrade: null, manage: SUB_MANAGE }) });
+  t.handlers.preview = (n) => (n === 1 ? { status: 502, json: { code: "provider_error" } } : PREVIEW_OK);
+  t.document.getElementById("changePlanBtn").click();
+  await sleep(80);
+  t.document.getElementById("changePlanRetryBtn").click();
+  await sleep(80);
+  check("Try again asks for a fresh preview and then shows the amount", t.calls.preview.length === 2 && !!t.document.getElementById("changePlanConfirmBtn"));
+  t.window.close();
+}
+
+console.log("switch to Pro: when the change itself fails");
+for (const [label, resp, expectText, expectRetry, refresh] of [
+  ["payment declined (change not applied)", { status: 422, json: { code: "change_failed" } }, "your plan has not been changed", true, false],
+  ["too close to renewal", { status: 409, json: { code: "locked_renewal" } }, "about to renew", true, false],
+  ["past due", { status: 409, json: { code: "past_due" } }, "last payment didn't go through", false, false],
+  ["provider error (could have gone through)", { status: 502, json: { code: "provider_error" } }, "couldn't confirm", false, true],
+  ["network down (could have gone through)", "throw", "couldn't confirm", false, true],
+]) {
+  const t = await boot({ usage: usageBody({ plan: "basic", upgrade: null, manage: SUB_MANAGE }) });
+  t.handlers.preview = () => PREVIEW_OK;
+  t.handlers.change = () => resp;
+  t.document.getElementById("changePlanBtn").click();
+  await sleep(80);
+  const fetchesBefore = t.calls.statusFetches;
+  t.document.getElementById("changePlanConfirmBtn").click();
+  await sleep(120);
+  check(`${label}: message shown`, text(t.document).includes(expectText), text(t.document));
+  check(`${label}: retry is ${expectRetry ? "offered" : "not offered"}`, !!t.document.getElementById("changePlanRetryBtn") === expectRetry);
+  check(`${label}: the page ${refresh ? "re-reads" : "does not need to re-read"} the real plan`, refresh ? t.calls.statusFetches > fetchesBefore : true);
+  check(`${label}: never says "Your plan is now Pro"`, !text(t.document).includes("Your plan is now Pro"));
+  t.window.close();
+}
+{
+  // μετά από αβέβαιο σφάλμα, αν ο server τελικά λέει Pro, η σελίδα το δείχνει
+  const t = await boot({ usage: usageBody({ plan: "basic", upgrade: null, manage: SUB_MANAGE }) });
+  t.handlers.preview = () => PREVIEW_OK;
+  t.handlers.change = (n, api) => { api.setUsage(usageBody({ plan: "pro", upgrade: null, manage: { canManage: true, canChangeToPro: false } })); return { status: 502, json: { code: "provider_error" } }; };
+  t.document.getElementById("changePlanBtn").click();
+  await sleep(80);
+  t.document.getElementById("changePlanConfirmBtn").click();
+  await sleep(150);
+  check("if the change actually went through, the button is gone after the refresh", !visible(t.document, "changePlanBtn"));
+  t.window.close();
+}
+
+console.log("Manage subscription: the Paddle portal");
+{
+  const t = await boot({ usage: usageBody({ plan: "basic", upgrade: null, manage: SUB_MANAGE }) });
+  t.handlers.portal = () => ({ status: 200, delayMs: 60, json: { url: "https://sandbox-customer-portal.paddle.com/x?token=1", cancelUrl: null, updatePaymentUrl: null } });
+  t.document.getElementById("manageSubBtn").click();
+  check("the new tab opens IMMEDIATELY on the click, before the request to the server starts (so it is not blocked)", t.calls.opened.length === 1 && t.calls.opened[0].target === "_blank" && t.calls.portal[0].at === 1);
+  check("the button is disabled while waiting", t.document.getElementById("manageSubBtn").disabled);
+  await sleep(150);
+  check("the tab is sent to the portal link", t.popup.location.href === "https://sandbox-customer-portal.paddle.com/x?token=1");
+  check("the new tab cannot reach back into the app (opener cleared)", t.popup.opener === null);
+  check("the request carries the session token and needs no ids from the browser", t.calls.portal[0].headers["X-Session-Token"] === "tok123" && Object.keys(t.calls.portal[0].body).length === 0);
+  check("the button works again", !t.document.getElementById("manageSubBtn").disabled);
+  check("no error notice", !visible(t.document, "billingNotice"));
+  t.window.close();
+}
+{
+  const t = await boot({ usage: usageBody({ plan: "basic", upgrade: null, manage: SUB_MANAGE }) });
+  t.handlers.portal = () => ({ status: 503, json: { code: "unavailable" } });
+  t.document.getElementById("manageSubBtn").click();
+  await sleep(100);
+  check("portal error: the empty tab is closed and a notice explains", t.popup.closed === true && visible(t.document, "billingNotice") && t.document.getElementById("billingNoticeText").textContent.includes("couldn't open the billing page"));
+  check("the error never navigated anywhere", t.popup.location.href === "" && t.calls.navigated.length === 0);
+  t.document.getElementById("billingNoticeDismiss").click();
+  check("the notice can be dismissed", !visible(t.document, "billingNotice"));
+  check("the button works again after an error", !t.document.getElementById("manageSubBtn").disabled);
+  t.window.close();
+}
+{
+  const t = await boot({ usage: usageBody({ plan: "basic", upgrade: null, manage: SUB_MANAGE }) });
+  t.handlers.portal = () => "throw";
+  t.document.getElementById("manageSubBtn").click();
+  await sleep(100);
+  check("network down while opening the portal: notice, tab closed", t.popup.closed === true && visible(t.document, "billingNotice"));
+  const t2 = await boot({ usage: usageBody({ plan: "basic", upgrade: null, manage: SUB_MANAGE }) });
+  t2.handlers.portal = () => ({ status: 200, json: {} });
+  t2.document.getElementById("manageSubBtn").click();
+  await sleep(100);
+  check("an answer without a link is treated as an error", t2.popup.closed === true && visible(t2.document, "billingNotice") && t2.popup.location.href === "");
+  t.window.close(); t2.window.close();
+}
+{
+  const t = await boot({ usage: usageBody({ plan: "basic", upgrade: null, manage: SUB_MANAGE }), blockPopups: true });
+  t.handlers.portal = () => ({ status: 200, json: { url: "https://sandbox-customer-portal.paddle.com/x?token=1" } });
+  t.document.getElementById("manageSubBtn").click();
+  await sleep(100);
+  check("popup blocked by the browser: falls back to opening in the same tab", t.calls.navigated.length === 1 && t.calls.navigated[0] === "https://sandbox-customer-portal.paddle.com/x?token=1");
+  t.window.close();
+}
+
+console.log("right after a first purchase the new buttons appear");
+{
+  const t = await boot({ usage: usageBody({ upgrade: OFFER_FREE }) });
+  t.handlers.reconcile = (b, n, api) => { api.setUsage(usageBody({ plan: "basic", upgrade: null, manage: SUB_MANAGE })); return { status: 200, json: { status: "applied", plan: "basic" } }; };
+  check("before paying there is nothing to manage", !visible(t.document, "manageSubBtn") && !visible(t.document, "changePlanBtn"));
+  await openAndPay(t, "basic");
+  await sleep(300);
+  check("once the plan is confirmed, Manage subscription and Switch to Pro appear", visible(t.document, "manageSubBtn") && visible(t.document, "changePlanBtn"));
   t.window.close();
 }
 

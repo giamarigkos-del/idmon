@@ -64,6 +64,12 @@
   .upgrade-btn{font-size:11.5px;font-weight:700;color:var(--on-accent);background:var(--accent);
     border:1px solid var(--accent);border-radius:4px;padding:5px 12px;cursor:pointer;font-family:inherit;}
   .upgrade-btn:hover{opacity:.88;}
+  .top-bar button.back-link{cursor:pointer;font-family:inherit;}
+  .change-plan-summary{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;
+    padding:14px 16px;margin:16px 0;max-width:420px;}
+  .change-plan-amount{font-size:24px;font-weight:700;margin:2px 0;}
+  .change-plan-note{font-size:12.5px;color:var(--text-soft);}
+  .change-plan-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;}
   .plan-grid{display:flex;gap:14px;flex-wrap:wrap;margin-top:16px;}
   .plan-card{flex:1 1 200px;max-width:280px;background:var(--surface);border:1px solid var(--border);
     border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px;}
@@ -343,6 +349,8 @@
       <a class="back-link" id="topAllDocsBtn" href="#" data-i18n="allDocs">All documents</a>
       <a class="back-link" id="switchModeLink" href="#" data-i18n="switchMode">Log out</a>
       <a class="back-link" href="/">←Portal</a>
+      <button type="button" class="back-link" id="manageSubBtn" data-i18n="manageSubBtn" style="display:none;">Manage subscription</button>
+      <button type="button" class="upgrade-btn" id="changePlanBtn" data-i18n="changePlanBtn" style="display:none;">Switch to Pro</button>
       <button type="button" class="upgrade-btn" id="upgradeBtn" data-i18n="upgradeBtn" style="display:none;">Upgrade</button>
       <button type="button" class="icon-btn" id="settingsBtn" data-i18n-title="widgetSettingsTooltip" title="Widget settings">⚙</button>
       <button type="button" class="icon-btn" id="embedBtn" data-i18n-title="embedTooltip" title="Embed on your site">🔗</button>
@@ -374,6 +382,13 @@
        δεν έχει φτάσει). Κρύβεται μόνη της μόλις το πλάνο ενημερωθεί. -->
   <div class="verify-banner" id="paymentPendingBanner" style="display:none;">
     <span data-i18n="paymentPendingBanner">Your payment is being processed. Your plan will update in a moment.</span>
+  </div>
+
+  <!-- Section R: μικρό μήνυμα σφάλματος για ενέργειες χρέωσης που γίνονται εκτός του κεντρικού
+       πάνελ (π.χ. αν δεν ανοίξει το portal του Paddle). Κλείνει με το ✕. -->
+  <div class="verify-banner" id="billingNotice" style="display:none;">
+    <span id="billingNoticeText"></span>
+    <button type="button" id="billingNoticeDismiss" class="verify-banner-dismiss" aria-label="Dismiss">✕</button>
   </div>
 
   <div class="layout">
@@ -2276,6 +2291,7 @@
     upgradePollTimer = null;
     clearPaymentPending();
     applyUpgradeOffer(null);
+    applyManageInfo(data.manage);
     el("usageLimitBanner").style.display = data.messagesLimitReached ? "flex" : "none";
     showPaymentState("confirmed", planLabel(data.plan));
   }
@@ -2436,6 +2452,175 @@
 
   el("upgradeBtn").addEventListener("click", renderUpgradePanel);
 
+  // Section R (συνέχεια): διαχείριση της ΥΠΑΡΧΟΥΣΑΣ συνδρομής.
+  // Ο server (GET /usage/status -> πεδίο "manage") αποφασίζει ποια κουμπιά φαίνονται:
+  //   "Διαχείριση συνδρομής" (portal του Paddle: τιμολόγια, κάρτα, ακύρωση)
+  //   "Αλλαγή σε Pro" (μόνο Basic με ενεργή συνδρομή, ΧΩΡΙΣ νέο checkout)
+  // Η αλλαγή έχει ΔΥΟ βήματα: πρώτα preview (δείχνουμε πόσο θα χρεωθεί σήμερα, ΔΕΝ αλλάζει
+  // τίποτα) και μετά, μόνο με ρητή επιβεβαίωση, η πραγματική αλλαγή. Τα ποσά έρχονται έτοιμα
+  // από το Paddle (μικρότερη υποδιαίρεση, π.χ. "2990" = 29,90)· εδώ απλά τα μορφοποιούμε.
+  let manageInfo = null;
+
+  function applyManageInfo(manage) {
+    manageInfo = manage && (manage.canManage || manage.canChangeToPro) ? manage : null;
+    el("changePlanBtn").style.display = manageInfo && manageInfo.canChangeToPro ? "" : "none";
+    el("manageSubBtn").style.display = manageInfo && manageInfo.canManage ? "" : "none";
+  }
+
+  function showBillingNotice(text) {
+    el("billingNoticeText").textContent = text;
+    el("billingNotice").style.display = "flex";
+  }
+
+  function formatMoney(minorUnits, currency) {
+    const n = Number(minorUnits);
+    try {
+      const fmt = new Intl.NumberFormat(getLang() === "el" ? "el-GR" : "en-US", { style: "currency", currency });
+      const digits = fmt.resolvedOptions().maximumFractionDigits;
+      return fmt.format(n / Math.pow(10, digits));
+    } catch (err) {
+      return minorUnits + " " + currency;
+    }
+  }
+
+  function setMainPanel(html) {
+    if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
+    currentSelectedId = null;
+    el("mainPanel").innerHTML = html;
+  }
+
+  function backToDocuments() {
+    el("topAllDocsBtn").click();
+  }
+
+  // Κωδικός σφάλματος του server -> μήνυμα. Αν δεν ξέρουμε τον κωδικό (ή το δίκτυο έπεσε)
+  // ΔΕΝ ισχυριζόμαστε ότι "δεν άλλαξε τίποτα": ίσως η αλλαγή να έγινε και απλά να μη τη
+  // μάθαμε, γι' αυτό λέμε να ανανεώσει και να δει το πλάνο του.
+  function changePlanErrorText(code) {
+    switch (code) {
+      case "locked_renewal": return t("changePlanErrLockedRenewal");
+      case "pending_changes": return t("changePlanErrPendingChanges");
+      case "past_due": return t("changePlanErrPastDue");
+      case "change_failed": return t("changePlanErrFailed");
+      case "not_eligible": return t("changePlanErrNotEligible");
+      default: return t("changePlanErrUnknown");
+    }
+  }
+
+  function renderChangePlanShell(inner) {
+    return `
+      <div class="edit-form" id="changePlanView" style="max-width:640px;">
+        <h2 style="margin:0 0 6px;font-size:16px;">${escapeHtml(t("changePlanTitle"))}</h2>
+        ${inner}
+      </div>
+    `;
+  }
+
+  function showChangePlanError(code, canRetry) {
+    setMainPanel(renderChangePlanShell(`
+      <p id="changePlanError" style="margin:0;font-size:13px;color:var(--text-soft);">${escapeHtml(changePlanErrorText(code))}</p>
+      <div class="change-plan-actions" style="margin-top:14px;">
+        ${canRetry ? `<button type="button" id="changePlanRetryBtn">${escapeHtml(t("changePlanRetry"))}</button>` : ""}
+        <button type="button" id="changePlanBackBtn">${escapeHtml(t("upgradeBackToDocs"))}</button>
+      </div>
+    `));
+    el("changePlanBackBtn").addEventListener("click", backToDocuments);
+    if (canRetry) el("changePlanRetryBtn").addEventListener("click", openChangePlanPanel);
+  }
+
+  function showPlanChanged(plan) {
+    setMainPanel(renderPaymentStateView("confirmed", planLabel(plan)));
+    el("upgradeBackBtn").addEventListener("click", backToDocuments);
+  }
+
+  async function confirmChangePlan() {
+    const confirmBtn = el("changePlanConfirmBtn");
+    const cancelBtn = el("changePlanCancelBtn");
+    confirmBtn.disabled = true;   // ένα κλικ = μία χρέωση
+    cancelBtn.disabled = true;
+    el("changePlanStatus").textContent = t("changePlanWorking");
+    let res, data;
+    try {
+      res = await fetch("/billing/change-plan", { method: "POST", headers: HEADERS, body: JSON.stringify({ plan: "pro" }) });
+      data = await res.json();
+    } catch (err) {
+      showChangePlanError("unknown", false);
+      checkUsageStatus(); // ίσως η αλλαγή έγινε: ανανεώνουμε ό,τι δείχνει η σελίδα
+      return;
+    }
+    if (res.ok && data.status === "applied") {
+      showPlanChanged(data.plan);
+      checkUsageStatus(); // κρύβει το "Αλλαγή σε Pro", ανανεώνει τα banners
+      return;
+    }
+    showChangePlanError(data && data.code, !!(data && (data.code === "change_failed" || data.code === "locked_renewal")));
+    if (!data || !data.code || data.code === "provider_error" || data.code === "unavailable") checkUsageStatus();
+  }
+
+  async function openChangePlanPanel() {
+    if (!manageInfo || !manageInfo.canChangeToPro) return;
+    setMainPanel(renderChangePlanShell(`<p id="changePlanLoading" style="margin:0;font-size:13px;color:var(--text-soft);">${escapeHtml(t("changePlanLoading"))}</p>`));
+    let res, data;
+    try {
+      res = await fetch("/billing/change-plan/preview", { method: "POST", headers: HEADERS, body: JSON.stringify({ plan: "pro" }) });
+      data = await res.json();
+    } catch (err) {
+      showChangePlanError("unknown", true);
+      return;
+    }
+    if (!res.ok) {
+      showChangePlanError(data && data.code, !!(data && (data.code === "provider_error" || data.code === "unavailable")));
+      return;
+    }
+    const today = formatMoney(data.chargeToday, data.currency);
+    const monthly = formatMoney(data.recurring, data.currency);
+    const recurringText = data.nextBilledAt
+      ? t("changePlanRecurringFrom", { date: formatDate(data.nextBilledAt), amount: monthly })
+      : t("changePlanRecurringThen", { amount: monthly });
+    setMainPanel(renderChangePlanShell(`
+      <p style="margin:0;font-size:13px;color:var(--text-soft);">${escapeHtml(t("changePlanIntro"))}</p>
+      <div class="change-plan-summary">
+        <div class="change-plan-note">${escapeHtml(t("changePlanTodayLabel"))}</div>
+        <div class="change-plan-amount" id="changePlanToday">${escapeHtml(today)}</div>
+        <div class="change-plan-note">${escapeHtml(t("changePlanTodayNote"))}</div>
+        <div class="change-plan-note" style="margin-top:10px;" id="changePlanRecurring">${escapeHtml(recurringText)}</div>
+      </div>
+      <div class="change-plan-actions">
+        <button type="button" id="changePlanConfirmBtn">${escapeHtml(t("changePlanConfirm", { amount: today }))}</button>
+        <button type="button" id="changePlanCancelBtn">${escapeHtml(t("changePlanCancel"))}</button>
+      </div>
+      <div class="upload-status" id="changePlanStatus"></div>
+    `));
+    el("changePlanConfirmBtn").addEventListener("click", confirmChangePlan);
+    el("changePlanCancelBtn").addEventListener("click", backToDocuments);
+  }
+
+  // Portal του Paddle: ανοίγει σε ΝΕΟ tab (το Paddle λέει να μην μπαίνει σε iframe). Το tab
+  // ανοίγει ΑΜΕΣΩΣ στο κλικ (πριν την αναμονή του server), αλλιώς οι browsers το μπλοκάρουν
+  // ως popup. Ο σύνδεσμος είναι προσωρινός: ζητιέται ΝΕΟΣ σε κάθε κλικ, δεν αποθηκεύεται.
+  async function openBillingPortal() {
+    const btn = el("manageSubBtn");
+    btn.disabled = true;
+    const popup = window.open("", "_blank");
+    if (popup) popup.opener = null;
+    try {
+      const res = await fetch("/billing/portal", { method: "POST", headers: HEADERS, body: "{}" });
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error("portal unavailable");
+      if (popup) popup.location.href = data.url;
+      else navigateTo(data.url); // το tab μπλοκαρίστηκε: ανοίγουμε στο ίδιο
+    } catch (err) {
+      if (popup) popup.close();
+      showBillingNotice(t("portalError"));
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  el("changePlanBtn").addEventListener("click", openChangePlanPanel);
+  el("manageSubBtn").addEventListener("click", openBillingPortal);
+  el("billingNoticeDismiss").addEventListener("click", () => { el("billingNotice").style.display = "none"; });
+
   // Section Q: διαβάζει GET /usage/status και δείχνει το usage-limit banner
   // αν το μηνιαίο όριο μηνυμάτων έχει εξαντληθεί. Best-effort -- αν
   // αποτύχει το fetch, απλά δεν δείχνουμε το banner (ίδιο σκεπτικό με
@@ -2446,6 +2631,7 @@
       if (!res.ok) return;
       const data = await res.json();
       applyUpgradeOffer(data.upgrade);
+      applyManageInfo(data.manage);
       if (data.messagesLimitReached) {
         el("usageLimitBanner").style.display = "flex";
       }

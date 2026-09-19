@@ -43,6 +43,10 @@ function makeEnv({ users = {}, sessions = {}, vars = {} } = {}) {
                 const u = users[args[0]];
                 return u ? { plan: u.plan } : null;
               }
+              if (sql.includes("SELECT plan, paddle_customer_id, paddle_subscription_id, paddle_status FROM users")) {
+                const u = users[args[0]];
+                return u ? { plan: u.plan, paddle_customer_id: u.paddle_customer_id ?? null, paddle_subscription_id: u.paddle_subscription_id ?? null, paddle_status: u.paddle_status ?? null } : null;
+              }
               if (sql.includes("SELECT paddle_status FROM users")) {
                 const u = users[args[0]];
                 return u ? { paddle_status: u.paddle_status ?? null } : null;
@@ -61,6 +65,7 @@ function makeEnv({ users = {}, sessions = {}, vars = {} } = {}) {
   return {
     DB,
     DOCUMENT_REGISTRY,
+    PADDLE_API_KEY: "pdl_test_dummy_key",
     PADDLE_CLIENT_TOKEN: "test_dummy_token",
     PADDLE_ENV: "sandbox",
     PADDLE_PRICE_BASIC: "pri_basic_test",
@@ -163,6 +168,36 @@ console.log("live environment flag");
   const env = makeEnv({ users: { "ws-free": { plan: "free" } }, vars: { PADDLE_ENV: "production" } });
   const { body } = await status(env, { "X-Workspace-Id": "ws-free" });
   check("PADDLE_ENV=production is passed through", body.upgrade && body.upgrade.environment === "production");
+}
+
+
+console.log("manage block: what an existing subscriber may do");
+{
+  const SUBID = "sub_" + "0".repeat(25) + "2";
+  const acct = (over) => ({ plan: "basic", paddle_subscription_id: SUBID, paddle_status: "active", paddle_customer_id: null, ...over });
+  const manageOf = async (user, vars = {}, ws = "ws-m") => {
+    const env = makeEnv({ users: user ? { [ws]: user } : {}, vars });
+    const { body } = await status(env, { "X-Workspace-Id": ws });
+    return body.manage;
+  };
+  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  check("basic + active subscription: can manage and change to pro", eq(await manageOf(acct()), { canManage: true, canChangeToPro: true }));
+  check("pro + active: can manage, cannot change", eq(await manageOf(acct({ plan: "pro" })), { canManage: true, canChangeToPro: false }));
+  check("basic + past_due: can manage (to fix the card), cannot change", eq(await manageOf(acct({ paddle_status: "past_due" })), { canManage: true, canChangeToPro: false }));
+  check("basic + trialing: can manage, cannot change", eq(await manageOf(acct({ paddle_status: "trialing" })), { canManage: true, canChangeToPro: false }));
+  check("basic + paused: can manage, cannot change", eq(await manageOf(acct({ paddle_status: "paused" })), { canManage: true, canChangeToPro: false }));
+  check("canceled subscription: nothing to manage", (await manageOf(acct({ plan: "free", paddle_status: "canceled" }))) === null);
+  check("legacy basic without a subscription: nothing to manage", (await manageOf(acct({ paddle_subscription_id: null, paddle_status: null }))) === null);
+  check("guest / developer (no account row): null", (await manageOf(null)) === null);
+  check("no PADDLE_API_KEY: null", (await manageOf(acct(), { PADDLE_API_KEY: undefined })) === null);
+  check("PADDLE_ENV missing: null", (await manageOf(acct(), { PADDLE_ENV: undefined })) === null);
+  check("PADDLE_ENV unknown value: null", (await manageOf(acct(), { PADDLE_ENV: "staging" })) === null);
+  check("no pro price configured: can manage, cannot change", eq(await manageOf(acct(), { PADDLE_PRICE_PRO: undefined }), { canManage: true, canChangeToPro: false }));
+  check("protected demo workspace: null", (await manageOf(acct(), {}, "efood-ops-demo")) === null);
+  const envKey = makeEnv({ users: { "ws-m": acct() } });
+  const { body } = await status(envKey, { "X-Workspace-Id": "ws-m" });
+  check("the API key never appears in the response", !JSON.stringify(body).includes("pdl_test_dummy_key"));
+  check("an existing subscriber gets no upgrade offer (no double subscription)", body.upgrade === null);
 }
 
 console.log("\n" + passed + " passed, " + failed + " failed");

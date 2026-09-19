@@ -1505,6 +1505,34 @@ async function buildUpgradeOffer(env, workspaceId, plan) {
   };
 }
 
+// Section R (συνέχεια): τι μπορεί να κάνει ο πελάτης με τη ΥΠΑΡΧΟΥΣΑ συνδρομή του.
+// Και εδώ αποφασίζει ο server (όχι ο browser):
+//   canManage:      έχει ζωντανή συνδρομή -> κουμπί "Διαχείριση συνδρομής" (portal του Paddle)
+//   canChangeToPro: Basic με ΕΝΕΡΓΗ συνδρομή -> κουμπί "Αλλαγή σε Pro". Δεν προσφέρεται σε
+//                   past_due (πρέπει πρώτα να διορθωθεί η κάρτα) ούτε όταν λείπει η ρύθμιση.
+// null = δεν εμφανίζεται τίποτα (Guest, χωρίς συνδρομή, ή δεν έχει ρυθμιστεί το billing API).
+async function getBillingUser(env, workspaceId) {
+  return await env.DB.prepare(
+    "SELECT plan, paddle_customer_id, paddle_subscription_id, paddle_status FROM users WHERE workspace_id = ?"
+  ).bind(workspaceId).first();
+}
+
+function billingConfigured(env) {
+  return !!(env.PADDLE_API_KEY && paddleApiBase(env));
+}
+
+function canChangeToPro(env, row) {
+  return !!(env.PADDLE_PRICE_PRO && row.plan === "basic" && row.paddle_status === "active" && row.paddle_subscription_id);
+}
+
+async function buildManageInfo(env, workspaceId) {
+  if (workspaceId === PROTECTED_WORKSPACE_ID) return null;
+  if (!billingConfigured(env)) return null;
+  const row = await getBillingUser(env, workspaceId);
+  if (!row || !row.paddle_subscription_id || !PADDLE_LIVE_SUBSCRIPTION_STATUSES.has(row.paddle_status)) return null;
+  return { canManage: true, canChangeToPro: canChangeToPro(env, row) };
+}
+
 // Section Q: GET /usage/status -- πηγή αλήθειας που διαβάζει το editor.html
 // για να δείξει το usage-limit banner, και που θα μπορούσε αργότερα να
 // τροφοδοτήσει ένα πιο αναλυτικό "πλάνο & χρήση" panel. Επιστρέφει και τα
@@ -1515,6 +1543,7 @@ async function handleGetUsageStatus(request, env) {
 
   const plan = await getPlanForWorkspace(env, workspaceId);
   const upgrade = await buildUpgradeOffer(env, workspaceId, plan);
+  const manage = await buildManageInfo(env, workspaceId);
   const limits = PLAN_LIMITS[plan] || PLAN_LIMITS[DEFAULT_PLAN];
   // Σεβόμαστε το ίδιο MONTHLY_MESSAGE_LIMIT_OVERRIDE με το checkAndIncrementUsage()
   // -- αλλιώς το τοπικό testing γίνεται μπερδεμένο: το backend θα μπλοκάρει
@@ -1535,6 +1564,7 @@ async function handleGetUsageStatus(request, env) {
     JSON.stringify({
       plan,
       upgrade,
+      manage,
       messagesUsed,
       messagesLimit,
       messagesLimitReached: workspaceId !== PROTECTED_WORKSPACE_ID && messagesUsed >= messagesLimit,
@@ -3770,6 +3800,215 @@ async function handleBillingReconcile(request, env) {
   return billingOk({ status: "up_to_date" }); // stale / other_subscription: το webhook (ή άλλη συνδρομή) πρόλαβε
 }
 
+// Section R (συνέχεια): αλλαγή Basic -> Pro και portal, μέσα από την εφαρμογή.
+//
+// Αλλαγή πλάνου: ΔΕΝ ανοίγουμε νέο checkout (θα έφτιαχνε ΔΕΥΤΕΡΗ συνδρομή). Αλλάζουμε το
+// price της ΥΠΑΡΧΟΥΣΑΣ συνδρομής με proration_billing_mode "prorated_immediately": ο πελάτης
+// πληρώνει ΜΟΝΟ τη διαφορά για το υπόλοιπο της περιόδου, αμέσως. Με on_payment_failure
+// "prevent_change" (ρητά), αν αποτύχει η πληρωμή η αλλαγή ΔΕΝ γίνεται.
+// Δύο βήματα: preview (δείχνουμε το ποσό, ΔΕΝ αλλάζει τίποτα) και μετά η ίδια η αλλαγή.
+// Ο browser ΠΟΤΕ δεν στέλνει subscription ID ή price ID: ο server τα βρίσκει από το session
+// και από τη ρύθμιση, οπότε δεν μπορεί να αλλάξει συνδρομή άλλου ή να διαλέξει άλλο πλάνο.
+const PADDLE_SUB_ID_RE = /^sub_[a-z\d]{26}$/;
+const PADDLE_CUSTOMER_ID_RE = /^ctm_[a-z\d]{26}$/;
+
+function billingError(status, code, message) {
+  return new Response(JSON.stringify({ error: message, code }), { status, headers: JSON_HEADERS });
+}
+
+// Ίδια λογική με το billingUpstreamError, αλλά με ΚΩΔΙΚΟ ώστε το editor να δείξει το σωστό
+// μήνυμα στη γλώσσα του χρήστη. Οι κωδικοί locked_renewal / pending_changes / past_due
+// είναι τα τεκμηριωμένα σφάλματα του Paddle για αλλαγές συνδρομής.
+function planChangeUpstreamError(res) {
+  if (res.code === "subscription_locked_renewal") {
+    return billingError(409, "locked_renewal", "Your subscription is about to renew. Please try again in a few minutes.");
+  }
+  if (res.code === "subscription_locked_pending_changes") {
+    return billingError(409, "pending_changes", "There is already a pending change on your subscription.");
+  }
+  if (res.code === "subscription_update_when_past_due") {
+    return billingError(409, "past_due", "Your last payment failed. Please update your payment method first.");
+  }
+  if (res.status === 404) return billingError(404, "not_found", "Not found");
+  if (res.code === "not_configured" || res.status === 401 || res.status === 403) {
+    return billingError(503, "unavailable", "Billing is temporarily unavailable");
+  }
+  if (res.status === 0 || res.status === 429 || res.status >= 500) {
+    return billingError(502, "provider_error", "The billing provider did not respond. Please try again.");
+  }
+  return billingError(422, "change_failed", "The change could not be completed. Your plan has not been changed.");
+}
+
+async function readJsonBody(request) {
+  try {
+    return await request.json();
+  } catch (err) {
+    return null;
+  }
+}
+
+// Κοινή αρχή και των τριών endpoints: πραγματικός λογαριασμός, όριο κλήσεων, γραμμή χρήστη.
+async function loadBillingContext(request, env) {
+  const auth = await requireAccountSession(request, env);
+  if (auth.error) return { error: auth.error };
+  const workspaceId = auth.session.workspace_id;
+  if (workspaceId === PROTECTED_WORKSPACE_ID) return { error: billingError(400, "not_applicable", "Not applicable to this workspace") };
+  if (await billingRateLimited(env, workspaceId)) {
+    return { error: billingError(429, "rate_limited", "Too many requests. Please try again in a moment.") };
+  }
+  const user = await getBillingUser(env, workspaceId);
+  if (!user) return { error: billingError(404, "not_found", "Account not found") };
+  return { workspaceId, user };
+}
+
+// Μόνο Basic με ΕΝΕΡΓΗ συνδρομή αλλάζει σε Pro. Επιστρέφει απάντηση σφάλματος ή null.
+function planChangeBlocker(env, user) {
+  if (!billingConfigured(env) || !env.PADDLE_PRICE_PRO) return billingError(503, "unavailable", "Billing is temporarily unavailable");
+  if (user.paddle_status === "past_due") {
+    return billingError(409, "past_due", "Your last payment failed. Please update your payment method first.");
+  }
+  if (!canChangeToPro(env, user) || !PADDLE_SUB_ID_RE.test(user.paddle_subscription_id)) {
+    return billingError(409, "not_eligible", "This plan change is not available for your account.");
+  }
+  return null;
+}
+
+function planChangeBody(env) {
+  return {
+    items: [{ price_id: env.PADDLE_PRICE_PRO, quantity: 1 }],
+    proration_billing_mode: "prorated_immediately",
+  };
+}
+
+// Τα ποσά του Paddle είναι strings στη μικρότερη υποδιαίρεση (π.χ. "2990" = 29,90). Δεχόμαστε
+// ΜΟΝΟ ακέραιο string, αλλιώς null -- ποτέ δεν δείχνουμε στον πελάτη κάτι που δεν καταλαβαίνουμε.
+function minorUnits(value) {
+  return typeof value === "string" && /^-?\d+$/.test(value) ? value : null;
+}
+
+// POST /billing/change-plan/preview  { plan: "pro" }
+// Δεν αλλάζει ΤΙΠΟΤΑ. Γυρνάει πόσο θα χρεωθεί ΣΗΜΕΡΑ (με φόρους, ό,τι θα δει στην κάρτα) και
+// πόσο θα πληρώνει από εδώ και πέρα, ώστε ο πελάτης να επιβεβαιώσει ενημερωμένος.
+async function handlePlanChangePreview(request, env) {
+  const ctx = await loadBillingContext(request, env);
+  if (ctx.error) return ctx.error;
+  const body = await readJsonBody(request);
+  if (!body || body.plan !== "pro") return billingError(400, "unsupported_plan", "Unsupported plan");
+
+  const blocker = planChangeBlocker(env, ctx.user);
+  if (blocker) return blocker;
+
+  const res = await paddleApi(env, "PATCH", `/subscriptions/${ctx.user.paddle_subscription_id}/preview`, planChangeBody(env));
+  if (!res.ok) return planChangeUpstreamError(res);
+
+  const d = res.data || {};
+  const today = d.immediate_transaction && d.immediate_transaction.details && d.immediate_transaction.details.totals;
+  const recurring = d.recurring_transaction_details && d.recurring_transaction_details.totals;
+  const chargeToday = today ? minorUnits(today.grand_total) || minorUnits(today.balance) || minorUnits(today.total) : null;
+  const recurringTotal = recurring ? minorUnits(recurring.total) : null;
+  const currency = (today && today.currency_code) || (recurring && recurring.currency_code) || d.currency_code || null;
+  if (chargeToday === null || recurringTotal === null || !currency) {
+    console.error("Paddle preview had an unexpected shape");
+    return billingError(502, "provider_error", "The billing provider did not respond. Please try again.");
+  }
+  return billingOk({
+    toPlan: "pro",
+    currency,
+    chargeToday,
+    recurring: recurringTotal,
+    nextBilledAt: d.next_billed_at || null,
+  });
+}
+
+// POST /billing/change-plan  { plan: "pro" }
+// Η πραγματική αλλαγή. Είναι idempotent: αν ο λογαριασμός είναι ΗΔΗ Pro (διπλό κλικ, ή το
+// webhook πρόλαβε) απαντάμε επιτυχία ΧΩΡΙΣ να ξαναχρεώσουμε. Το αποτέλεσμα εφαρμόζεται
+// αμέσως από την ίδια την απάντηση του Paddle (applyPaddleSubscription), χωρίς αναμονή webhook.
+async function handlePlanChange(request, env) {
+  const ctx = await loadBillingContext(request, env);
+  if (ctx.error) return ctx.error;
+  const body = await readJsonBody(request);
+  if (!body || body.plan !== "pro") return billingError(400, "unsupported_plan", "Unsupported plan");
+
+  if (ctx.user.plan === "pro" && ctx.user.paddle_status === "active" && ctx.user.paddle_subscription_id) {
+    return billingOk({ status: "applied", plan: "pro" });
+  }
+  const blocker = planChangeBlocker(env, ctx.user);
+  if (blocker) return blocker;
+
+  const res = await paddleApi(env, "PATCH", `/subscriptions/${ctx.user.paddle_subscription_id}`, {
+    ...planChangeBody(env),
+    on_payment_failure: "prevent_change",
+  });
+  if (!res.ok) return planChangeUpstreamError(res);
+
+  const subscription = res.data;
+  if (!subscription || !subscription.id) return billingError(502, "provider_error", "The billing provider did not respond. Please try again.");
+  await applyPaddleSubscription(env, subscription, subscription.updated_at || new Date().toISOString(), ctx.workspaceId);
+
+  // Επιβεβαιώνουμε από τη ΒΑΣΗ (όχι μαντεύοντας) ότι ο λογαριασμός είναι πια Pro.
+  const plan = await getPlanForWorkspace(env, ctx.workspaceId);
+  if (plan !== "pro") {
+    console.error("Plan change went through at Paddle but the account is not Pro:", plan);
+    return billingError(502, "provider_error", "The billing provider did not respond. Please try again.");
+  }
+  return billingOk({ status: "applied", plan });
+}
+
+// Δεχόμαστε ΜΟΝΟ https links του Paddle. Το URL που θα ανοίξει ο browser του πελάτη έρχεται από
+// εξωτερικό API, οπότε ποτέ δεν το περνάμε αν δεν δείχνει σε domain του Paddle.
+function isPaddlePortalUrl(value) {
+  try {
+    const u = new URL(value);
+    return u.protocol === "https:" && (u.hostname === "paddle.com" || u.hostname.endsWith(".paddle.com"));
+  } catch (err) {
+    return false;
+  }
+}
+
+// POST /billing/portal
+// Δημιουργεί ΝΕΟ σύνδεσμο προς το portal του Paddle κάθε φορά (είναι προσωρινός, δεν
+// αποθηκεύεται ποτέ). Εκεί ο πελάτης βλέπει τιμολόγια, αλλάζει κάρτα, ακυρώνει.
+async function handleBillingPortal(request, env) {
+  const ctx = await loadBillingContext(request, env);
+  if (ctx.error) return ctx.error;
+  const user = ctx.user;
+  if (!billingConfigured(env)) return billingError(503, "unavailable", "Billing is temporarily unavailable");
+  if (!user.paddle_subscription_id || !PADDLE_SUB_ID_RE.test(user.paddle_subscription_id) ||
+      !PADDLE_LIVE_SUBSCRIPTION_STATUSES.has(user.paddle_status)) {
+    return billingError(409, "no_subscription", "There is no active subscription to manage.");
+  }
+
+  let customerId = user.paddle_customer_id;
+  if (!customerId || !PADDLE_CUSTOMER_ID_RE.test(customerId)) {
+    // Δεν έχουμε αποθηκεύσει customer id (θεωρητικά δεν συμβαίνει): το ρωτάμε από τη συνδρομή.
+    const subRes = await paddleApi(env, "GET", `/subscriptions/${user.paddle_subscription_id}`);
+    if (!subRes.ok) return planChangeUpstreamError(subRes);
+    customerId = subRes.data && subRes.data.customer_id;
+    if (!customerId || !PADDLE_CUSTOMER_ID_RE.test(customerId)) {
+      return billingError(502, "provider_error", "The billing provider did not respond. Please try again.");
+    }
+  }
+
+  const res = await paddleApi(env, "POST", `/customers/${customerId}/portal-sessions`, {
+    subscription_ids: [user.paddle_subscription_id],
+  });
+  if (!res.ok) return planChangeUpstreamError(res);
+
+  const urls = (res.data && res.data.urls) || {};
+  const url = urls.general && isPaddlePortalUrl(urls.general.overview) ? urls.general.overview : null;
+  if (!url) {
+    console.error("Paddle portal session had no usable link");
+    return billingError(502, "provider_error", "The billing provider did not respond. Please try again.");
+  }
+  const subUrls = (Array.isArray(urls.subscriptions) ? urls.subscriptions : []).find((s) => s && s.id === user.paddle_subscription_id) || {};
+  return billingOk({
+    url,
+    cancelUrl: isPaddlePortalUrl(subUrls.cancel_subscription) ? subUrls.cancel_subscription : null,
+    updatePaymentUrl: isPaddlePortalUrl(subUrls.update_subscription_payment_method) ? subUrls.update_subscription_payment_method : null,
+  });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -3878,6 +4117,17 @@ export default {
     // συγκεκριμένη πληρωμή (χρειάζεται session, δεν είναι δημόσιο).
     if (url.pathname === "/billing/reconcile" && request.method === "POST") {
       return handleBillingReconcile(request, env);
+    }
+
+    // Section R: αλλαγή Basic -> Pro (preview και πραγματική αλλαγή) και portal του Paddle.
+    if (url.pathname === "/billing/change-plan/preview" && request.method === "POST") {
+      return handlePlanChangePreview(request, env);
+    }
+    if (url.pathname === "/billing/change-plan" && request.method === "POST") {
+      return handlePlanChange(request, env);
+    }
+    if (url.pathname === "/billing/portal" && request.method === "POST") {
+      return handleBillingPortal(request, env);
     }
 
     // Public embed endpoint -- ΔΕΝ χρησιμοποιεί resolveWorkspaceId (session/
