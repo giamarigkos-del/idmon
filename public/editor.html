@@ -57,6 +57,22 @@
     cursor:pointer;}
   .icon-btn:hover{background:var(--accent-soft);border-color:var(--accent);}
 
+  /* Section R: κουμπί "Αναβάθμιση" (φαίνεται μόνο όταν ο server το επιτρέψει,
+     βλ. buildUpgradeOffer στο backend) και οι κάρτες πλάνων του πάνελ. Ίδια
+     χρωματική λογική με τα υπόλοιπα κουμπιά της top-bar, με accent φόντο
+     ώστε να ξεχωρίζει ως η ενέργεια που θέλουμε να γίνει. */
+  .upgrade-btn{font-size:11.5px;font-weight:700;color:var(--on-accent);background:var(--accent);
+    border:1px solid var(--accent);border-radius:4px;padding:5px 12px;cursor:pointer;font-family:inherit;}
+  .upgrade-btn:hover{opacity:.88;}
+  .plan-grid{display:flex;gap:14px;flex-wrap:wrap;margin-top:16px;}
+  .plan-card{flex:1 1 200px;max-width:280px;background:var(--surface);border:1px solid var(--border);
+    border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px;}
+  .plan-card h3{margin:0;font-size:15px;}
+  .plan-price{font-size:22px;font-weight:700;min-height:28px;}
+  .plan-price small{font-size:12px;font-weight:400;color:var(--text-soft);}
+  .plan-feature{font-size:12.5px;color:var(--text-soft);}
+  .plan-card button{margin-top:8px;}
+
   .layout{flex:1;display:flex;min-height:0;}
 
   .sidebar{width:340px;flex-shrink:0;border-left:1px solid var(--border);background:var(--surface);
@@ -327,6 +343,7 @@
       <a class="back-link" id="topAllDocsBtn" href="#" data-i18n="allDocs">All documents</a>
       <a class="back-link" id="switchModeLink" href="#" data-i18n="switchMode">Log out</a>
       <a class="back-link" href="/">←Portal</a>
+      <button type="button" class="upgrade-btn" id="upgradeBtn" data-i18n="upgradeBtn" style="display:none;">Upgrade</button>
       <button type="button" class="icon-btn" id="settingsBtn" data-i18n-title="widgetSettingsTooltip" title="Widget settings">⚙</button>
       <button type="button" class="icon-btn" id="embedBtn" data-i18n-title="embedTooltip" title="Embed on your site">🔗</button>
       <button type="button" class="icon-btn" id="analyticsBtn" data-i18n-title="analyticsTooltip" title="Analytics">📊</button>
@@ -2091,6 +2108,179 @@
     out.querySelector("pre").textContent = JSON.stringify(data, null, 2);
   }
 
+  // Section R: αναβάθμιση πλάνου μέσω Paddle.
+  // Ο server (GET /usage/status -> πεδίο "upgrade") αποφασίζει ΑΝ φαίνεται το
+  // κουμπί και ΤΙ πλάνα προσφέρονται· εδώ απλά το εμφανίζουμε. Το Paddle.js
+  // φορτώνεται μόνο όταν χρειαστεί (πάνελ ή checkout), όχι για όλους. Ο
+  // πραγματικός υποβιβασμός/αναβάθμιση του πλάνου γίνεται ΜΟΝΟ από το webhook
+  // (POST /paddle/webhook), ποτέ από αυτό το script -- το checkout.completed
+  // που ακούμε εδώ είναι καθαρά για το μήνυμα προς τον χρήστη.
+  let upgradeOffer = null;
+  let paddleReady = null;
+  let upgradePollTimer = null;
+
+  function planLabel(plan) {
+    return t("planName_" + plan);
+  }
+
+  function applyUpgradeOffer(offer) {
+    upgradeOffer = offer && Array.isArray(offer.offers) && offer.offers.length ? offer : null;
+    el("upgradeBtn").style.display = upgradeOffer ? "" : "none";
+  }
+
+  function setUpgradeStatus(text) {
+    const s = el("upgradeStatus");
+    if (s) s.textContent = text;
+  }
+
+  function loadPaddle(offer) {
+    if (paddleReady) return paddleReady;
+    paddleReady = new Promise((resolve, reject) => {
+      const init = () => {
+        try {
+          if (offer.environment === "sandbox") window.Paddle.Environment.set("sandbox");
+          window.Paddle.Initialize({ token: offer.clientToken, eventCallback: onPaddleEvent });
+          resolve(window.Paddle);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      if (window.Paddle) {
+        init();
+        return;
+      }
+      const s = document.createElement("script");
+      s.src = "https://cdn.paddle.com/paddle/v2/paddle.js";
+      s.onload = init;
+      s.onerror = () => reject(new Error("Paddle.js failed to load"));
+      document.head.appendChild(s);
+    });
+    // Αν αποτύχει η φόρτωση, επιτρέπουμε νέα προσπάθεια στο επόμενο κλικ.
+    paddleReady.catch(() => { paddleReady = null; });
+    return paddleReady;
+  }
+
+  function onPaddleEvent(event) {
+    if (event && event.name === "checkout.completed") handleCheckoutCompleted();
+  }
+
+  // Το webhook ενημερώνει το plan λίγα δευτερόλεπτα μετά την πληρωμή. Ρωτάμε
+  // τον server κάθε 3" (μέχρι 10 φορές) μέχρι να πάψει να προσφέρει αναβάθμιση,
+  // δηλαδή μέχρι να δει ζωντανή συνδρομή στον λογαριασμό.
+  function handleCheckoutCompleted() {
+    setUpgradeStatus(t("upgradeProcessing"));
+    clearInterval(upgradePollTimer);
+    let tries = 0;
+    upgradePollTimer = setInterval(async () => {
+      tries++;
+      try {
+        const res = await fetch("/usage/status", { headers: HEADERS });
+        if (res.ok) {
+          const data = await res.json();
+          if (!data.upgrade) {
+            clearInterval(upgradePollTimer);
+            applyUpgradeOffer(null);
+            el("usageLimitBanner").style.display = data.messagesLimitReached ? "flex" : "none";
+            setUpgradeStatus(t("upgradeDone", { plan: planLabel(data.plan) }));
+            return;
+          }
+        }
+      } catch (err) {
+        // best-effort: θα ξαναδοκιμάσει στον επόμενο γύρο
+      }
+      if (tries >= 10) {
+        clearInterval(upgradePollTimer);
+        setUpgradeStatus(t("upgradeSlow"));
+      }
+    }, 3000);
+  }
+
+  async function startCheckout(planKey) {
+    const chosen = upgradeOffer && upgradeOffer.offers.find((o) => o.plan === planKey);
+    if (!chosen) return;
+    setUpgradeStatus("");
+    try {
+      const paddle = await loadPaddle(upgradeOffer);
+      paddle.Checkout.open({
+        items: [{ priceId: chosen.priceId, quantity: 1 }],
+        customData: { workspace_id: upgradeOffer.workspaceId },
+        settings: { displayMode: "overlay", locale: getLang() === "el" ? "el" : "en" },
+      });
+    } catch (err) {
+      setUpgradeStatus(t("upgradeLoadError"));
+    }
+  }
+
+  // Τιμές από το ίδιο το Paddle (τοπική μορφή + φόρος όπως θα τις δει ο
+  // πελάτης στο checkout) -- δεν τις γράφουμε χειροκίνητα στον κώδικα, άρα δεν
+  // μπορούν ποτέ να διαφέρουν από τη χρέωση. Best-effort: αν αποτύχει, οι
+  // κάρτες δείχνουν απλά χωρίς τιμή και το checkout δείχνει την τιμή κανονικά.
+  async function fillUpgradePrices(offer) {
+    try {
+      const paddle = await loadPaddle(offer);
+      const result = await paddle.PricePreview({
+        items: offer.offers.map((o) => ({ priceId: o.priceId, quantity: 1 })),
+      });
+      const lines = (result && result.data && result.data.details && result.data.details.lineItems) || [];
+      lines.forEach((line, i) => {
+        const priceId = (line.price && line.price.id) || (offer.offers[i] && offer.offers[i].priceId);
+        const total = line.formattedTotals && line.formattedTotals.total;
+        if (!priceId || !total) return;
+        const slot = Array.from(document.querySelectorAll("[data-price-for]"))
+          .find((n) => n.getAttribute("data-price-for") === priceId);
+        if (!slot) return;
+        slot.textContent = total;
+        const small = document.createElement("small");
+        small.textContent = " " + t("upgradePerMonth");
+        slot.appendChild(small);
+      });
+    } catch (err) {
+      // best-effort, δες σχόλιο πάνω
+    }
+  }
+
+  function renderUpgradeContent(offer) {
+    const numberLocale = getLang() === "el" ? "el-GR" : "en-US";
+    const cards = offer.offers
+      .map((o) => {
+        const docs = o.docs == null ? t("upgradeDocsUnlimited") : t("upgradeDocsCount", { n: o.docs });
+        return `
+        <div class="plan-card">
+          <h3>${escapeHtml(planLabel(o.plan))}</h3>
+          <div class="plan-price" data-price-for="${escapeHtml(o.priceId)}"></div>
+          <div class="plan-feature">${escapeHtml(t("upgradeMessagesPerMonth", { n: o.messages.toLocaleString(numberLocale) }))}</div>
+          <div class="plan-feature">${escapeHtml(docs)}</div>
+          <button type="button" class="upgrade-choose-btn" data-plan="${escapeHtml(o.plan)}">${escapeHtml(t("upgradeChoosePlan", { plan: planLabel(o.plan) }))}</button>
+        </div>`;
+      })
+      .join("");
+
+    return `
+      <div class="edit-form" style="max-width:640px;">
+        <h2 style="margin:0 0 4px;font-size:16px;">${escapeHtml(t("upgradeTitle"))}</h2>
+        <p style="margin:0 0 6px;font-size:13px;color:var(--text-soft);">${escapeHtml(t("upgradeIntro"))}</p>
+        <p style="margin:0;font-size:12.5px;color:var(--text-soft);">${escapeHtml(t("upgradeCurrentPlan", { plan: planLabel(offer.currentPlan) }))}</p>
+        <div class="plan-grid">${cards}</div>
+        <div class="upload-status" id="upgradeStatus"></div>
+        <div style="font-size:11.5px;color:var(--text-soft);margin-top:14px;">${escapeHtml(t("upgradePoweredBy"))}</div>
+      </div>
+    `;
+  }
+
+  function renderUpgradePanel() {
+    if (!upgradeOffer) return;
+    if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
+    currentSelectedId = null;
+    const main = el("mainPanel");
+    main.innerHTML = renderUpgradeContent(upgradeOffer);
+    main.querySelectorAll(".upgrade-choose-btn").forEach((btn) => {
+      btn.addEventListener("click", () => startCheckout(btn.dataset.plan));
+    });
+    fillUpgradePrices(upgradeOffer);
+  }
+
+  el("upgradeBtn").addEventListener("click", renderUpgradePanel);
+
   // Section Q: διαβάζει GET /usage/status και δείχνει το usage-limit banner
   // αν το μηνιαίο όριο μηνυμάτων έχει εξαντληθεί. Best-effort -- αν
   // αποτύχει το fetch, απλά δεν δείχνουμε το banner (ίδιο σκεπτικό με
@@ -2100,6 +2290,7 @@
       const res = await fetch("/usage/status", { headers: HEADERS });
       if (!res.ok) return;
       const data = await res.json();
+      applyUpgradeOffer(data.upgrade);
       if (data.messagesLimitReached) {
         el("usageLimitBanner").style.display = "flex";
       }

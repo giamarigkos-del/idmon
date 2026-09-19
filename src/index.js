@@ -1459,6 +1459,52 @@ async function handleGetAnalyticsSummary(request, env) {
   return new Response(JSON.stringify(summary), { headers: JSON_HEADERS });
 }
 
+// Section R: προσφορά αναβάθμισης -- ο server αποφασίζει ΠΟΙΟΣ βλέπει το κουμπί
+// "Αναβάθμιση" στο editor.html και ΤΙ πλάνα μπορεί να αγοράσει, ώστε ο browser
+// να μην κρίνει ποτέ μόνος του (ό,τι υπάρχει στον browser μπορεί να το αλλάξει
+// ο χρήστης). Επιστρέφει null όταν ΔΕΝ πρέπει να εμφανιστεί κουμπί:
+//   - το προστατευμένο demo workspace
+//   - Guest/Developer: δεν υπάρχει γραμμή στο users, άρα δεν υπάρχει τι να αναβαθμιστεί
+//   - plan pro: δεν υπάρχει ανώτερο
+//   - υπάρχει ήδη ζωντανή συνδρομή στο Paddle: ένα νέο checkout θα έφτιαχνε
+//     ΔΕΥΤΕΡΗ συνδρομή. Η αλλαγή Basic -> Pro πάνω σε υπάρχουσα συνδρομή είναι
+//     ξεχωριστό, μελλοντικό βήμα. Μια ακυρωμένη (canceled) συνδρομή ΔΕΝ μετράει
+//     ως ζωντανή -- ο λογαριασμός μπορεί να ξαναεγγραφεί.
+//   - λείπει ρύθμιση Paddle (PADDLE_CLIENT_TOKEN, PADDLE_ENV, price IDs): το κουμπί
+//     απλά δεν εμφανίζεται, αντί να σπάει κάτι
+// Το client-side token είναι δημόσιο by design (το χρησιμοποιεί το Paddle.js στον
+// browser). Τα price IDs έρχονται από τα ίδια [vars] που διαβάζει και το webhook,
+// ώστε το go-live να αλλάζει ΜΟΝΟ το wrangler.toml, όχι τον κώδικα.
+const PADDLE_LIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due", "paused"]);
+
+async function buildUpgradeOffer(env, workspaceId, plan) {
+  if (workspaceId === PROTECTED_WORKSPACE_ID) return null;
+  if (plan !== "free" && plan !== "basic") return null;
+  if (!env.PADDLE_CLIENT_TOKEN || !env.PADDLE_ENV) return null;
+
+  const row = await env.DB.prepare("SELECT paddle_status FROM users WHERE workspace_id = ?").bind(workspaceId).first();
+  if (!row) return null;
+  if (row.paddle_status && PADDLE_LIVE_SUBSCRIPTION_STATUSES.has(row.paddle_status)) return null;
+
+  const candidates = [];
+  if (plan === "free" && env.PADDLE_PRICE_BASIC) candidates.push({ plan: "basic", priceId: env.PADDLE_PRICE_BASIC });
+  if (env.PADDLE_PRICE_PRO) candidates.push({ plan: "pro", priceId: env.PADDLE_PRICE_PRO });
+  if (candidates.length === 0) return null;
+
+  return {
+    environment: env.PADDLE_ENV === "production" ? "production" : "sandbox",
+    clientToken: env.PADDLE_CLIENT_TOKEN,
+    workspaceId,
+    currentPlan: plan,
+    offers: candidates.map((c) => ({
+      plan: c.plan,
+      priceId: c.priceId,
+      messages: PLAN_LIMITS[c.plan].messages,
+      docs: PLAN_LIMITS[c.plan].docs === Infinity ? null : PLAN_LIMITS[c.plan].docs,
+    })),
+  };
+}
+
 // Section Q: GET /usage/status -- πηγή αλήθειας που διαβάζει το editor.html
 // για να δείξει το usage-limit banner, και που θα μπορούσε αργότερα να
 // τροφοδοτήσει ένα πιο αναλυτικό "πλάνο & χρήση" panel. Επιστρέφει και τα
@@ -1468,6 +1514,7 @@ async function handleGetUsageStatus(request, env) {
   if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
 
   const plan = await getPlanForWorkspace(env, workspaceId);
+  const upgrade = await buildUpgradeOffer(env, workspaceId, plan);
   const limits = PLAN_LIMITS[plan] || PLAN_LIMITS[DEFAULT_PLAN];
   // Σεβόμαστε το ίδιο MONTHLY_MESSAGE_LIMIT_OVERRIDE με το checkAndIncrementUsage()
   // -- αλλιώς το τοπικό testing γίνεται μπερδεμένο: το backend θα μπλοκάρει
@@ -1487,6 +1534,7 @@ async function handleGetUsageStatus(request, env) {
   return new Response(
     JSON.stringify({
       plan,
+      upgrade,
       messagesUsed,
       messagesLimit,
       messagesLimitReached: workspaceId !== PROTECTED_WORKSPACE_ID && messagesUsed >= messagesLimit,

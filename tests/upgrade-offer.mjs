@@ -1,0 +1,169 @@
+// Έλεγχος του πεδίου "upgrade" στο GET /usage/status (Section R).
+// Τρέχει ΧΩΡΙΣ wrangler dev: φορτώνει το src/index.js απευθείας και του δίνει
+// ψεύτικα D1/KV. Χρήση (PowerShell, από τον φάκελο idmon):
+//   node tests/upgrade-offer.mjs
+// Προαιρετικά: $env:INDEX_PATH = "C:\\...\\index.js" για άλλο αρχείο.
+import { pathToFileURL } from "node:url";
+import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
+
+// Το repo έχει package.json με "type": "commonjs", οπότε το Node αρνείται να
+// φορτώσει το src/index.js (είναι ES module). Αντί να πειράξουμε το package.json
+// του project, αντιγράφουμε τα αρχεία του src σε έναν προσωρινό φάκελο με δικό
+// του package.json { "type": "module" } και φορτώνουμε από εκεί. Τα αρχικά
+// αρχεία δεν αγγίζονται.
+const indexPath = path.resolve(process.env.INDEX_PATH || "./src/index.js");
+const srcDir = path.dirname(indexPath);
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "idmon-test-"));
+for (const name of fs.readdirSync(srcDir)) {
+  if (name.endsWith(".js")) fs.copyFileSync(path.join(srcDir, name), path.join(tmpDir, name));
+}
+fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ type: "module" }));
+const worker = (await import(pathToFileURL(path.join(tmpDir, path.basename(indexPath))).href)).default;
+process.on("exit", () => fs.rmSync(tmpDir, { recursive: true, force: true }));
+
+let passed = 0;
+let failed = 0;
+function check(name, condition, detail) {
+  if (condition) { passed++; console.log("  ok   " + name); }
+  else { failed++; console.log("  FAIL " + name + (detail ? "  -> " + detail : "")); }
+}
+
+// Ψεύτικη D1: απαντάει μόνο στα δύο queries που κάνει το /usage/status.
+function makeEnv({ users = {}, sessions = {}, vars = {} } = {}) {
+  const DB = {
+    prepare(sql) {
+      return {
+        bind(...args) {
+          return {
+            async first() {
+              if (sql.includes("FROM sessions")) return sessions[args[0]] || null;
+              if (sql.includes("SELECT plan FROM users")) {
+                const u = users[args[0]];
+                return u ? { plan: u.plan } : null;
+              }
+              if (sql.includes("SELECT paddle_status FROM users")) {
+                const u = users[args[0]];
+                return u ? { paddle_status: u.paddle_status ?? null } : null;
+              }
+              throw new Error("Unexpected SQL in test: " + sql);
+            },
+          };
+        },
+      };
+    },
+  };
+  const DOCUMENT_REGISTRY = {
+    async get() { return null; },
+    async list() { return { keys: [], list_complete: true }; },
+  };
+  return {
+    DB,
+    DOCUMENT_REGISTRY,
+    PADDLE_CLIENT_TOKEN: "test_dummy_token",
+    PADDLE_ENV: "sandbox",
+    PADDLE_PRICE_BASIC: "pri_basic_test",
+    PADDLE_PRICE_PRO: "pri_pro_test",
+    ...vars,
+  };
+}
+
+async function status(env, headers) {
+  const res = await worker.fetch(new Request("https://app.idmon.app/usage/status", { headers }), env);
+  return { res, body: await res.json() };
+}
+
+const future = new Date(Date.now() + 3600_000).toISOString();
+
+console.log("free account without subscription");
+{
+  const env = makeEnv({ users: { "ws-free": { plan: "free" } } });
+  const { res, body } = await status(env, { "X-Workspace-Id": "ws-free" });
+  check("status 200", res.status === 200);
+  check("offers basic and pro", body.upgrade && body.upgrade.offers.map((o) => o.plan).join() === "basic,pro", JSON.stringify(body.upgrade));
+  check("carries workspaceId and currentPlan", body.upgrade && body.upgrade.workspaceId === "ws-free" && body.upgrade.currentPlan === "free");
+  check("carries sandbox environment and token", body.upgrade && body.upgrade.environment === "sandbox" && body.upgrade.clientToken === "test_dummy_token");
+  check("price ids come from vars", body.upgrade && body.upgrade.offers[0].priceId === "pri_basic_test" && body.upgrade.offers[1].priceId === "pri_pro_test");
+  check("limits come from PLAN_LIMITS", body.upgrade && body.upgrade.offers[0].messages === 500 && body.upgrade.offers[0].docs === 20 && body.upgrade.offers[1].messages === 2500 && body.upgrade.offers[1].docs === null);
+  check("existing fields intact", body.plan === "free" && body.messagesLimit === 100 && body.messagesUsed === 0 && body.docsLimit === 5);
+}
+
+console.log("basic account without subscription (migration default)");
+{
+  const env = makeEnv({ users: { "ws-basic": { plan: "basic", paddle_status: null } } });
+  const { body } = await status(env, { "X-Workspace-Id": "ws-basic" });
+  check("offers only pro", body.upgrade && body.upgrade.offers.map((o) => o.plan).join() === "pro", JSON.stringify(body.upgrade));
+}
+
+console.log("account with a live subscription");
+for (const st of ["active", "trialing", "past_due", "paused"]) {
+  const env = makeEnv({ users: { "ws-sub": { plan: "basic", paddle_status: st } } });
+  const { body } = await status(env, { "X-Workspace-Id": "ws-sub" });
+  check("no upgrade when status is " + st, body.upgrade === null);
+}
+
+console.log("account whose subscription was canceled (plan back to free)");
+{
+  const env = makeEnv({ users: { "ws-canceled": { plan: "free", paddle_status: "canceled" } } });
+  const { body } = await status(env, { "X-Workspace-Id": "ws-canceled" });
+  check("offers basic and pro again", body.upgrade && body.upgrade.offers.length === 2);
+}
+
+console.log("pro account");
+{
+  const env = makeEnv({ users: { "ws-pro": { plan: "pro", paddle_status: "active" } } });
+  const { body } = await status(env, { "X-Workspace-Id": "ws-pro" });
+  check("no upgrade", body.upgrade === null);
+}
+
+console.log("guest / developer (no users row)");
+{
+  const env = makeEnv();
+  const { body } = await status(env, { "X-Workspace-Id": "ws-guest" });
+  check("no upgrade", body.upgrade === null);
+  check("plan is still reported as free", body.plan === "free");
+}
+
+console.log("protected demo workspace");
+{
+  const env = makeEnv({ users: { "efood-ops-demo": { plan: "free" } } });
+  const { body } = await status(env, { "X-Workspace-Id": "efood-ops-demo" });
+  check("no upgrade", body.upgrade === null);
+}
+
+console.log("real session resolves the workspace server-side");
+{
+  const env = makeEnv({
+    users: { "ws-real": { plan: "free" } },
+    sessions: { tok123: { workspace_id: "ws-real", expires_at: future } },
+  });
+  // Ο client στέλνει ΛΑΘΟΣ X-Workspace-Id· το session κερδίζει.
+  const { body } = await status(env, { "X-Session-Token": "tok123", "X-Workspace-Id": "ws-someone-else" });
+  check("workspaceId in offer comes from the session", body.upgrade && body.upgrade.workspaceId === "ws-real", JSON.stringify(body.upgrade));
+}
+
+console.log("missing Paddle configuration");
+{
+  for (const missing of ["PADDLE_CLIENT_TOKEN", "PADDLE_ENV"]) {
+    const env = makeEnv({ users: { "ws-free": { plan: "free" } }, vars: { [missing]: undefined } });
+    const { body } = await status(env, { "X-Workspace-Id": "ws-free" });
+    check("no upgrade without " + missing, body.upgrade === null);
+  }
+  const noPro = makeEnv({ users: { "ws-basic": { plan: "basic" } }, vars: { PADDLE_PRICE_PRO: undefined } });
+  const { body: b1 } = await status(noPro, { "X-Workspace-Id": "ws-basic" });
+  check("basic account with no pro price gets no offer", b1.upgrade === null);
+  const noBasic = makeEnv({ users: { "ws-free": { plan: "free" } }, vars: { PADDLE_PRICE_BASIC: undefined } });
+  const { body: b2 } = await status(noBasic, { "X-Workspace-Id": "ws-free" });
+  check("free account with no basic price gets pro only", b2.upgrade && b2.upgrade.offers.map((o) => o.plan).join() === "pro");
+}
+
+console.log("live environment flag");
+{
+  const env = makeEnv({ users: { "ws-free": { plan: "free" } }, vars: { PADDLE_ENV: "production" } });
+  const { body } = await status(env, { "X-Workspace-Id": "ws-free" });
+  check("PADDLE_ENV=production is passed through", body.upgrade && body.upgrade.environment === "production");
+}
+
+console.log("\n" + passed + " passed, " + failed + " failed");
+process.exit(failed ? 1 : 0);

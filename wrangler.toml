@@ -59,3 +59,12 @@ GOOGLE_REDIRECT_URI = "https://app.idmon.app/oauth/google/callback"
 # όταν περάσουμε σε live αλλάζουν οι δύο τιμές εδώ, όχι ο κώδικας.
 PADDLE_PRICE_BASIC = "pri_01m2x1f5kfbt7h0dxmm10knzxe"
 PADDLE_PRICE_PRO = "pri_01m2x1dep88bhsjw8qcstdtfhv"
+
+# Checkout στο editor.html: ο server στέλνει αυτά τα δύο στον browser μαζί με
+# τα price IDs (GET /usage/status, πεδίο "upgrade"). Το client-side token είναι
+# ΔΗΜΟΣΙΟ by design (το χρησιμοποιεί το Paddle.js στον browser) -- δεν είναι
+# secret. Είναι ξεχωριστό ανά περιβάλλον (sandbox / live). Στο go-live αλλάζουν
+# ΚΑΙ αυτά τα δύο: το token σε live token και το PADDLE_ENV σε "production".
+# Αν λείπει κάποιο από τα δύο, το κουμπί "Αναβάθμιση" απλά δεν εμφανίζεται.
+PADDLE_CLIENT_TOKEN = "test_4883a067b5d39d9939b871bc7a4"
+PADDLE_ENV = "sandbox"
