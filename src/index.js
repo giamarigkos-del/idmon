@@ -3495,6 +3495,81 @@ function paddleOk(extra) {
   return new Response(JSON.stringify({ ok: true, ...extra }), { headers: JSON_HEADERS });
 }
 
+// Ο ΚΟΙΝΟΣ πυρήνας που εφαρμόζει μια συνδρομή του Paddle στον λογαριασμό: τον
+// χρησιμοποιούν ΚΑΙ το webhook (το Paddle μας ειδοποιεί) ΚΑΙ η "συμφωνία"
+// (POST /billing/reconcile, εμείς ρωτάμε το Paddle). Μία λογική, δύο είσοδοι --
+// έτσι ό,τι κι αν φτάσει πρώτο δίνει ακριβώς το ίδιο αποτέλεσμα, και το
+// δεύτερο που θα φτάσει είναι ακίνδυνο (η προστασία stale_event παρακάτω).
+//
+// occurredAtIso: πότε έγινε η αλλαγή (για το webhook: event.occurred_at, για
+// τη συμφωνία: subscription.updated_at). workspaceHint: προαιρετικό, χρησιμοποιείται
+// ΜΟΝΟ αν η συνδρομή δεν έχει workspace_id στο custom_data.
+// Επιστρέφει { outcome: "applied", plan } | { outcome: "stale" } |
+// { outcome: "other_subscription" } | { outcome: "no_account" }.
+async function applyPaddleSubscription(env, subscription, occurredAtIso, workspaceHint = null) {
+  const occurredMs = Date.parse(occurredAtIso);
+
+  // Ποιος λογαριασμός είναι; Πρώτα από το subscription ID που έχουμε ήδη
+  // αποθηκεύσει, και αν δεν υπάρχει (πρώτη φορά), από το workspace_id που
+  // περάσαμε στο checkout ως custom_data.
+  const selectCols = "id, plan, paddle_subscription_id, paddle_status, paddle_event_at";
+  let user = await env.DB.prepare(
+    `SELECT ${selectCols} FROM users WHERE paddle_subscription_id = ?`
+  ).bind(subscription.id).first();
+
+  if (!user) {
+    const workspaceId = (subscription.custom_data && subscription.custom_data.workspace_id) || workspaceHint;
+    if (workspaceId) {
+      user = await env.DB.prepare(
+        `SELECT ${selectCols} FROM users WHERE workspace_id = ?`
+      ).bind(String(workspaceId)).first();
+    }
+  }
+
+  if (!user) {
+    return { outcome: "no_account" };
+  }
+
+  // Το Paddle δεν εγγυάται σειρά αφίξεως. Αγνοούμε ό,τι είναι ΠΑΛΑΙΟΤΕΡΟ
+  // από το τελευταίο γεγονός που έχουμε ήδη εφαρμόσει (το ίδιο μήνυμα
+  // ξανά, ίδια ώρα, εφαρμόζεται ξανά ακίνδυνα -- δίνει το ίδιο αποτέλεσμα).
+  if (user.paddle_event_at) {
+    const storedMs = Date.parse(user.paddle_event_at);
+    if (Number.isFinite(storedMs) && occurredMs < storedMs) {
+      return { outcome: "stale" };
+    }
+  }
+
+  // Ο λογαριασμός έχει ΗΔΗ άλλη συνδρομή. Ένα καθυστερημένο γεγονός της
+  // ΠΑΛΙΑΣ (π.χ. "canceled") δεν πρέπει να χαλάσει τη νέα. Μόνο μια νέα
+  // ενεργή συνδρομή παίρνει τη θέση της παλιάς.
+  if (user.paddle_subscription_id && user.paddle_subscription_id !== subscription.id) {
+    const takesOver = subscription.status === "active" || subscription.status === "trialing";
+    if (!takesOver) return { outcome: "other_subscription" };
+  }
+
+  const newPlan = decidePlanForPaddleSubscription(env, subscription) || user.plan;
+
+  await env.DB.prepare(
+    `UPDATE users
+       SET plan = ?,
+           paddle_customer_id = COALESCE(?, paddle_customer_id),
+           paddle_subscription_id = ?,
+           paddle_status = ?,
+           paddle_event_at = ?
+     WHERE id = ?`
+  ).bind(
+    newPlan,
+    subscription.customer_id || null,
+    subscription.id,
+    subscription.status || null,
+    occurredAtIso,
+    user.id
+  ).run();
+
+  return { outcome: "applied", plan: newPlan };
+}
+
 async function handlePaddleWebhook(request, env) {
   const rawBody = await request.text();
 
@@ -3524,73 +3599,175 @@ async function handlePaddleWebhook(request, env) {
   }
 
   try {
-    // Ποιος λογαριασμός είναι; Πρώτα από το subscription ID που έχουμε ήδη
-    // αποθηκεύσει, και αν δεν υπάρχει (πρώτη φορά), από το workspace_id που
-    // περάσαμε στο checkout ως custom_data.
-    const selectCols = "id, plan, paddle_subscription_id, paddle_status, paddle_event_at";
-    let user = await env.DB.prepare(
-      `SELECT ${selectCols} FROM users WHERE paddle_subscription_id = ?`
-    ).bind(subscription.id).first();
+    const result = await applyPaddleSubscription(env, subscription, event.occurred_at);
 
-    if (!user) {
-      const workspaceId = subscription.custom_data && subscription.custom_data.workspace_id;
-      if (workspaceId) {
-        user = await env.DB.prepare(
-          `SELECT ${selectCols} FROM users WHERE workspace_id = ?`
-        ).bind(String(workspaceId)).first();
-      }
-    }
-
-    if (!user) {
+    if (result.outcome === "no_account") {
       // 200 και όχι σφάλμα: ξαναστέλνοντας το ίδιο μήνυμα δεν θα βρεθεί ποτέ
       // λογαριασμός, οπότε το retry δεν βοηθάει.
       console.warn("Paddle webhook: no matching account for subscription", subscription.id);
       return paddleOk({ matched: false });
     }
-
-    // Το Paddle δεν εγγυάται σειρά αφίξεως. Αγνοούμε ό,τι είναι ΠΑΛΑΙΟΤΕΡΟ
-    // από το τελευταίο γεγονός που έχουμε ήδη εφαρμόσει (το ίδιο μήνυμα
-    // ξανά, ίδια ώρα, εφαρμόζεται ξανά ακίνδυνα -- δίνει το ίδιο αποτέλεσμα).
-    if (user.paddle_event_at) {
-      const storedMs = Date.parse(user.paddle_event_at);
-      if (Number.isFinite(storedMs) && occurredMs < storedMs) {
-        return paddleOk({ ignored: "stale_event" });
-      }
-    }
-
-    // Ο λογαριασμός έχει ΗΔΗ άλλη συνδρομή. Ένα καθυστερημένο γεγονός της
-    // ΠΑΛΙΑΣ (π.χ. "canceled") δεν πρέπει να χαλάσει τη νέα. Μόνο μια νέα
-    // ενεργή συνδρομή παίρνει τη θέση της παλιάς.
-    if (user.paddle_subscription_id && user.paddle_subscription_id !== subscription.id) {
-      const takesOver = subscription.status === "active" || subscription.status === "trialing";
-      if (!takesOver) return paddleOk({ ignored: "other_subscription" });
-    }
-
-    const newPlan = decidePlanForPaddleSubscription(env, subscription) || user.plan;
-
-    await env.DB.prepare(
-      `UPDATE users
-         SET plan = ?,
-             paddle_customer_id = COALESCE(?, paddle_customer_id),
-             paddle_subscription_id = ?,
-             paddle_status = ?,
-             paddle_event_at = ?
-       WHERE id = ?`
-    ).bind(
-      newPlan,
-      subscription.customer_id || null,
-      subscription.id,
-      subscription.status || null,
-      event.occurred_at,
-      user.id
-    ).run();
-
-    return paddleOk({ matched: true, plan: newPlan });
+    if (result.outcome === "stale") return paddleOk({ ignored: "stale_event" });
+    if (result.outcome === "other_subscription") return paddleOk({ ignored: "other_subscription" });
+    return paddleOk({ matched: true, plan: result.plan });
   } catch (err) {
     // 500 -> το Paddle ξαναδοκιμάζει αργότερα (σωστό για πρόβλημα βάσης).
     console.error("Paddle webhook processing failed:", err && err.message);
     return jsonError(500, "Internal error");
   }
+}
+
+// Section R (συνέχεια): ο ΔΙΚΟΣ ΜΑΣ server μιλάει ΠΡΟΣ το Paddle.
+//
+// Γιατί χρειάζεται: το webhook είναι ο κύριος δρόμος, αλλά μπορεί να αργήσει
+// (retries του Paddle, πρόβλημα στη βάση). Ο πελάτης έχει ήδη πληρώσει και δεν
+// πρέπει να περιμένει. Η "συμφωνία" (reconcile) ρωτάει ΕΜΕΙΣ το Paddle για τη
+// συγκεκριμένη πληρωμή και εφαρμόζει το ίδιο αποτέλεσμα με το webhook, μέσω της
+// ίδιας συνάρτησης (applyPaddleSubscription). Ό,τι φτάσει πρώτο κερδίζει.
+//
+// Το API key (PADDLE_API_KEY) είναι SECRET: `wrangler secret put PADDLE_API_KEY`.
+// ΠΟΤΕ δεν γράφεται σε log, σε απάντηση προς τον browser ή σε μήνυμα σφάλματος.
+// Το PADDLE_ENV ("sandbox" ή "production") διαλέγει τη διεύθυνση του API, ώστε
+// το go-live να αλλάζει ρύθμιση/secret και όχι κώδικα.
+const PADDLE_API_TIMEOUT_MS = 8000;
+const PADDLE_TXN_ID_RE = /^txn_[a-z\d]{26}$/; // ίδιο pattern με την τεκμηρίωση του Paddle
+const BILLING_RATE_LIMIT_MAX = 40; // κλήσεις ανά workspace ανά RATE_LIMIT_WINDOW_SECONDS (το polling κάνει ~10 ανά πληρωμή)
+
+function paddleApiBase(env) {
+  if (env.PADDLE_ENV === "production") return "https://api.paddle.com";
+  if (env.PADDLE_ENV === "sandbox") return "https://sandbox-api.paddle.com";
+  return null; // άγνωστο/κενό: δεν μαντεύουμε -- ένα live key σε sandbox URL (ή αντίστροφα) είναι λάθος
+}
+
+// Μία κλήση προς το Paddle. Δεν πετάει ποτέ exception· επιστρέφει πάντα
+// { ok: true, data } ή { ok: false, status, code }.
+async function paddleApi(env, method, path, body) {
+  const base = paddleApiBase(env);
+  if (!env.PADDLE_API_KEY || !base) return { ok: false, status: 0, code: "not_configured" };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PADDLE_API_TIMEOUT_MS);
+  try {
+    const res = await fetch(base + path, {
+      method,
+      headers: { Authorization: `Bearer ${env.PADDLE_API_KEY}`, "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+    let json = null;
+    try {
+      json = await res.json();
+    } catch (err) {
+      // κενό/μη JSON σώμα: το χειριζόμαστε παρακάτω με βάση το status
+    }
+    if (!res.ok) {
+      const code = (json && json.error && json.error.code) || "paddle_error";
+      console.error("Paddle API error:", method, path, res.status, code); // ΟΧΙ headers/key
+      return { ok: false, status: res.status, code };
+    }
+    return { ok: true, status: res.status, data: json && json.data };
+  } catch (err) {
+    const code = err && err.name === "AbortError" ? "timeout" : "network_error";
+    console.error("Paddle API call failed:", method, path, code);
+    return { ok: false, status: 0, code };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Μετατρέπει ένα σφάλμα του Paddle σε γενική απάντηση προς τον browser. Ο
+// χρήστης ΠΟΤΕ δεν βλέπει εσωτερικές λεπτομέρειες (λάθος/ληγμένο key, ελλιπή
+// δικαιώματα)· αυτά μένουν στα logs.
+function billingUpstreamError(res) {
+  if (res.status === 404) return jsonError(404, "Not found");
+  if (res.code === "not_configured" || res.status === 401 || res.status === 403) {
+    return jsonError(503, "Billing is temporarily unavailable");
+  }
+  return jsonError(502, "The billing provider did not respond. Please try again.");
+}
+
+function billingOk(payload) {
+  return new Response(JSON.stringify(payload), { headers: JSON_HEADERS });
+}
+
+// Απαιτεί πραγματικό λογαριασμό (session)· Guest/Developer δεν έχουν συνδρομή.
+async function requireAccountSession(request, env) {
+  const sessionToken = request.headers.get("X-Session-Token");
+  if (!sessionToken) return { error: jsonError(401, "Not logged in") };
+  const session = await env.DB.prepare(
+    "SELECT user_id, workspace_id, expires_at FROM sessions WHERE token = ?"
+  ).bind(sessionToken).first();
+  if (!session || new Date(session.expires_at) <= new Date()) return { error: jsonError(401, "Session expired") };
+  return { session };
+}
+
+// Δικό του όριο (όχι ο γενικός rate limiter των 5 προσπαθειών, που θα έκοβε το
+// polling): προστατεύει το Paddle API από κατάχρηση, όχι τον χρήστη από λάθος.
+async function billingRateLimited(env, workspaceId) {
+  const key = `ratelimit:billing:${workspaceId}`;
+  const raw = await env.DOCUMENT_REGISTRY.get(key);
+  const count = raw ? parseInt(raw, 10) : 0;
+  if (count >= BILLING_RATE_LIMIT_MAX) return true;
+  await env.DOCUMENT_REGISTRY.put(key, String(count + 1), { expirationTtl: RATE_LIMIT_WINDOW_SECONDS });
+  return false;
+}
+
+// POST /billing/reconcile  { transactionId }
+// Ο browser μας δίνει το transaction_id που πήρε από το checkout.completed. ΔΕΝ
+// τον εμπιστευόμαστε: ρωτάμε το Paddle και ελέγχουμε ότι η πληρωμή έχει το
+// ΔΙΚΟ ΣΟΥ workspace_id (από το session, όχι από τον browser). Έτσι κανείς δεν
+// μπορεί να διεκδικήσει πληρωμή άλλου λογαριασμού.
+// Απαντήσεις: { status: "pending" } (η συνδρομή δεν έχει δημιουργηθεί ακόμα, ξαναρώτα),
+// { status: "applied", plan }, { status: "up_to_date" } (το webhook πρόλαβε),
+// { status: "not_completed" } (η πληρωμή δεν ολοκληρώθηκε).
+async function handleBillingReconcile(request, env) {
+  const auth = await requireAccountSession(request, env);
+  if (auth.error) return auth.error;
+  const workspaceId = auth.session.workspace_id;
+  if (workspaceId === PROTECTED_WORKSPACE_ID) return jsonError(400, "Not applicable to this workspace");
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonError(400, "Invalid JSON body");
+  }
+  const transactionId = body && body.transactionId;
+  if (typeof transactionId !== "string" || !PADDLE_TXN_ID_RE.test(transactionId)) {
+    return jsonError(400, "Invalid transaction id");
+  }
+
+  if (await billingRateLimited(env, workspaceId)) {
+    return jsonError(429, "Too many requests. Please try again in a moment.");
+  }
+
+  const txnRes = await paddleApi(env, "GET", `/transactions/${transactionId}`);
+  if (!txnRes.ok) return billingUpstreamError(txnRes);
+  const txn = txnRes.data || {};
+
+  // Ιδιοκτησία: το workspace_id της πληρωμής πρέπει να είναι το δικό σου.
+  const paidFor = txn.custom_data && txn.custom_data.workspace_id;
+  if (paidFor !== workspaceId) return jsonError(403, "This payment does not belong to this account");
+
+  if (txn.status === "canceled" || txn.status === "past_due") return billingOk({ status: "not_completed" });
+  if (txn.status !== "completed") return billingOk({ status: "pending" }); // paid/billed/ready/draft: ακόμα σε εξέλιξη
+  // Η συνδρομή δημιουργείται ασύγχρονα: μπορεί να μην υπάρχει ακόμα στο transaction.
+  if (!txn.subscription_id) return billingOk({ status: "pending" });
+
+  const subRes = await paddleApi(env, "GET", `/subscriptions/${txn.subscription_id}`);
+  if (!subRes.ok) return billingUpstreamError(subRes);
+  const subscription = subRes.data;
+  if (!subscription || !subscription.id) return jsonError(502, "The billing provider did not respond. Please try again.");
+
+  const result = await applyPaddleSubscription(
+    env,
+    subscription,
+    subscription.updated_at || new Date().toISOString(),
+    workspaceId
+  );
+  if (result.outcome === "no_account") return jsonError(404, "Account not found");
+  if (result.outcome === "applied") return billingOk({ status: "applied", plan: result.plan });
+  return billingOk({ status: "up_to_date" }); // stale / other_subscription: το webhook (ή άλλη συνδρομή) πρόλαβε
 }
 
 export default {
@@ -3695,6 +3872,12 @@ export default {
     // υπογραφή του μηνύματος μέσα στο handlePaddleWebhook.
     if (url.pathname === "/paddle/webhook" && request.method === "POST") {
       return handlePaddleWebhook(request, env);
+    }
+
+    // Section R: "συμφωνία" πληρωμής -- ο server ρωτάει το Paddle για μια
+    // συγκεκριμένη πληρωμή (χρειάζεται session, δεν είναι δημόσιο).
+    if (url.pathname === "/billing/reconcile" && request.method === "POST") {
+      return handleBillingReconcile(request, env);
     }
 
     // Public embed endpoint -- ΔΕΝ χρησιμοποιεί resolveWorkspaceId (session/

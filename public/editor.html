@@ -2174,9 +2174,9 @@
     }
   }
 
-  function writePaymentPending(plan) {
+  function writePaymentPending(plan, transactionId) {
     try {
-      localStorage.setItem(PAYMENT_PENDING_KEY, JSON.stringify({ plan, workspaceId: WORKSPACE_ID, at: Date.now() }));
+      localStorage.setItem(PAYMENT_PENDING_KEY, JSON.stringify({ plan, transactionId: transactionId || null, workspaceId: WORKSPACE_ID, at: Date.now() }));
     } catch (err) {
       // best-effort: χωρίς storage χάνουμε μόνο την προστασία του reload
     }
@@ -2239,7 +2239,7 @@
 
   function onPaddleEvent(event) {
     if (!event) return;
-    if (event.name === "checkout.completed") handleCheckoutCompleted();
+    if (event.name === "checkout.completed") handleCheckoutCompleted(event.data && event.data.transaction_id);
     else if (event.name === "checkout.payment_failed") setUpgradeStatus(t("upgradePaymentFailed"));
   }
 
@@ -2280,16 +2280,46 @@
     showPaymentState("confirmed", planLabel(data.plan));
   }
 
-  // Ρωτάμε τον server μέχρι να πάψει να προσφέρει αναβάθμιση, δηλαδή μέχρι το
-  // webhook να γράψει τη συνδρομή στον λογαριασμό. Αν δεν γίνει μέσα στο
-  // όριο, δείχνουμε "slow" και σταματάμε (το flag μένει, οπότε ένα reload
-  // ξαναρχίζει την αναμονή).
+  // "Συμφωνία" πληρωμής: ζητάμε από τον server να ρωτήσει ΑΥΤΟΣ το Paddle για τη
+  // συγκεκριμένη πληρωμή και να εφαρμόσει το πλάνο, χωρίς να περιμένει το webhook.
+  // Επιστρέφει "pending" (ξαναδοκίμασε στον επόμενο γύρο) ή "stop" (τελείωσε, ή δεν
+  // βοηθάει να ξαναδοκιμάσουμε). Είναι ΠΑΝΤΑ best-effort: ό,τι κι αν γίνει εδώ, το
+  // webhook και η ανάγνωση του /usage/status συνεχίζουν να δουλεύουν κανονικά.
+  async function reconcilePayment(transactionId) {
+    try {
+      const res = await fetch("/billing/reconcile", {
+        method: "POST",
+        headers: HEADERS,
+        body: JSON.stringify({ transactionId }),
+      });
+      if (res.status === 429 || res.status === 502) return "pending"; // προσωρινό
+      if (!res.ok) return "stop";
+      const data = await res.json();
+      return data.status === "pending" ? "pending" : "stop";
+    } catch (err) {
+      return "pending";
+    }
+  }
+
+  // Ρωτάμε τον server μέχρι να πάψει να προσφέρει αναβάθμιση, δηλαδή μέχρι η
+  // συνδρομή να γραφτεί στον λογαριασμό. Δύο δρόμοι, ο πρώτος που θα πετύχει
+  // κερδίζει (το αποτέλεσμα είναι το ίδιο):
+  //   1. το webhook του Paddle (μπορεί να αργήσει)
+  //   2. η "συμφωνία" (reconcilePayment παραπάνω)
+  // Αν δεν γίνει τίποτα μέσα στο όριο, δείχνουμε "slow" και σταματάμε (το flag
+  // μένει, οπότε ένα reload ξαναρχίζει την αναμονή).
   function startUpgradePolling() {
     clearInterval(upgradePollTimer);
     const cfg = upgradePollConfig();
     let tries = 0;
+    let reconcileState = "pending";
     upgradePollTimer = setInterval(async () => {
       tries++;
+      const pending = readPaymentPending();
+      const transactionId = pending && pending.transactionId;
+      if (reconcileState === "pending" && transactionId) {
+        reconcileState = await reconcilePayment(transactionId);
+      }
       try {
         const res = await fetch("/usage/status", { headers: HEADERS });
         if (res.ok) {
@@ -2310,8 +2340,8 @@
     }, cfg.intervalMs);
   }
 
-  function handleCheckoutCompleted() {
-    writePaymentPending(lastChosenPlan);
+  function handleCheckoutCompleted(transactionId) {
+    writePaymentPending(lastChosenPlan, transactionId);
     el("upgradeBtn").style.display = "none";
     el("paymentPendingBanner").style.display = "flex";
     showPaymentState("pending");

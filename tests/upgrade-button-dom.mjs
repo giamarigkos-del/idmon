@@ -1,5 +1,5 @@
-// Headless έλεγχος του κουμπιού "Αναβάθμιση" και των καταστάσεων πληρωμής στο
-// editor.html (Section R), με jsdom και ψεύτικο Paddle.js -- χωρίς browser,
+// Headless έλεγχος του κουμπιού "Αναβάθμιση", των καταστάσεων πληρωμής και της
+// "συμφωνίας" με το Paddle (POST /billing/reconcile) στο editor.html (Section R), με jsdom και ψεύτικο Paddle.js -- χωρίς browser,
 // χωρίς δίκτυο, χωρίς wrangler.
 // Χρήση (PowerShell, από τον φάκελο idmon):
 //   node tests/upgrade-button-dom.mjs
@@ -24,6 +24,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const POLL = { intervalMs: 60, maxTries: 4 }; // γρήγορο polling μόνο για τα tests
 const PENDING_KEY = "idmonPaymentPending";
+const TXN_ID = "txn_" + "0".repeat(25) + "1";
 
 const OFFER_FREE = {
   environment: "sandbox",
@@ -42,20 +43,23 @@ function usageBody(overrides) {
 }
 
 function pendingFlag(overrides) {
-  return JSON.stringify({ plan: "pro", workspaceId: "ws-real", at: Date.now(), ...overrides });
+  return JSON.stringify({ plan: "pro", transactionId: TXN_ID, workspaceId: "ws-real", at: Date.now(), ...overrides });
 }
 
 // Χτίζει τη σελίδα: το shared.js μπαίνει inline, τα εξωτερικά scripts/CSS
 // (CDN) αφαιρούνται και τα ελάχιστα globals που περιμένει ο editor ορίζονται
 // ως stubs -- δεν τα χρειάζεται καμία λειτουργία του κουμπιού.
-async function boot({ usage, lang = "en", session = true, paddle = "mock", paddleInitThrows = false, local = {} }) {
+async function boot({ usage, lang = "en", session = true, paddle = "mock", paddleInitThrows = false, local = {}, reconcile = null }) {
   const html = editorHtml
     .replace(/<link[^>]*>/g, "")
     .replace('<script src="/shared.js"></script>', () => "<script>" + sharedJs + "</script>")
     .replace(/<script src="https?:[^>]*><\/script>/g, "");
 
-  const calls = { initialize: [], environment: [], checkoutOpen: [], pricePreview: [], statusFetches: 0, allDocsClicks: 0 };
+  const calls = { initialize: [], environment: [], checkoutOpen: [], pricePreview: [], statusFetches: 0, allDocsClicks: 0, reconcile: [] };
   let currentUsage = usage;
+  // Ο "server" για το /billing/reconcile· κάθε test το αλλάζει ανάλογα με το σενάριο.
+  const api = { setUsage: (u) => { currentUsage = u; } };
+  const handlers = { reconcile: reconcile || (() => ({ status: 200, json: {} })) };
 
   const dom = new JSDOM(html, {
     runScripts: "dangerously",
@@ -70,7 +74,14 @@ async function boot({ usage, lang = "en", session = true, paddle = "mock", paddl
       window.marked = { parse: (s) => s, use() {}, setOptions() {} };
       window.DOMPurify = { sanitize: (s) => s };
       window.toastui = { Editor: function () {} };
-      window.fetch = async (url) => {
+      window.fetch = async (url, init = {}) => {
+        if (String(url).startsWith("/billing/reconcile")) {
+          const body = JSON.parse(init.body);
+          calls.reconcile.push({ body, method: init.method, headers: init.headers });
+          const r = handlers.reconcile(body, calls.reconcile.length, api);
+          if (r === "throw") throw new TypeError("network down");
+          return { ok: r.status >= 200 && r.status < 300, status: r.status, json: async () => r.json };
+        }
         if (String(url).startsWith("/usage/status")) {
           calls.statusFetches++;
           return { ok: true, status: 200, json: async () => currentUsage };
@@ -99,7 +110,7 @@ async function boot({ usage, lang = "en", session = true, paddle = "mock", paddl
   await sleep(80);
   // Μετράει τα κλικ στο "All documents" (το χρησιμοποιεί το "Back to documents").
   dom.window.document.getElementById("topAllDocsBtn").addEventListener("click", () => calls.allDocsClicks++);
-  return { dom, window: dom.window, document: dom.window.document, calls, setUsage: (u) => { currentUsage = u; } };
+  return { dom, window: dom.window, document: dom.window.document, calls, handlers, setUsage: (u) => { currentUsage = u; } };
 }
 
 const btnVisible = (doc) => doc.getElementById("upgradeBtn").style.display !== "none";
@@ -114,7 +125,7 @@ async function openAndPay(t, plan = "pro") {
   await sleep(80);
   t.document.querySelector(`.upgrade-choose-btn[data-plan="${plan}"]`).click();
   await sleep(50);
-  t.calls.initialize[0].eventCallback({ name: "checkout.completed" });
+  t.calls.initialize[0].eventCallback({ name: "checkout.completed", data: { transaction_id: TXN_ID } });
 }
 
 console.log("free account, server offers basic and pro");
@@ -159,6 +170,7 @@ console.log("payment completed: pending state shows immediately, confirmed state
   check("pending banner is visible", bannerVisible(t.document));
   const saved = JSON.parse(flag(t.window) || "null");
   check("browser remembers the payment for this workspace", saved && saved.workspaceId === "ws-real" && saved.plan === "pro", flag(t.window));
+  check("...together with the Paddle transaction id", saved && saved.transactionId === TXN_ID);
 
   // Ο server "βλέπει" πλέον την ενεργή συνδρομή (το webhook τελείωσε).
   t.setUsage(usageBody({ plan: "pro", messagesLimit: 2500, messagesLimitReached: false, upgrade: null }));
@@ -240,6 +252,119 @@ console.log("payment fails inside the checkout");
   check("failure message is shown", t.document.getElementById("upgradeStatus").textContent.startsWith("The payment didn't go through"), t.document.getElementById("upgradeStatus").textContent);
   check("nothing is remembered as paid", flag(t.window) === null);
   check("Upgrade button stays visible", btnVisible(t.document));
+  t.window.close();
+}
+
+console.log("reconcile: the server asks Paddle, so a late webhook does not matter");
+{
+  // Ο server "εφαρμόζει" το πλάνο μέσω συμφωνίας· το webhook δεν έρχεται ποτέ.
+  const t = await boot({ usage: usageBody({ messagesLimitReached: true, upgrade: OFFER_FREE }) });
+  t.handlers.reconcile = () => { t.setUsage(usageBody({ plan: "basic", upgrade: null })); return { status: 200, json: { status: "applied", plan: "basic" } }; };
+  await openAndPay(t, "basic");
+  await sleep(300);
+  check("reconcile was called with the transaction id", t.calls.reconcile.length >= 1 && t.calls.reconcile[0].body.transactionId === TXN_ID);
+  check("it is a POST that carries the session token", t.calls.reconcile[0].method === "POST" && t.calls.reconcile[0].headers["X-Session-Token"] === "tok123");
+  check("the confirmed view appears without any webhook", stateView(t.document) && stateView(t.document).dataset.state === "confirmed");
+  check("reconcile stops after it succeeded", t.calls.reconcile.length === 1);
+  t.window.close();
+}
+{
+  // pending, pending, applied
+  const t = await boot({ usage: usageBody({ upgrade: OFFER_FREE }) });
+  t.handlers.reconcile = (b, n) => {
+    if (n < 3) return { status: 200, json: { status: "pending" } };
+    t.setUsage(usageBody({ plan: "basic", upgrade: null }));
+    return { status: 200, json: { status: "applied", plan: "basic" } };
+  };
+  await openAndPay(t, "basic");
+  await sleep(450);
+  check("keeps asking while Paddle says pending, then confirms", t.calls.reconcile.length === 3 && stateView(t.document).dataset.state === "confirmed", "calls: " + t.calls.reconcile.length);
+  t.window.close();
+}
+{
+  // reconcile is refused (403): stop asking, but the webhook path still works
+  const t = await boot({ usage: usageBody({ upgrade: OFFER_FREE }) });
+  t.handlers.reconcile = () => ({ status: 403, json: { error: "nope" } });
+  await openAndPay(t, "basic");
+  await sleep(200);
+  check("a refusal (403) is not retried", t.calls.reconcile.length === 1, "calls: " + t.calls.reconcile.length);
+  check("the pending view stays meanwhile", stateView(t.document).dataset.state === "pending");
+  t.setUsage(usageBody({ plan: "basic", upgrade: null })); // το webhook τελικά έρχεται
+  await sleep(200);
+  check("the webhook path still confirms", stateView(t.document).dataset.state === "confirmed");
+  t.window.close();
+}
+{
+  // 503 (key problem): also not retried, page unaffected
+  const t = await boot({ usage: usageBody({ upgrade: OFFER_FREE }) });
+  t.handlers.reconcile = () => ({ status: 503, json: { error: "unavailable" } });
+  await openAndPay(t, "basic");
+  await sleep(POLL.intervalMs * 2.5);
+  check("503 (billing unavailable) is not retried and does not break the page", t.calls.reconcile.length === 1 && stateView(t.document).dataset.state === "pending", "calls: " + t.calls.reconcile.length);
+  t.window.close();
+}
+{
+  // temporary problems are retried: 502, 429 and a network error
+  const t = await boot({ usage: usageBody({ upgrade: OFFER_FREE }) });
+  t.handlers.reconcile = (b, n) => (n === 1 ? { status: 502, json: {} } : n === 2 ? { status: 429, json: {} } : n === 3 ? "throw" : { status: 200, json: { status: "pending" } });
+  await openAndPay(t, "basic");
+  await sleep(450);
+  check("502, 429 and network errors are retried", t.calls.reconcile.length >= 4, "calls: " + t.calls.reconcile.length);
+  t.window.close();
+}
+{
+  // Paddle says the payment was not completed / server says up to date: stop
+  for (const status of ["not_completed", "up_to_date", "applied"]) {
+    const t = await boot({ usage: usageBody({ upgrade: OFFER_FREE }) });
+    t.handlers.reconcile = () => ({ status: 200, json: { status } });
+    await openAndPay(t, "basic");
+    await sleep(300);
+    check(`reconcile status "${status}" ends the asking`, t.calls.reconcile.length === 1);
+    t.window.close();
+  }
+}
+{
+  // no transaction id in the event: nothing to reconcile, webhook path unchanged
+  const t = await boot({ usage: usageBody({ upgrade: OFFER_FREE }) });
+  t.document.getElementById("upgradeBtn").click();
+  await sleep(80);
+  t.document.querySelector('.upgrade-choose-btn[data-plan="basic"]').click();
+  await sleep(50);
+  t.calls.initialize[0].eventCallback({ name: "checkout.completed" });
+  await sleep(200);
+  check("no transaction id: reconcile is never called", t.calls.reconcile.length === 0);
+  t.setUsage(usageBody({ plan: "basic", upgrade: null }));
+  await sleep(200);
+  check("...and the webhook path still confirms", stateView(t.document).dataset.state === "confirmed");
+  t.window.close();
+}
+{
+  // reload while pending: the remembered transaction id resumes the reconcile
+  const t = await boot({
+    usage: usageBody({ upgrade: OFFER_FREE }),
+    local: { [PENDING_KEY]: pendingFlag() },
+    reconcile: (b, n, api) => { api.setUsage(usageBody({ plan: "basic", upgrade: null })); return { status: 200, json: { status: "applied", plan: "basic" } }; },
+  });
+  await sleep(300);
+  check("after a reload, reconcile resumes with the remembered transaction id", t.calls.reconcile.length === 1 && t.calls.reconcile[0].body.transactionId === TXN_ID);
+  check("...and the banner clears once it is applied", !bannerVisible(t.document) && flag(t.window) === null);
+  t.window.close();
+}
+{
+  // old flag format (no transaction id) still works
+  const t = await boot({ usage: usageBody({ upgrade: OFFER_FREE }), local: { [PENDING_KEY]: pendingFlag({ transactionId: undefined }) } });
+  await sleep(150);
+  check("an older remembered payment without transaction id does not call reconcile", t.calls.reconcile.length === 0 && bannerVisible(t.document));
+  t.window.close();
+}
+{
+  // never confirmed: reconcile is capped by the same 30 second limit
+  const t = await boot({ usage: usageBody({ upgrade: OFFER_FREE }) });
+  t.handlers.reconcile = () => ({ status: 200, json: { status: "pending" } });
+  await openAndPay(t, "basic");
+  await sleep(POLL.intervalMs * (POLL.maxTries + 3));
+  check("reconcile asks at most once per polling round", t.calls.reconcile.length === POLL.maxTries, "calls: " + t.calls.reconcile.length);
+  check("still ends in the slow message with no buy buttons", stateView(t.document).dataset.state === "slow" && chooseButtons(t.document) === 0);
   t.window.close();
 }
 
