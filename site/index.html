@@ -5,6 +5,9 @@
   Οι αριθμοί (100/500/2.500 μηνύματα, 5/20/απεριόριστα έγγραφα) είναι τα ΠΡΑΓΜΑΤΙΚΑ όρια
   του κώδικα (PLAN_LIMITS), οι τιμές (29 και 59 ευρώ) οι ίδιες με το Paddle. Αν αλλάξει
   οποιοδήποτε από τα δύο, αλλάζει ΚΑΙ εδώ.
+  ΧΡΩΜΑΤΑ: ίδιο πορτοκαλί (#D97757) με το landing της εφαρμογής. Στα κουμπιά/badge το κείμενο πάνω στο πορτοκαλί
+  είναι σκούρο (var(--bg)) και όχι --on-accent: το ανοιχτό κείμενο πάνω σε αυτό το πορτοκαλί έχει χαμηλή αντίθεση
+  (~2,7:1), το σκούρο ~6:1.
   Οι τιμές γράφονται "με ΦΠΑ" -- ισχύει μόνο αν στο live Paddle οι τιμές οριστούν ως
   ΣΥΜΠΕΡΙΛΑΜΒΑΝΟΝΤΑΙ ο φόρος (Checkout > Sales tax settings), όπως στο sandbox.
   Δεν αναφέρεται επωνυμία/ΑΦΜ/έδρα ακόμα: μπαίνουν όταν ολοκληρωθεί η έναρξη στη ΔΟΥ.
@@ -18,6 +21,8 @@
 <meta name="description" content="Idmon: chat assistant που απαντά από τα δικά σου έγγραφα. Τιμολόγηση: Free, Basic 29 €/μήνα, Pro 59 €/μήνα, με ΦΠΑ.">
 <link rel="stylesheet" href="shared.css">
 <style>
+  /* Ίδια ζεστή παλέτα με το landing της εφαρμογής (override του --accent του shared.css, που είναι ουδέτερο γκρι). */
+  :root{--accent:#D97757;--accent-soft:rgba(217,119,87,.16);}
   .topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 24px;border-bottom:1px solid var(--border);}
   .topbar a.brand{color:var(--text);font-weight:700;text-decoration:none;}
   .page-wrap{max-width:980px;margin:0 auto;padding:40px 20px 80px;}
@@ -27,15 +32,17 @@
   .plan{border:1px solid var(--border);border-radius:10px;padding:22px 20px;display:flex;flex-direction:column;gap:6px;position:relative;}
   .plan.featured{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
   .plan h2{margin:0;font-size:1.15rem;}
-  .badge{position:absolute;top:-11px;right:16px;background:var(--accent);color:var(--on-accent,#fff);font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:999px;}
+  .badge{position:absolute;top:-11px;right:16px;background:var(--accent);color:var(--bg);font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:999px;}
   .price{font-size:2rem;font-weight:700;margin:6px 0 0;}
   .price small{font-size:.85rem;font-weight:400;color:var(--text-soft);}
   .vat{font-size:.8rem;color:var(--text-soft);margin:0 0 10px;}
   .plan ul{list-style:none;padding:0;margin:0 0 16px;font-size:.95rem;}
   .plan li{padding:4px 0;}
   .plan li strong{font-weight:700;}
-  .cta{display:inline-block;text-align:center;margin-top:auto;padding:10px 14px;border-radius:6px;text-decoration:none;font-weight:700;border:1px solid var(--accent);color:var(--accent);}
-  .plan.featured .cta{background:var(--accent);color:var(--on-accent,#fff);}
+  .cta{display:inline-block;text-align:center;margin-top:auto;padding:11px 14px;border-radius:6px;text-decoration:none;font-weight:700;font-size:.95rem;border:1px solid var(--accent);color:var(--accent);}
+  .cta:hover{background:var(--accent-soft);}
+  .plan.featured .cta{background:var(--accent);color:var(--bg);}
+  .plan.featured .cta:hover{background:var(--accent);filter:brightness(1.08);}
   .table-wrap{overflow-x:auto;margin:0 0 2.4em;}
   .faq h3{margin:1.4em 0 .3em;font-size:1.02rem;}
   .faq p{margin:0;color:var(--text-soft);}
