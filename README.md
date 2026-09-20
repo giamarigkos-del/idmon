@@ -94,6 +94,16 @@ Limits are defined in `PLAN_LIMITS` in `src/index.js` and stored per account in 
 - The protected demo workspace is exempt from the message limit
 - For local testing only, `MONTHLY_MESSAGE_LIMIT_OVERRIDE` in `.dev.vars` overrides the message limit (the variable does not exist in production)
 
+## Billing
+
+Paddle is the payment provider and Merchant of Record for the Basic and Pro plans. Monthly and annual prices are configured as Paddle Live price IDs; the public pricing page includes a monthly/annual toggle and VAT-inclusive prices.
+
+Verified Paddle webhook deliveries arrive at `POST /paddle/webhook`. The Worker reads the raw request body, verifies the `Paddle-Signature` HMAC with `PADDLE_WEBHOOK_SECRET`, and only then parses or writes data. It routes `customer.created`, `customer.updated`, `subscription.created`, `subscription.updated`, `subscription.canceled`, other `subscription.*` status events, and `transaction.completed`; unrelated verified event types are acknowledged safely.
+
+Paddle state is mirrored idempotently in the D1 `customers` and `subscriptions` tables. Customer rows are keyed by `customer_id`, subscription rows by `subscription_id`, and Paddle event timestamps prevent duplicate or out-of-order deliveries from overwriting newer state. The existing `users` billing columns and plan are updated alongside the mirror so the application can enforce workspace limits.
+
+The paid-access helper grants access when a subscription is `active` or `trialing`. A scheduled cancellation or pause does not revoke access while the subscription status remains active; access is revoked when the status is actually `canceled`. `past_due` and `paused` subscriptions remain manageable through the Paddle customer portal, but do not grant a new upgrade offer.
+
 ## Architecture
 
 ```
@@ -103,10 +113,11 @@ Limits are defined in `PLAN_LIMITS` in `src/index.js` and stored per account in 
   index /        └─────────┬──────────┘
   editor /                 │
   article /                ├──▶ KV (DOCUMENT_REGISTRY)      documents, fallback logs, contradictions, widget settings, analytics counters, usage counters, one-time tokens
-  terms /                  ├──▶ D1 (rag-demo-tool-accounts) accounts, sessions, connections
+  terms /                  ├──▶ D1 (rag-demo-tool-accounts) accounts, sessions, connections, billing mirror
   privacy)                 ├──▶ Vectorize (operations-portal-rag-index)   embeddings for semantic search, per workspace
   Customer sites  ───▶     ├──▶ Gemini API                  gemini-embedding-001 for embeddings, gemini-3.6-flash for answers, PDF extraction, and contradiction detection
-  (widget.js)              └──▶ Resend API                  transactional email: fallback alerts, verification, password reset
+  (widget.js)              ├──▶ Paddle API                  checkout, subscriptions, customer portal, and webhooks
+                          └──▶ Resend API                  transactional email: fallback alerts, verification, password reset
 ```
 
 Design decisions worth calling out:
@@ -126,6 +137,7 @@ Design decisions worth calling out:
 | Vector search | Cloudflare Vectorize (768 dimensions, cosine similarity) |
 | Document storage | Cloudflare KV |
 | Accounts, sessions, connections | Cloudflare D1 (SQLite) |
+| Billing | Paddle Checkout, subscriptions, customer portal, and webhooks |
 | Password hashing | PBKDF2-SHA256 (native Web Crypto, no dependency) |
 | Token encryption | AES-GCM (native Web Crypto) |
 | Embeddings | Gemini `gemini-embedding-001` |
@@ -154,6 +166,16 @@ Unless noted otherwise, endpoints resolve the workspace from `X-Session-Token` i
 | `POST` | `/account/resend-verification` | Resend the verification email (session required) |
 | `GET` | `/account/export` | Download all account data as JSON (session required) |
 | `POST` | `/account/delete` | Delete the account and all workspace data; requires password (session required, rate limited) |
+
+**Billing**
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/paddle/webhook` | Receive verified Paddle customer, subscription, and completed-transaction events; no user session required |
+| `POST` | `/billing/reconcile` | Reconcile a completed Paddle transaction for the signed-in account |
+| `POST` | `/billing/change-plan/preview` | Preview a Basic-to-Pro change for the signed-in account |
+| `POST` | `/billing/change-plan` | Apply a Basic-to-Pro change for the signed-in account |
+| `POST` | `/billing/portal` | Mint a Paddle customer-portal session for the signed-in account |
 
 **Documents**
 
@@ -234,7 +256,7 @@ npx wrangler d1 execute rag-demo-tool-accounts --remote --file=schema.sql
 npx wrangler d1 execute rag-demo-tool-accounts --local --file=schema.sql
 ```
 
-`schema.sql` is the complete, current schema (users, sessions, embed domains, connections), so a fresh setup needs nothing else. **Do not also run the files in `migrations/` on a fresh database:** their changes are already part of `schema.sql`, and re-applying them fails with `duplicate column name`. The migrations exist for databases created earlier that need to catch up. For those, list what is pending and apply it in order:
+`schema.sql` is the complete, current schema (users, sessions, embed domains, connections, and the Paddle `customers`/`subscriptions` mirror), so a fresh setup needs nothing else. **Do not also run the files in `migrations/` on a fresh database:** their changes are already part of `schema.sql`, and re-applying them fails with `duplicate column name`. The migrations exist for databases created earlier that need to catch up. For those, list what is pending and apply them in order:
 
 ```bash
 npx wrangler d1 migrations list rag-demo-tool-accounts --remote
@@ -252,11 +274,18 @@ npx wrangler secret put DEVELOPER_PASSWORD
 npx wrangler secret put RESEND_API_KEY          # needed for fallback alerts, verification, and password reset emails
 npx wrangler secret put TOKEN_ENCRYPTION_KEY    # 32-byte hex key, only needed for the Google Drive connector
 npx wrangler secret put GOOGLE_CLIENT_SECRET    # only needed for the Google Drive connector
+npx wrangler secret put PADDLE_API_KEY           # Paddle Live API key for server-side calls
+npx wrangler secret put PADDLE_WEBHOOK_SECRET    # Paddle notification signing secret
 ```
 
 Configure `[vars]` in `wrangler.toml`:
 - `NOTIFY_FROM_EMAIL`: the sender address for transactional email. It must belong to a domain you have verified on Resend (or use `onboarding@resend.dev`, Resend's shared test sender, which can only deliver to your own Resend account email)
 - `GOOGLE_CLIENT_ID` and `GOOGLE_REDIRECT_URI`: only for the Google Drive connector
+- `PADDLE_ENV`, `PADDLE_PRICE_BASIC_MONTHLY`, `PADDLE_PRICE_BASIC_ANNUAL`, `PADDLE_PRICE_PRO_MONTHLY`, and `PADDLE_PRICE_PRO_ANNUAL`: plain Paddle environment and price-ID vars. Keep the Live values for production.
+- `PADDLE_CLIENT_TOKEN`: the public Paddle.js client token, also a plain var; it is safe to send to the browser, but must match `PADDLE_ENV`.
+- `PADDLE_PRICE_BASIC` and `PADDLE_PRICE_PRO`: the monthly price IDs used by the current in-app upgrade flow and webhook plan mapping.
+
+The values for `PADDLE_API_KEY` and `PADDLE_WEBHOOK_SECRET` must be Wrangler secrets, never committed to `wrangler.toml` or `.env.example`. The variable names and non-secret Live price IDs are listed in `.env.example` for local setup.
 
 For local runs, put overrides such as `MONTHLY_MESSAGE_LIMIT_OVERRIDE` in `.dev.vars`.
 
@@ -297,8 +326,10 @@ idmon/
 │   ├── shared.css          # Design tokens, shared component styles, scrollbar styling, i18n toggle
 │   └── shared.js           # Shared frontend logic: workspace/session resolution, i18n, markdown rendering, slugs
 ├── migrations/             # D1 migrations (0002 onward), for upgrading databases created earlier
+│   └── 0008_paddle_mirror.sql # Paddle customers/subscriptions mirror tables
 ├── tests/                  # Integration and headless tests, see Testing
-├── schema.sql              # Complete current D1 schema for fresh setups: users, sessions, embed_domains, connections
+├── .env.example            # Paddle variable names and non-secret Live price IDs
+├── schema.sql              # Complete current D1 schema for fresh setups, including billing mirror tables
 └── wrangler.toml
 ```
 
@@ -313,7 +344,7 @@ idmon/
 - The rate limiter uses per-IP buckets, so users behind a shared IP share a bucket
 - PBKDF2 is capped at 100,000 iterations by the Workers runtime (see [Accounts and sessions](#accounts-and-sessions))
 - No version history: publishing overwrites the previous embedded version (the full text is always preserved in KV, but there is no diff-able revision log)
-- There is no public pricing or marketing page yet; `idmon.app` currently issues a temporary `302` redirect to `app.idmon.app`
+- The public pricing page has a Live monthly/annual toggle and checkout buttons; checkout on `app.idmon.app` remains pending Paddle's checkout-domain approval
 - Internal resource names still use the old branding (Worker `operations-portal-rag`, Vectorize index `operations-portal-rag-index`, D1 database `rag-demo-tool-accounts`); they are not visible to end users
 - The Terms of Service and Privacy Policy are templates and do not yet include a legal entity identification
 
