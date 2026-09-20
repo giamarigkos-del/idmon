@@ -5,6 +5,9 @@
   Οι αριθμοί (100/500/2.500 μηνύματα, 5/20/απεριόριστα έγγραφα) είναι τα ΠΡΑΓΜΑΤΙΚΑ όρια
   του κώδικα (PLAN_LIMITS), οι τιμές (29 και 59 ευρώ) οι ίδιες με το Paddle. Αν αλλάξει
   οποιοδήποτε από τα δύο, αλλάζει ΚΑΙ εδώ.
+  ΡΟΗ ΕΓΓΡΑΦΗΣ (σημαντικό για τα κείμενα): ΟΛΑ τα κουμπιά πάνε στο app.idmon.app/landing, δηλαδή στην επιλογή
+  Guest (δοκιμαστικός χώρος, διαγράφεται μετά από 7 ημέρες) ή Account. Ένας νέος λογαριασμός είναι ΠΑΝΤΑ Free· το
+  Basic/Pro αγοράζεται ΜΕΣΑ στην εφαρμογή (κουμπί Upgrade). Γι' αυτό τα πλάνα Basic/Pro ΔΕΝ έχουν κουμπί "αγορά" εδώ.
   ΧΡΩΜΑΤΑ: ίδιο πορτοκαλί (#D97757) με το landing της εφαρμογής. Στα κουμπιά/badge το κείμενο πάνω στο πορτοκαλί
   είναι σκούρο (var(--bg)) και όχι --on-accent: το ανοιχτό κείμενο πάνω σε αυτό το πορτοκαλί έχει χαμηλή αντίθεση
   (~2,7:1), το σκούρο ~6:1.
@@ -18,7 +21,7 @@
 <meta charset="UTF-8">
 <title>Τιμολόγηση — Idmon</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Idmon: chat assistant που απαντά από τα δικά σου έγγραφα. Τιμολόγηση: Free, Basic 29 €/μήνα, Pro 59 €/μήνα, με ΦΠΑ.">
+<meta name="description" content="Idmon: chatbot για το site σου που απαντά μόνο από τα δικά σου έγγραφα. Δοκίμασέ το δωρεάν. Basic 29 €/μήνα, Pro 59 €/μήνα, με ΦΠΑ.">
 <link rel="stylesheet" href="shared.css">
 <style>
   /* Ίδια ζεστή παλέτα με το landing της εφαρμογής (override του --accent του shared.css, που είναι ουδέτερο γκρι). */
@@ -41,8 +44,11 @@
   .plan li strong{font-weight:700;}
   .cta{display:inline-block;text-align:center;margin-top:auto;padding:11px 14px;border-radius:6px;text-decoration:none;font-weight:700;font-size:.95rem;border:1px solid var(--accent);color:var(--accent);}
   .cta:hover{background:var(--accent-soft);}
-  .plan.featured .cta{background:var(--accent);color:var(--bg);}
-  .plan.featured .cta:hover{background:var(--accent);filter:brightness(1.08);}
+  .cta.cta-primary{background:var(--accent);color:var(--bg);padding:12px 22px;font-size:1rem;}
+  .cta.cta-primary:hover{background:var(--accent);filter:brightness(1.08);}
+  .hero-note{color:var(--text-soft);font-size:.88rem;max-width:640px;margin:.4em 0 2.6em;}
+  .plan-note{margin:auto 0 0;padding:11px 0;text-align:center;font-size:.9rem;color:var(--text-soft);border-top:1px solid var(--border);}
+  .pricing-note{color:var(--text-soft);font-size:.92rem;margin:-1em 0 2.4em;}
   .table-wrap{overflow-x:auto;margin:0 0 2.4em;}
   .faq h3{margin:1.4em 0 .3em;font-size:1.02rem;}
   .faq p{margin:0;color:var(--text-soft);}
@@ -64,8 +70,13 @@
 
 <div id="content-el" class="lang-block md-content">
 
-<h1>Τιμολόγηση</h1>
-<p class="lead">Ένας βοηθός που απαντά στους επισκέπτες σου μόνο από τα δικά σου έγγραφα. Ξεκίνα δωρεάν και αναβάθμισε όταν το χρειαστείς. Όλες οι τιμές είναι μηνιαίες και <strong>περιλαμβάνουν ΦΠΑ</strong>.</p>
+<h1>Idmon</h1>
+<p class="lead">Ένας συνομιλιακός βοηθός (chatbot) για το site σου: ανεβάζεις τα δικά σου έγγραφα και οι επισκέπτες σου παίρνουν απαντήσεις μόνο από αυτά, μέσα από ένα widget που ενσωματώνεις στον ιστότοπό σου.</p>
+<p><a class="cta cta-primary" href="https://app.idmon.app/landing">Δοκίμασέ το δωρεάν</a></p>
+<p class="hero-note">Δεν χρειάζεται κάρτα. Στην επόμενη οθόνη διαλέγεις δοκιμαστικό χώρο χωρίς λογαριασμό (τα δεδομένα του διαγράφονται μετά από 7 ημέρες) ή δωρεάν λογαριασμό.</p>
+
+<h2>Τιμολόγηση</h2>
+<p class="lead">Ξεκίνα δωρεάν και αναβάθμισε όταν το χρειαστείς. Όλες οι τιμές είναι μηνιαίες και <strong>περιλαμβάνουν ΦΠΑ</strong>.</p>
 
 <div class="plans">
   <div class="plan">
@@ -87,7 +98,7 @@
       <li><strong>500</strong> μηνύματα / μήνα</li>
       <li><strong>20</strong> έγγραφα</li>
     </ul>
-    <a class="cta" href="https://app.idmon.app/landing">Ξεκίνα με Basic</a>
+    <p class="plan-note">Αναβάθμιση μέσα στην εφαρμογή</p>
   </div>
   <div class="plan">
     <h2>Pro</h2>
@@ -97,9 +108,11 @@
       <li><strong>2.500</strong> μηνύματα / μήνα</li>
       <li><strong>Απεριόριστα</strong> έγγραφα</li>
     </ul>
-    <a class="cta" href="https://app.idmon.app/landing">Ξεκίνα με Pro</a>
+    <p class="plan-note">Αναβάθμιση μέσα στην εφαρμογή</p>
   </div>
 </div>
+
+<p class="pricing-note">Ξεκινάς πάντα με δωρεάν λογαριασμό και αναβαθμίζεις μέσα στην εφαρμογή όποτε θέλεις. Δεν χρεώνεσαι κατά την εγγραφή.</p>
 
 <h2>Τι περιλαμβάνεται σε όλα τα πλάνα</h2>
 <div class="table-wrap">
@@ -144,8 +157,13 @@
 
 <div id="content-en" class="lang-block md-content">
 
-<h1>Pricing</h1>
-<p class="lead">An assistant that answers your visitors only from your own documents. Start for free and upgrade when you need to. All prices are monthly and <strong>include VAT</strong>.</p>
+<h1>Idmon</h1>
+<p class="lead">A conversational assistant (chatbot) for your website: you upload your own documents and your visitors get answers only from them, through a widget you embed on your site.</p>
+<p><a class="cta cta-primary" href="https://app.idmon.app/landing">Try it for free</a></p>
+<p class="hero-note">No card needed. On the next screen you choose a trial space without an account (its data is deleted after 7 days) or a free account.</p>
+
+<h2>Pricing</h2>
+<p class="lead">Start for free and upgrade when you need to. All prices are monthly and <strong>include VAT</strong>.</p>
 
 <div class="plans">
   <div class="plan">
@@ -167,7 +185,7 @@
       <li><strong>500</strong> messages / month</li>
       <li><strong>20</strong> documents</li>
     </ul>
-    <a class="cta" href="https://app.idmon.app/landing">Start with Basic</a>
+    <p class="plan-note">Upgrade inside the app</p>
   </div>
   <div class="plan">
     <h2>Pro</h2>
@@ -177,9 +195,11 @@
       <li><strong>2,500</strong> messages / month</li>
       <li><strong>Unlimited</strong> documents</li>
     </ul>
-    <a class="cta" href="https://app.idmon.app/landing">Start with Pro</a>
+    <p class="plan-note">Upgrade inside the app</p>
   </div>
 </div>
+
+<p class="pricing-note">You always start with a free account and upgrade inside the app whenever you like, so you are never charged at signup.</p>
 
 <h2>What every plan includes</h2>
 <div class="table-wrap">
