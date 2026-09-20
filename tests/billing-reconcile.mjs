@@ -51,6 +51,8 @@ function makeState(userOverrides = {}) {
       paddle_customer_id: null, paddle_subscription_id: null, paddle_status: null, paddle_event_at: null,
       ...userOverrides,
     }],
+    customers: [],
+    subscriptions: [],
     sessions: {
       [TOKEN]: { user_id: 1, workspace_id: WS, expires_at: future },
       "tok-expired": { user_id: 1, workspace_id: WS, expires_at: new Date(Date.now() - 1000).toISOString() },
@@ -75,6 +77,23 @@ function makeEnv(state, vars = {}, { failDb = false } = {}) {
             },
             async run() {
               if (failDb) throw new Error("D1 is down");
+              if (sql.includes("INSERT INTO customers")) {
+                const [customerId, email, createdAt, updatedAt, lastEventAt] = args;
+                const existing = state.customers.find((x) => x.customer_id === customerId);
+                if (!existing) state.customers.push({ customer_id: customerId, email, created_at: createdAt, updated_at: updatedAt, last_event_at: lastEventAt });
+                else if (!existing.last_event_at || lastEventAt >= existing.last_event_at) {
+                  if (email) existing.email = email;
+                  existing.updated_at = updatedAt; existing.last_event_at = lastEventAt;
+                }
+                return { success: true };
+              }
+              if (sql.includes("INSERT INTO subscriptions")) {
+                const [subscriptionId, customerId, status, priceId, productId, scheduledAction, scheduledAt, createdAt, updatedAt, lastEventAt] = args;
+                const existing = state.subscriptions.find((x) => x.subscription_id === subscriptionId);
+                if (!existing) state.subscriptions.push({ subscription_id: subscriptionId, customer_id: customerId, status, price_id: priceId, product_id: productId, scheduled_change_action: scheduledAction, scheduled_change_at: scheduledAt, created_at: createdAt, updated_at: updatedAt, last_event_at: lastEventAt });
+                else if (lastEventAt >= existing.last_event_at) Object.assign(existing, { customer_id: customerId, status, price_id: priceId, product_id: productId, scheduled_change_action: scheduledAction, scheduled_change_at: scheduledAt, updated_at: updatedAt, last_event_at: lastEventAt });
+                return { success: true };
+              }
               if (sql.trim().startsWith("UPDATE users")) {
                 const [plan, customerId, subId, status, eventAt, id] = args;
                 const u = state.users.find((x) => x.id === id);
@@ -388,6 +407,16 @@ const evt = (type, subOver = {}, occurred = "2026-09-19T19:00:00.000Z") => ({
   check("past_due keeps the plan but records the status", pastDue.json.plan === "pro" && state.users[0].plan === "pro" && state.users[0].paddle_status === "past_due");
   const canceled = await webhook(env, evt("subscription.canceled", { status: "canceled" }, "2026-09-19T21:00:00.000Z"));
   check("canceled goes back to free", canceled.json.plan === "free" && state.users[0].plan === "free" && state.users[0].paddle_status === "canceled");
+  check("subscription is mirrored once with its latest state", state.subscriptions.length === 1 && state.subscriptions[0].status === "canceled" && state.subscriptions[0].price_id === "pri_basic_test");
+  check("customer placeholder is mirrored for subscription events", state.customers.length === 1 && state.customers[0].customer_id === "ctm_1");
+}
+{
+  const state = makeState(); const env = makeEnv(state);
+  const customer = await webhook(env, { event_type: "customer.created", occurred_at: "2026-09-19T19:00:00.000Z", data: { id: "ctm_1", email: "owner@example.com" } });
+  const updated = await webhook(env, { event_type: "customer.updated", occurred_at: "2026-09-19T20:00:00.000Z", data: { id: "ctm_1", email: "new-owner@example.com" } });
+  const stale = await webhook(env, { event_type: "customer.updated", occurred_at: "2026-09-19T18:00:00.000Z", data: { id: "ctm_1", email: "stale@example.com" } });
+  check("customer events are routed and idempotently upserted", customer.json.handled === "customer.created" && updated.json.handled === "customer.updated" && stale.json.handled === "customer.updated");
+  check("stale customer data does not overwrite newer data", state.customers[0].email === "new-owner@example.com");
 }
 {
   const state = makeState(); const env = makeEnv(state);
@@ -396,7 +425,7 @@ const evt = (type, subOver = {}, occurred = "2026-09-19T19:00:00.000Z") => ({
   const noCustom = await webhook(env, evt("subscription.created", { custom_data: null }));
   check("no custom_data and unknown subscription: matched:false", noCustom.json.matched === false);
   const notSub = await webhook(env, { event_type: "transaction.completed", occurred_at: "2026-09-19T19:00:00.000Z", data: { id: "txn_x" } });
-  check("non-subscription event is ignored with 200", notSub.res.status === 200 && notSub.json.ignored === "event_type");
+  check("transaction.completed is handled with 200", notSub.res.status === 200 && notSub.json.handled === "transaction.completed");
   const malformed = await webhook(env, { event_type: "subscription.created", occurred_at: "not a date", data: { id: SUB } });
   check("malformed event is ignored with 200", malformed.res.status === 200 && malformed.json.ignored === "malformed_event");
   const badJson = await webhook(env, null, { raw: "not json{" });

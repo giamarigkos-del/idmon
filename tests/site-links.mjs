@@ -64,12 +64,15 @@ console.log("no broken links, and the legal pages are reachable from the navigat
     const external = [];
     for (const r of refs) {
       if (r.startsWith("mailto:") || r.startsWith("#")) continue;
-      if (/^https?:\/\//.test(r)) { if (!/^https:\/\/app\.idmon\.app(\/|$)/.test(r)) external.push(r); continue; }
+      if (/^https?:\/\//.test(r)) {
+        if (!/^https:\/\/app\.idmon\.app(\/|$)/.test(r) && !/^https:\/\/cdn\.paddle\.com(\/|$)/.test(r)) external.push(r);
+        continue;
+      }
       const p = "/" + r.replace(/^\//, "").split(/[?#]/)[0];
       if (!available.has(p)) broken.push(r);
     }
     check(`${page}: every internal link and file exists on the public site`, broken.length === 0, broken.join(", "));
-    check(`${page}: the only absolute links go to app.idmon.app`, external.length === 0, external.join(", "));
+    check(`${page}: absolute links use approved app/CDN hosts`, external.length === 0, external.join(", "));
     check(`${page}: shows the contact email`, html.includes("info@idmon.app"));
     check(`${page}: links to Terms, Privacy and Refunds (navigation)`, page === "terms.html"
       ? html.includes("/privacy.html") && html.includes("/refunds.html")

@@ -18,8 +18,8 @@ import { createHmac, randomBytes } from "node:crypto";
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:8787";
 const SECRET = process.env.PADDLE_WEBHOOK_SECRET;
-const PRICE_BASIC = process.env.PADDLE_PRICE_BASIC || "pri_01m2x1f5kfbt7h0dxmm10knzxe";
-const PRICE_PRO = process.env.PADDLE_PRICE_PRO || "pri_01m2x1dep88bhsjw8qcstdtfhv";
+const PRICE_BASIC = process.env.PADDLE_PRICE_BASIC || "pri_01m2ynemr2t4dnes8rz775p090";
+const PRICE_PRO = process.env.PADDLE_PRICE_PRO || "pri_01m2ynen6sh5949wn1pnsr1s51";
 
 if (!SECRET) {
   console.error('Λείπει το PADDLE_WEBHOOK_SECRET (βλ. οδηγίες στην κορυφή του αρχείου).');

@@ -45,6 +45,8 @@ function makeState(userOverrides = {}) {
       paddle_event_at: "2026-09-19T19:00:00.000Z",
       ...userOverrides,
     }],
+    customers: [],
+    subscriptions: [],
     sessions: {
       [TOKEN]: { user_id: 1, workspace_id: WS, expires_at: future },
       "tok-expired": { user_id: 1, workspace_id: WS, expires_at: new Date(Date.now() - 1000).toISOString() },
@@ -63,6 +65,7 @@ function makeEnv(state, vars = {}) {
           return {
             async first() {
               if (sql.includes("FROM sessions WHERE token")) return state.sessions[args[0]] || null;
+              if (sql.includes("FROM subscriptions s") && sql.includes("LEFT JOIN customers")) return null;
               if (sql.includes("SELECT plan, paddle_customer_id, paddle_subscription_id, paddle_status FROM users")) return row(state.users.find((u) => u.workspace_id === args[0])) || null;
               if (sql.includes("FROM users WHERE paddle_subscription_id")) return pick(state.users.find((u) => u.paddle_subscription_id === args[0])) || null;
               if (sql.includes("FROM users WHERE workspace_id")) return pick(state.users.find((u) => u.workspace_id === args[0])) || null;

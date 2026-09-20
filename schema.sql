@@ -50,6 +50,32 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_paddle_customer ON users(paddle_customer_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_paddle_subscription ON users(paddle_subscription_id);
 
+-- Durable Paddle state mirrored from verified webhook events. These rows are
+-- live billing state, not disposable test data.
+CREATE TABLE IF NOT EXISTS customers (
+  customer_id TEXT PRIMARY KEY,
+  email TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_event_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+  subscription_id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  price_id TEXT NOT NULL,
+  product_id TEXT NOT NULL,
+  scheduled_change_action TEXT,
+  scheduled_change_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_event_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_customer ON subscriptions(customer_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status);
+
 -- sessions: το token είναι το μόνο πράγμα που κρατάει ο browser. ΠΟΤΕ δεν
 -- ξαναδημιουργείται/μαντεύεται από τον client -- υπάρχει ΜΟΝΟ αν το server
 -- το δημιούργησε ρητά σε ένα login. Το logout είναι απλά DELETE αυτής της

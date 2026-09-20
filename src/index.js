@@ -3493,11 +3493,21 @@ async function verifyPaddleSignature(rawBody, header, secret, nowMs = Date.now()
 function planFromPaddleSubscription(env, subscription) {
   const items = Array.isArray(subscription.items) ? subscription.items : [];
   const plans = new Set();
+  const priceIds = new Set([
+    env.PADDLE_PRICE_BASIC,
+    env.PADDLE_PRICE_BASIC_MONTHLY,
+    env.PADDLE_PRICE_BASIC_ANNUAL,
+  ].filter(Boolean));
+  const proPriceIds = new Set([
+    env.PADDLE_PRICE_PRO,
+    env.PADDLE_PRICE_PRO_MONTHLY,
+    env.PADDLE_PRICE_PRO_ANNUAL,
+  ].filter(Boolean));
   for (const item of items) {
     const priceId = item && item.price && item.price.id;
     if (!priceId) continue;
-    if (env.PADDLE_PRICE_PRO && priceId === env.PADDLE_PRICE_PRO) plans.add("pro");
-    else if (env.PADDLE_PRICE_BASIC && priceId === env.PADDLE_PRICE_BASIC) plans.add("basic");
+    if (proPriceIds.has(priceId)) plans.add("pro");
+    else if (priceIds.has(priceId)) plans.add("basic");
   }
   // Αν (θεωρητικά) υπάρχουν και τα δύο, κερδίζει το ανώτερο.
   if (plans.has("pro")) return "pro";
@@ -3516,13 +3526,103 @@ function planFromPaddleSubscription(env, subscription) {
 // Επιστρέφει το νέο plan, ή null = "μην αλλάξεις το plan".
 function decidePlanForPaddleSubscription(env, subscription) {
   const status = subscription.status;
-  if (status === "active" || status === "trialing") return planFromPaddleSubscription(env, subscription);
+  if (subscriptionGrantsPaidAccess(subscription)) return planFromPaddleSubscription(env, subscription);
   if (status === "canceled" || status === "paused") return "free";
   return null;
 }
 
 function paddleOk(extra) {
   return new Response(JSON.stringify({ ok: true, ...extra }), { headers: JSON_HEADERS });
+}
+
+function subscriptionGrantsPaidAccess(subscription) {
+  return subscription && (subscription.status === "active" || subscription.status === "trialing");
+}
+
+function paddleSubscriptionDetails(subscription) {
+  const item = Array.isArray(subscription.items) ? subscription.items[0] : null;
+  const price = item && item.price;
+  const scheduledChange = subscription.scheduled_change || null;
+  return {
+    customerId: subscription.customer_id || null,
+    priceId: (price && price.id) || "unknown",
+    productId: (price && (price.product_id || (price.product && price.product.id))) || subscription.product_id || "unknown",
+    scheduledChangeAction: scheduledChange && scheduledChange.action || null,
+    scheduledChangeAt: scheduledChange && scheduledChange.effective_at || null,
+  };
+}
+
+async function mirrorPaddleCustomer(env, customer, occurredAt) {
+  if (!customer || !customer.id) return false;
+  const now = new Date().toISOString();
+  const email = typeof customer.email === "string" ? customer.email : "";
+  await env.DB.prepare(
+    `INSERT INTO customers (customer_id, email, created_at, updated_at, last_event_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(customer_id) DO UPDATE SET
+       email = CASE WHEN excluded.email <> '' THEN excluded.email ELSE customers.email END,
+       updated_at = excluded.updated_at,
+       last_event_at = excluded.last_event_at
+     WHERE customers.last_event_at IS NULL OR excluded.last_event_at >= customers.last_event_at`
+  ).bind(customer.id, email, now, now, occurredAt).run();
+  return true;
+}
+
+async function mirrorPaddleSubscription(env, subscription, occurredAt) {
+  if (!subscription || !subscription.id || !Number.isFinite(Date.parse(occurredAt))) return false;
+  const details = paddleSubscriptionDetails(subscription);
+  if (!details.customerId) return false;
+  // Subscription events can race customer.created. A placeholder is replaced
+  // by the later customer event, so the foreign-key relationship is durable.
+  await mirrorPaddleCustomer(env, { id: details.customerId, email: "" }, occurredAt);
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `INSERT INTO subscriptions
+       (subscription_id, customer_id, status, price_id, product_id,
+        scheduled_change_action, scheduled_change_at, created_at, updated_at, last_event_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(subscription_id) DO UPDATE SET
+       customer_id = excluded.customer_id,
+       status = excluded.status,
+       price_id = excluded.price_id,
+       product_id = excluded.product_id,
+       scheduled_change_action = excluded.scheduled_change_action,
+       scheduled_change_at = excluded.scheduled_change_at,
+       updated_at = excluded.updated_at,
+       last_event_at = excluded.last_event_at
+     WHERE subscriptions.last_event_at <= excluded.last_event_at`
+  ).bind(
+    subscription.id,
+    details.customerId,
+    subscription.status || "unknown",
+    details.priceId,
+    details.productId,
+    details.scheduledChangeAction,
+    details.scheduledChangeAt,
+    now,
+    now,
+    occurredAt
+  ).run();
+  return true;
+}
+
+async function handlePaddleCustomerEvent(env, event) {
+  return mirrorPaddleCustomer(env, event.data, event.occurred_at);
+}
+
+async function handlePaddleSubscriptionEvent(env, event) {
+  const subscription = event.data;
+  const mirrored = await mirrorPaddleSubscription(env, subscription, event.occurred_at);
+  const result = await applyPaddleSubscription(env, subscription, event.occurred_at);
+  return { mirrored, result };
+}
+
+async function handlePaddleTransactionEvent(env, event) {
+  const transaction = event.data;
+  if (transaction && transaction.customer_id) {
+    await mirrorPaddleCustomer(env, { id: transaction.customer_id, email: transaction.customer_email || "" }, event.occurred_at);
+  }
+  return { recorded: !!(transaction && transaction.id) };
 }
 
 // Ο ΚΟΙΝΟΣ πυρήνας που εφαρμόζει μια συνδρομή του Paddle στον λογαριασμό: τον
@@ -3617,29 +3717,33 @@ async function handlePaddleWebhook(request, env) {
     return jsonError(400, "Invalid JSON body");
   }
 
-  // Απαντάμε 200 σε ό,τι δεν μας αφορά, ώστε το Paddle να μην το ξαναστέλνει.
   const eventType = event && event.event_type;
-  if (typeof eventType !== "string" || !eventType.startsWith("subscription.")) {
-    return paddleOk({ ignored: "event_type" });
-  }
-  const subscription = event.data;
   const occurredMs = Date.parse(event.occurred_at);
-  if (!subscription || !subscription.id || !Number.isFinite(occurredMs)) {
+  if (typeof eventType !== "string" || !Number.isFinite(occurredMs) || !event.data) {
     return paddleOk({ ignored: "malformed_event" });
   }
 
   try {
-    const result = await applyPaddleSubscription(env, subscription, event.occurred_at);
-
-    if (result.outcome === "no_account") {
-      // 200 και όχι σφάλμα: ξαναστέλνοντας το ίδιο μήνυμα δεν θα βρεθεί ποτέ
-      // λογαριασμός, οπότε το retry δεν βοηθάει.
-      console.warn("Paddle webhook: no matching account for subscription", subscription.id);
-      return paddleOk({ matched: false });
+    if (eventType === "customer.created" || eventType === "customer.updated") {
+      const handled = await handlePaddleCustomerEvent(env, event);
+      return paddleOk({ handled: handled ? eventType : "malformed_event" });
     }
-    if (result.outcome === "stale") return paddleOk({ ignored: "stale_event" });
-    if (result.outcome === "other_subscription") return paddleOk({ ignored: "other_subscription" });
-    return paddleOk({ matched: true, plan: result.plan });
+    if (eventType === "transaction.completed") {
+      const result = await handlePaddleTransactionEvent(env, event);
+      return paddleOk({ handled: result.recorded ? eventType : "malformed_event" });
+    }
+    if (eventType.startsWith("subscription.")) {
+      const { result } = await handlePaddleSubscriptionEvent(env, event);
+      if (result.outcome === "no_account") {
+        console.warn("Paddle webhook: no matching account for subscription", event.data.id);
+        return paddleOk({ matched: false });
+      }
+      if (result.outcome === "stale") return paddleOk({ ignored: "stale_event" });
+      if (result.outcome === "other_subscription") return paddleOk({ ignored: "other_subscription" });
+      return paddleOk({ matched: true, plan: result.plan, access: subscriptionGrantsPaidAccess(event.data) });
+    }
+    // Unknown verified event types are acknowledged safely.
+    return paddleOk({ ignored: "event_type" });
   } catch (err) {
     // 500 -> το Paddle ξαναδοκιμάζει αργότερα (σωστό για πρόβλημα βάσης).
     console.error("Paddle webhook processing failed:", err && err.message);
@@ -3979,7 +4083,13 @@ async function handleBillingPortal(request, env) {
     return billingError(409, "no_subscription", "There is no active subscription to manage.");
   }
 
-  let customerId = user.paddle_customer_id;
+  const mirrored = await env.DB.prepare(
+    `SELECT s.customer_id, c.customer_id AS customer_record_id
+       FROM subscriptions s
+       LEFT JOIN customers c ON c.customer_id = s.customer_id
+      WHERE s.subscription_id = ?`
+  ).bind(user.paddle_subscription_id).first();
+  let customerId = (mirrored && (mirrored.customer_record_id || mirrored.customer_id)) || user.paddle_customer_id;
   if (!customerId || !PADDLE_CUSTOMER_ID_RE.test(customerId)) {
     // Δεν έχουμε αποθηκεύσει customer id (θεωρητικά δεν συμβαίνει): το ρωτάμε από τη συνδρομή.
     const subRes = await paddleApi(env, "GET", `/subscriptions/${user.paddle_subscription_id}`);

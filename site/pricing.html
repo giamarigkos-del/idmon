@@ -12,7 +12,7 @@
   είναι σκούρο (var(--bg)) και όχι --on-accent: το ανοιχτό κείμενο πάνω σε αυτό το πορτοκαλί έχει χαμηλή αντίθεση
   (~2,7:1), το σκούρο ~6:1.
   Οι τιμές γράφονται "με ΦΠΑ" -- ισχύει μόνο αν στο live Paddle οι τιμές οριστούν ως
-  ΣΥΜΠΕΡΙΛΑΜΒΑΝΟΝΤΑΙ ο φόρος (Checkout > Sales tax settings), όπως στο sandbox.
+  ΣΥΜΠΕΡΙΛΑΜΒΑΝΟΝΤΑΙ ο φόρος (Checkout > Sales tax settings), όπως στο live Paddle.
   Δεν αναφέρεται επωνυμία/ΑΦΜ/έδρα ακόμα: μπαίνουν όταν ολοκληρωθεί η έναρξη στη ΔΟΥ.
 -->
 <!DOCTYPE html>
@@ -49,6 +49,11 @@
   .hero-note{color:var(--text-soft);font-size:.88rem;max-width:640px;margin:.4em 0 2.6em;}
   .plan-note{margin:auto 0 0;padding:11px 0;text-align:center;font-size:.9rem;color:var(--text-soft);border-top:1px solid var(--border);}
   .pricing-note{color:var(--text-soft);font-size:.92rem;margin:-1em 0 2.4em;}
+  .billing-toggle{display:flex;justify-content:center;gap:2px;width:max-content;margin:0 auto 20px;padding:3px;background:var(--surface-2);border:1px solid var(--border);border-radius:7px;}
+  .billing-toggle button{border:0;border-radius:5px;padding:8px 16px;background:transparent;color:var(--text-soft);font:inherit;font-size:.9rem;font-weight:700;cursor:pointer;}
+  .billing-toggle button[aria-pressed="true"]{background:var(--accent);color:var(--bg);}
+  .annual-savings{min-height:1.2em;margin:0;color:var(--accent);font-size:.8rem;font-weight:700;}
+  .plan .checkout-btn{width:100%;margin-top:auto;cursor:pointer;}
   .table-wrap{overflow-x:auto;margin:0 0 2.4em;}
   .faq h3{margin:1.4em 0 .3em;font-size:1.02rem;}
   .faq p{margin:0;color:var(--text-soft);}
@@ -76,7 +81,12 @@
 <p class="hero-note">Δεν χρειάζεται κάρτα. Στην επόμενη οθόνη διαλέγεις δοκιμαστικό χώρο χωρίς λογαριασμό (τα δεδομένα του διαγράφονται μετά από 7 ημέρες) ή δωρεάν λογαριασμό.</p>
 
 <h2>Τιμολόγηση</h2>
-<p class="lead">Ξεκίνα δωρεάν και αναβάθμισε όταν το χρειαστείς. Όλες οι τιμές είναι μηνιαίες και <strong>περιλαμβάνουν ΦΠΑ</strong>.</p>
+<p class="lead">Ξεκίνα δωρεάν και αναβάθμισε όταν το χρειαστείς. Όλες οι τιμές <strong>περιλαμβάνουν ΦΠΑ</strong>.</p>
+
+<div class="billing-toggle" role="group" aria-label="Περίοδος χρέωσης">
+  <button type="button" data-billing="monthly" aria-pressed="true">Μηνιαία</button>
+  <button type="button" data-billing="annual" aria-pressed="false">Ετήσια</button>
+</div>
 
 <div class="plans">
   <div class="plan">
@@ -92,23 +102,25 @@
   <div class="plan featured">
     <span class="badge">Προτεινόμενο</span>
     <h2>Basic</h2>
-    <div class="price">29 €<small> / μήνα</small></div>
+    <div class="price"><span data-monthly="29" data-annual="290">29</span> €<small data-period-label> / μήνα</small></div>
     <p class="vat">με ΦΠΑ</p>
+    <p class="annual-savings" data-savings> </p>
     <ul>
       <li><strong>500</strong> μηνύματα / μήνα</li>
       <li><strong>20</strong> έγγραφα</li>
     </ul>
-    <p class="plan-note">Αναβάθμιση μέσα στην εφαρμογή</p>
+    <button type="button" class="cta checkout-btn" data-plan="basic" data-monthly-price="pri_01m2ynemr2t4dnes8rz775p090" data-annual-price="pri_01m2ynemzv76wbb37zvr1q9fnb">Αναβάθμιση</button>
   </div>
   <div class="plan">
     <h2>Pro</h2>
-    <div class="price">59 €<small> / μήνα</small></div>
+    <div class="price"><span data-monthly="59" data-annual="590">59</span> €<small data-period-label> / μήνα</small></div>
     <p class="vat">με ΦΠΑ</p>
+    <p class="annual-savings" data-savings> </p>
     <ul>
       <li><strong>2.500</strong> μηνύματα / μήνα</li>
       <li><strong>Απεριόριστα</strong> έγγραφα</li>
     </ul>
-    <p class="plan-note">Αναβάθμιση μέσα στην εφαρμογή</p>
+    <button type="button" class="cta checkout-btn" data-plan="pro" data-monthly-price="pri_01m2ynen6sh5949wn1pnsr1s51" data-annual-price="pri_01m2ynend8w7383t0nqzgd0f1z">Αναβάθμιση</button>
   </div>
 </div>
 
@@ -163,7 +175,12 @@
 <p class="hero-note">No card needed. On the next screen you choose a trial space without an account (its data is deleted after 7 days) or a free account.</p>
 
 <h2>Pricing</h2>
-<p class="lead">Start for free and upgrade when you need to. All prices are monthly and <strong>include VAT</strong>.</p>
+<p class="lead">Start for free and upgrade when you need to. All prices <strong>include VAT</strong>.</p>
+
+<div class="billing-toggle" role="group" aria-label="Billing period">
+  <button type="button" data-billing="monthly" aria-pressed="true">Monthly</button>
+  <button type="button" data-billing="annual" aria-pressed="false">Annual</button>
+</div>
 
 <div class="plans">
   <div class="plan">
@@ -179,23 +196,25 @@
   <div class="plan featured">
     <span class="badge">Recommended</span>
     <h2>Basic</h2>
-    <div class="price">€29<small> / month</small></div>
+    <div class="price">€<span data-monthly="29" data-annual="290">29</span><small data-period-label> / month</small></div>
     <p class="vat">VAT included</p>
+    <p class="annual-savings" data-savings> </p>
     <ul>
       <li><strong>500</strong> messages / month</li>
       <li><strong>20</strong> documents</li>
     </ul>
-    <p class="plan-note">Upgrade inside the app</p>
+    <button type="button" class="cta checkout-btn" data-plan="basic" data-monthly-price="pri_01m2ynemr2t4dnes8rz775p090" data-annual-price="pri_01m2ynemzv76wbb37zvr1q9fnb">Upgrade</button>
   </div>
   <div class="plan">
     <h2>Pro</h2>
-    <div class="price">€59<small> / month</small></div>
+    <div class="price">€<span data-monthly="59" data-annual="590">59</span><small data-period-label> / month</small></div>
     <p class="vat">VAT included</p>
+    <p class="annual-savings" data-savings> </p>
     <ul>
       <li><strong>2,500</strong> messages / month</li>
       <li><strong>Unlimited</strong> documents</li>
     </ul>
-    <p class="plan-note">Upgrade inside the app</p>
+    <button type="button" class="cta checkout-btn" data-plan="pro" data-monthly-price="pri_01m2ynen6sh5949wn1pnsr1s51" data-annual-price="pri_01m2ynend8w7383t0nqzgd0f1z">Upgrade</button>
   </div>
 </div>
 
@@ -250,6 +269,7 @@
   window.__SKIP_WORKSPACE_REDIRECT__ = true;
 </script>
 <script src="shared.js"></script>
+<script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
 <script>
   document.querySelectorAll('.lang-block').forEach(function(el){ el.style.display = 'none'; });
   var activeLang = getLang();
@@ -258,6 +278,56 @@
   document.documentElement.lang = activeLang;
   document.title = activeLang === 'el' ? 'Τιμολόγηση — Idmon' : 'Pricing — Idmon';
   initLangToggle('langToggle');
+
+  var billingPeriod = 'monthly';
+  var paddleReady = false;
+  var paddleToken = 'live_d06ea77dbb7841c5652998a2c8e';
+  var billingText = {
+    el: { monthly: ' / μήνα', annual: ' / έτος', savings: '2 μήνες δωρεάν', checkout: 'Αναβάθμιση' },
+    en: { monthly: ' / month', annual: ' / year', savings: '2 months free', checkout: 'Upgrade' },
+  };
+
+  function updateBillingPeriod(period) {
+    billingPeriod = period === 'annual' ? 'annual' : 'monthly';
+    document.querySelectorAll('[data-billing]').forEach(function(button) {
+      button.setAttribute('aria-pressed', button.getAttribute('data-billing') === billingPeriod ? 'true' : 'false');
+    });
+    var text = billingText[activeLang] || billingText.en;
+    document.querySelectorAll('[data-monthly]').forEach(function(price) {
+      price.textContent = price.getAttribute('data-' + billingPeriod);
+    });
+    document.querySelectorAll('[data-period-label]').forEach(function(label) {
+      label.textContent = text[billingPeriod];
+    });
+    document.querySelectorAll('[data-savings]').forEach(function(savings) {
+      var price = savings.previousElementSibling && savings.previousElementSibling.previousElementSibling;
+      var monthly = price && Number(price.querySelector('[data-monthly]')?.getAttribute('data-monthly'));
+      var annual = price && Number(price.querySelector('[data-monthly]')?.getAttribute('data-annual'));
+      var monthsFree = monthly && annual ? Math.round((monthly * 12 - annual) / monthly) : 0;
+      savings.textContent = billingPeriod === 'annual' && monthsFree > 0 ? text.savings : '';
+    });
+  }
+
+  document.querySelectorAll('[data-billing]').forEach(function(button) {
+    button.addEventListener('click', function() { updateBillingPeriod(button.getAttribute('data-billing')); });
+  });
+
+  document.querySelectorAll('.checkout-btn').forEach(function(button) {
+    button.addEventListener('click', function() {
+      var priceId = button.getAttribute('data-' + billingPeriod + '-price');
+      if (!priceId || !window.Paddle) return;
+      if (!paddleReady) {
+        window.Paddle.Initialize({ token: paddleToken });
+        paddleReady = true;
+      }
+      window.Paddle.Checkout.open({
+        items: [{ priceId: priceId, quantity: 1 }],
+        settings: { displayMode: 'overlay', locale: activeLang === 'el' ? 'el' : 'en' },
+      });
+    });
+  });
+
+  updateBillingPeriod('monthly');
 </script>
 
 </body>

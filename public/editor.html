@@ -2230,7 +2230,7 @@
     paddleReady = new Promise((resolve, reject) => {
       const init = () => {
         try {
-          if (offer.environment === "sandbox") window.Paddle.Environment.set("sandbox");
+          if (offer.environment && offer.environment !== "production") window.Paddle.Environment.set(offer.environment);
           window.Paddle.Initialize({ token: offer.clientToken, eventCallback: onPaddleEvent });
           resolve(window.Paddle);
         } catch (err) {
