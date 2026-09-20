@@ -1,0 +1,237 @@
+<!--
+  ΣΗΜΕΙΩΣΗ ΓΙΑ ΤΟΝ GIANNIS (δεν εμφανίζεται στους επισκέπτες):
+  Σελίδα τιμολόγησης του Idmon. Δίγλωσση (EL/EN), ίδιος μηχανισμός με το privacy.html:
+  shared.css (design tokens, .lang-toggle, .md-content) + shared.js (getLang, initLangToggle).
+  Οι αριθμοί (100/500/2.500 μηνύματα, 5/20/απεριόριστα έγγραφα) είναι τα ΠΡΑΓΜΑΤΙΚΑ όρια
+  του κώδικα (PLAN_LIMITS), οι τιμές (29 και 59 ευρώ) οι ίδιες με το Paddle. Αν αλλάξει
+  οποιοδήποτε από τα δύο, αλλάζει ΚΑΙ εδώ.
+  Οι τιμές γράφονται "με ΦΠΑ" -- ισχύει μόνο αν στο live Paddle οι τιμές οριστούν ως
+  ΣΥΜΠΕΡΙΛΑΜΒΑΝΟΝΤΑΙ ο φόρος (Checkout > Sales tax settings), όπως στο sandbox.
+  Δεν αναφέρεται επωνυμία/ΑΦΜ/έδρα ακόμα: μπαίνουν όταν ολοκληρωθεί η έναρξη στη ΔΟΥ.
+-->
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<title>Τιμολόγηση — Idmon</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Idmon: chat assistant που απαντά από τα δικά σου έγγραφα. Τιμολόγηση: Free, Basic 29 €/μήνα, Pro 59 €/μήνα, με ΦΠΑ.">
+<link rel="stylesheet" href="shared.css">
+<style>
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 24px;border-bottom:1px solid var(--border);}
+  .topbar a.brand{color:var(--text);font-weight:700;text-decoration:none;}
+  .page-wrap{max-width:980px;margin:0 auto;padding:40px 20px 80px;}
+  .lang-block{display:none;}
+  .lead{color:var(--text-soft);font-size:1.05rem;margin:0 0 1.6em;max-width:640px;}
+  .plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin:0 0 2.4em;}
+  .plan{border:1px solid var(--border);border-radius:10px;padding:22px 20px;display:flex;flex-direction:column;gap:6px;position:relative;}
+  .plan.featured{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
+  .plan h2{margin:0;font-size:1.15rem;}
+  .badge{position:absolute;top:-11px;right:16px;background:var(--accent);color:var(--on-accent,#fff);font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:999px;}
+  .price{font-size:2rem;font-weight:700;margin:6px 0 0;}
+  .price small{font-size:.85rem;font-weight:400;color:var(--text-soft);}
+  .vat{font-size:.8rem;color:var(--text-soft);margin:0 0 10px;}
+  .plan ul{list-style:none;padding:0;margin:0 0 16px;font-size:.95rem;}
+  .plan li{padding:4px 0;}
+  .plan li strong{font-weight:700;}
+  .cta{display:inline-block;text-align:center;margin-top:auto;padding:10px 14px;border-radius:6px;text-decoration:none;font-weight:700;border:1px solid var(--accent);color:var(--accent);}
+  .plan.featured .cta{background:var(--accent);color:var(--on-accent,#fff);}
+  .table-wrap{overflow-x:auto;margin:0 0 2.4em;}
+  .faq h3{margin:1.4em 0 .3em;font-size:1.02rem;}
+  .faq p{margin:0;color:var(--text-soft);}
+  .footer-links{margin-top:3em;padding-top:1.2em;border-top:1px solid var(--border);font-size:.9rem;color:var(--text-soft);}
+  .footer-links a{color:var(--text-soft);}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <a class="brand" href="/pricing.html">idmon.app</a>
+  <div id="langToggle" class="lang-toggle">
+    <button class="lang-btn" data-lang="en">EN</button>
+    <button class="lang-btn" data-lang="el">EL</button>
+  </div>
+</div>
+
+<div class="page-wrap">
+
+<div id="content-el" class="lang-block md-content">
+
+<h1>Τιμολόγηση</h1>
+<p class="lead">Ένας βοηθός που απαντά στους επισκέπτες σου μόνο από τα δικά σου έγγραφα. Ξεκίνα δωρεάν και αναβάθμισε όταν το χρειαστείς. Όλες οι τιμές είναι μηνιαίες και <strong>περιλαμβάνουν ΦΠΑ</strong>.</p>
+
+<div class="plans">
+  <div class="plan">
+    <h2>Free</h2>
+    <div class="price">0 €<small> / μήνα</small></div>
+    <p class="vat">Χωρίς κάρτα</p>
+    <ul>
+      <li><strong>100</strong> μηνύματα / μήνα</li>
+      <li><strong>5</strong> έγγραφα</li>
+    </ul>
+    <a class="cta" href="https://app.idmon.app/landing">Ξεκίνα δωρεάν</a>
+  </div>
+  <div class="plan featured">
+    <span class="badge">Προτεινόμενο</span>
+    <h2>Basic</h2>
+    <div class="price">29 €<small> / μήνα</small></div>
+    <p class="vat">με ΦΠΑ</p>
+    <ul>
+      <li><strong>500</strong> μηνύματα / μήνα</li>
+      <li><strong>20</strong> έγγραφα</li>
+    </ul>
+    <a class="cta" href="https://app.idmon.app/landing">Ξεκίνα με Basic</a>
+  </div>
+  <div class="plan">
+    <h2>Pro</h2>
+    <div class="price">59 €<small> / μήνα</small></div>
+    <p class="vat">με ΦΠΑ</p>
+    <ul>
+      <li><strong>2.500</strong> μηνύματα / μήνα</li>
+      <li><strong>Απεριόριστα</strong> έγγραφα</li>
+    </ul>
+    <a class="cta" href="https://app.idmon.app/landing">Ξεκίνα με Pro</a>
+  </div>
+</div>
+
+<h2>Τι περιλαμβάνεται σε όλα τα πλάνα</h2>
+<div class="table-wrap">
+<table>
+<tr><th></th><th>Free</th><th>Basic</th><th>Pro</th></tr>
+<tr><td>Τιμή (με ΦΠΑ)</td><td>0 €</td><td>29 € / μήνα</td><td>59 € / μήνα</td></tr>
+<tr><td>Μηνύματα ανά μήνα</td><td>100</td><td>500</td><td>2.500</td></tr>
+<tr><td>Έγγραφα</td><td>5</td><td>20</td><td>Απεριόριστα</td></tr>
+<tr><td>Chat widget για το site σου</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>Απαντήσεις βασισμένες στα δικά σου έγγραφα</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>Στατιστικά χρήσης και ερωτήσεις χωρίς απάντηση</td><td>✓</td><td>✓</td><td>✓</td></tr>
+</table>
+</div>
+
+<div class="faq">
+<h2>Συχνές ερωτήσεις</h2>
+
+<h3>Τι μετράει ως «μήνυμα»;</h3>
+<p>Κάθε ερώτηση επισκέπτη που απαντάται από το Idmon μετράει ως ένα μήνυμα. Το όριο ισχύει ανά χώρο εργασίας και ανά μήνα, και μπορείς να δεις πόσα έχεις χρησιμοποιήσει μέσα στην εφαρμογή.</p>
+
+<h3>Τι γίνεται αν φτάσω το όριο;</h3>
+<p>Οι επισκέπτες σου βλέπουν ένα γενικό μήνυμα προσωρινής μη διαθεσιμότητας και εσύ βλέπεις ειδοποίηση μέσα στην εφαρμογή. Το widget ξαναδουλεύει όταν ανανεωθεί το όριο τον επόμενο μήνα ή αν αναβαθμίσεις πλάνο.</p>
+
+<h3>Μπορώ να αλλάξω ή να ακυρώσω οποτεδήποτε;</h3>
+<p>Ναι. Από το Basic στο Pro αλλάζεις μέσα στην εφαρμογή και πληρώνεις μόνο τη διαφορά για το υπόλοιπο της περιόδου. Την ακύρωση και τα τιμολόγιά σου τα βρίσκεις στη «Διαχείριση συνδρομής». Δες και την <a href="/refunds.html">Πολιτική Ακύρωσης &amp; Επιστροφών</a>.</p>
+
+<h3>Πώς γίνονται οι πληρωμές και ο ΦΠΑ;</h3>
+<p>Οι πληρωμές γίνονται μέσω της Paddle, που λειτουργεί ως Merchant of Record: εισπράττει την πληρωμή, υπολογίζει και αποδίδει τον ΦΠΑ και εκδίδει την απόδειξη. Οι τιμές που βλέπεις εδώ είναι οι τελικές τιμές με ΦΠΑ.</p>
+
+<h3>Πού πηγαίνουν τα έγγραφά μου;</h3>
+<p>Τα έγγραφα και οι ερωτήσεις χρησιμοποιούνται μόνο για να παραχθούν οι απαντήσεις. Δες την <a href="/privacy.html">Πολιτική Απορρήτου</a> για τους παρόχους που εμπλέκονται και για τα δικαιώματά σου.</p>
+</div>
+
+<div class="footer-links">
+  <a href="/terms.html">Όροι Χρήσης</a> ·
+  <a href="/privacy.html">Πολιτική Απορρήτου</a> ·
+  <a href="/refunds.html">Ακύρωση &amp; Επιστροφές</a> ·
+  <a href="mailto:info@idmon.app">info@idmon.app</a>
+</div>
+
+</div>
+
+<div id="content-en" class="lang-block md-content">
+
+<h1>Pricing</h1>
+<p class="lead">An assistant that answers your visitors only from your own documents. Start for free and upgrade when you need to. All prices are monthly and <strong>include VAT</strong>.</p>
+
+<div class="plans">
+  <div class="plan">
+    <h2>Free</h2>
+    <div class="price">€0<small> / month</small></div>
+    <p class="vat">No card needed</p>
+    <ul>
+      <li><strong>100</strong> messages / month</li>
+      <li><strong>5</strong> documents</li>
+    </ul>
+    <a class="cta" href="https://app.idmon.app/landing">Start for free</a>
+  </div>
+  <div class="plan featured">
+    <span class="badge">Recommended</span>
+    <h2>Basic</h2>
+    <div class="price">€29<small> / month</small></div>
+    <p class="vat">VAT included</p>
+    <ul>
+      <li><strong>500</strong> messages / month</li>
+      <li><strong>20</strong> documents</li>
+    </ul>
+    <a class="cta" href="https://app.idmon.app/landing">Start with Basic</a>
+  </div>
+  <div class="plan">
+    <h2>Pro</h2>
+    <div class="price">€59<small> / month</small></div>
+    <p class="vat">VAT included</p>
+    <ul>
+      <li><strong>2,500</strong> messages / month</li>
+      <li><strong>Unlimited</strong> documents</li>
+    </ul>
+    <a class="cta" href="https://app.idmon.app/landing">Start with Pro</a>
+  </div>
+</div>
+
+<h2>What every plan includes</h2>
+<div class="table-wrap">
+<table>
+<tr><th></th><th>Free</th><th>Basic</th><th>Pro</th></tr>
+<tr><td>Price (VAT included)</td><td>€0</td><td>€29 / month</td><td>€59 / month</td></tr>
+<tr><td>Messages per month</td><td>100</td><td>500</td><td>2,500</td></tr>
+<tr><td>Documents</td><td>5</td><td>20</td><td>Unlimited</td></tr>
+<tr><td>Chat widget for your website</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>Answers based on your own documents</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>Usage statistics and unanswered questions</td><td>✓</td><td>✓</td><td>✓</td></tr>
+</table>
+</div>
+
+<div class="faq">
+<h2>Frequently asked questions</h2>
+
+<h3>What counts as a "message"?</h3>
+<p>Every visitor question that Idmon answers counts as one message. The limit applies per workspace and per month, and you can see how much you have used inside the app.</p>
+
+<h3>What happens if I reach the limit?</h3>
+<p>Your visitors see a generic temporary-unavailability message and you see a notice inside the app. The widget works again when the limit renews next month, or as soon as you upgrade.</p>
+
+<h3>Can I change or cancel at any time?</h3>
+<p>Yes. You switch from Basic to Pro inside the app and pay only the difference for the rest of the billing period. You will find cancellation and your invoices under "Manage subscription". See also our <a href="/refunds.html">Cancellation &amp; Refund Policy</a>.</p>
+
+<h3>How do payments and VAT work?</h3>
+<p>Payments are processed by Paddle, which acts as Merchant of Record: it collects the payment, calculates and remits VAT, and issues your receipt. The prices you see here are the final prices, VAT included.</p>
+
+<h3>Where do my documents go?</h3>
+<p>Your documents and questions are used only to generate answers. See the <a href="/privacy.html">Privacy Policy</a> for the providers involved and for your rights.</p>
+</div>
+
+<div class="footer-links">
+  <a href="/terms.html">Terms of Service</a> ·
+  <a href="/privacy.html">Privacy Policy</a> ·
+  <a href="/refunds.html">Cancellation &amp; Refunds</a> ·
+  <a href="mailto:info@idmon.app">info@idmon.app</a>
+</div>
+
+</div>
+
+</div>
+
+<script>
+  // Καθαρά δημόσιο, στατικό περιεχόμενο: δεν χρειάζεται ποτέ workspace, οπότε το shared.js
+  // δεν πρέπει να ανακατευθύνει τον επισκέπτη στη landing page (ίδιο με το privacy.html).
+  window.__SKIP_WORKSPACE_REDIRECT__ = true;
+</script>
+<script src="shared.js"></script>
+<script>
+  document.querySelectorAll('.lang-block').forEach(function(el){ el.style.display = 'none'; });
+  var activeLang = getLang();
+  var activeBlock = document.getElementById('content-' + activeLang);
+  if (activeBlock) activeBlock.style.display = 'block';
+  document.documentElement.lang = activeLang;
+  document.title = activeLang === 'el' ? 'Τιμολόγηση — Idmon' : 'Pricing — Idmon';
+  initLangToggle('langToggle');
+</script>
+
+</body>
+</html>

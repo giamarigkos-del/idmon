@@ -1,0 +1,29 @@
+# Δεύτερο, ΜΙΚΡΟ Worker που σερβίρει ΜΟΝΟ τη δημόσια "βιτρίνα" στο idmon.app (χωρίς app.):
+# σελίδα τιμολόγησης, Όροι, Απόρρητο, Ακύρωση/Επιστροφές. Το ίδιο το εργαλείο μένει στο
+# app.idmon.app (wrangler.toml), εντελώς ξεχωριστά.
+#
+# Γιατί ξεχωριστό Worker και όχι το ίδιο: το Worker της εφαρμογής σερβίρει ΟΛΑ τα αρχεία του
+# public/ πριν τρέξει ο κώδικάς του, οπότε στο idmon.app θα εμφανίζονταν και το editor.html,
+# το widget κλπ. Εδώ το site/ έχει ΜΟΝΟ τις σελίδες που θέλουμε να βλέπει ο κόσμος (και το
+# Paddle κατά την έγκριση domain). Δεν έχει κώδικα, άρα δεν έχει API, βάση ή secrets.
+#
+# Το site/ ΔΕΝ γράφεται με το χέρι: φτιάχνεται από το public/ με
+#   node scripts/sync-site.mjs
+# ώστε να υπάρχει ΜΙΑ πηγή αλήθειας για τα κείμενα. Το tests/site-links.mjs ελέγχει ότι το
+# site/ είναι πάντα συγχρονισμένο και ότι κανένα link δεν είναι σπασμένο.
+#
+# Deploy:  node scripts/sync-site.mjs   και μετά   wrangler deploy --config wrangler.site.toml
+name = "idmon-site"
+compatibility_date = "2026-08-01"
+workers_dev = false
+
+# Προϋπόθεση ΠΡΙΝ το πρώτο deploy: στο Cloudflare DNS του idmon.app να ΜΗΝ υπάρχει ο
+# προσωρινός A record (192.0.2.1) ούτε το redirect rule "apex to app redirect", αλλιώς το
+# custom domain δεν μπορεί να δημιουργηθεί (το wrangler φτιάχνει μόνο του DNS record και SSL).
+routes = [
+  { pattern = "idmon.app", custom_domain = true }
+]
+
+[assets]
+directory = "./site"
+not_found_handling = "none"
