@@ -30,7 +30,10 @@
   .log{border-top:1px solid #e2ded2;margin-top:6px;}
   .turn{padding:8px 0;border-bottom:1px solid #eee9dd;}
   .turn .q{font-weight:600;}
-  .turn .a{color:#444;margin-top:3px;line-height:1.4;word-break:break-word;}
+  .turn .a{color:#444;margin-top:3px;line-height:1.4;word-break:break-word;white-space:pre-wrap;}
+  .row.off{opacity:.45;}
+  .note{color:#6b6b6b;font-size:12px;line-height:1.4;margin:0 0 8px;}
+  pre.cfg{background:#f6f5f1;border:1px solid #e2ded2;border-radius:6px;padding:8px;white-space:pre-wrap;font-size:11.5px;margin:8px 0;}
   .turn .why{color:#b3261e;margin-top:3px;font-size:12px;}
   .turn.ok .mark{color:#1a7f37;} .turn.bad .mark{color:#b3261e;}
   .summary{font-weight:700;padding:8px 0;}
@@ -60,14 +63,17 @@
   <div class="row"><label for="embedId">Embed ID</label><input type="text" id="embedId" placeholder="emb-xxxxxxxxxxxx" autocomplete="off"></div>
   <div class="row"><label for="server">Server</label><input type="text" id="server" autocomplete="off"></div>
 
-  <h2>Εμφάνιση (data-attributes του snippet)</h2>
-  <div class="row"><label for="color">Χρώμα</label><select id="color"></select></div>
-  <div class="row"><label for="botName">Όνομα</label><input type="text" id="botName" placeholder="(κενό = Assistant)" autocomplete="off"></div>
+  <h2>Εμφάνιση</h2>
+  <div class="check"><input type="checkbox" id="serverConfig" checked><label for="serverConfig">Ρυθμίσεις από τον server (όπως ένας πελάτης)</label></div>
+  <p class="note" id="serverNote"></p>
+  <div class="row" id="rowColor"><label for="color">Χρώμα</label><select id="color"></select></div>
+  <div class="row" id="rowName"><label for="botName">Όνομα</label><input type="text" id="botName" placeholder="(κενό = Assistant)" autocomplete="off"></div>
   <div class="row"><label for="lang">Γλώσσα</label><select id="lang"><option value="el">Ελληνικά</option><option value="en">English</option></select></div>
   <div class="row"><label for="position">Θέση</label><select id="position"><option value="bottom-right">Κάτω δεξιά</option><option value="bottom-left">Κάτω αριστερά</option></select></div>
-  <div class="check"><input type="checkbox" id="contact"><label for="contact">Στοιχεία επικοινωνίας (link + τηλέφωνο)</label></div>
+  <div class="check" id="rowContact"><input type="checkbox" id="contact"><label for="contact">Στοιχεία επικοινωνίας (link + τηλέφωνο)</label></div>
   <div class="check"><input type="checkbox" id="fresh" checked><label for="fresh">Φρέσκο widget.js (παρακάμπτει το cache)</label></div>
-  <div class="row" style="margin-top:10px"><button class="btn" id="applyBtn" type="button">Φόρτωση widget</button></div>
+  <div class="row" style="margin-top:10px"><button class="btn" id="applyBtn" type="button">Φόρτωση widget</button>
+  <button class="btn ghost" id="configBtn" type="button">Τι επιστρέφει ο server;</button></div>
   <div id="status"></div>
 
   <h2>Snippet που φορτώθηκε</h2>
@@ -122,16 +128,24 @@ function normalizeServer(value) {
   return null;
 }
 
+// Δύο τρόποι, όπως στην πραγματικότητα:
+//  - serverConfig (προεπιλογή): ΝΕΟ στυλ snippet, μόνο embed ID (+ γλώσσα/θέση). Χρώμα, όνομα,
+//    λογότυπο, επικοινωνία και "Powered by Idmon" έρχονται από τον server.
+//  - serverConfig === false: προεπισκόπηση. data-config="off" (καμία κλήση στον server) και τα
+//    χαρακτηριστικά εμφάνισης από τα attributes, ώστε να δοκιμάζεις χρώματα χωρίς να πειράξεις τον λογαριασμό.
 function buildAttrs(cfg) {
   var a = { "data-embed-id": String(cfg.embedId || "").trim() };
-  if (cfg.color) a["data-accent-color"] = cfg.color;
-  if (cfg.botName && cfg.botName.trim()) a["data-bot-name"] = cfg.botName.trim();
   if (cfg.lang) a["data-lang"] = cfg.lang;
   if (cfg.position === "bottom-left") a["data-position"] = "bottom-left";
-  if (cfg.contact) {
-    a["data-contact-label"] = "Επικοινωνία";
-    a["data-contact-url"] = "https://example.com/contact";
-    a["data-contact-phone"] = "210 123 4567";
+  if (cfg.serverConfig === false) {
+    a["data-config"] = "off";
+    if (cfg.color) a["data-accent-color"] = cfg.color;
+    if (cfg.botName && cfg.botName.trim()) a["data-bot-name"] = cfg.botName.trim();
+    if (cfg.contact) {
+      a["data-contact-label"] = "Επικοινωνία";
+      a["data-contact-url"] = "https://example.com/contact";
+      a["data-contact-phone"] = "210 123 4567";
+    }
   }
   return a;
 }
@@ -160,6 +174,34 @@ function checkTurn(answer, turn, state) {
   return { ok: !missing.length && !forbidden.length && !promptMissing, missing: missing, forbidden: forbidden, promptMissing: promptMissing };
 }
 
+// Περιγραφή της απάντησης του /embed/{id}/config σε γραμμές κειμένου.
+function summarizeConfig(status, body) {
+  if (status === 403) return ["403: το domain αυτής της σελίδας ΔΕΝ είναι στη λίστα επιτρεπόμενων του λογαριασμού (πρόσθεσέ το στο πάνελ ενσωμάτωσης του editor)."];
+  if (status === 404) return ["404: άγνωστο Embed ID."];
+  if (status !== 200 || !body || typeof body !== "object") return [String(status) + ": απροσδόκητη απάντηση."];
+  var lines = ["200 OK"];
+  ["accentColor", "botName", "logoUrl", "contactLabel", "contactUrl", "contactPhone", "showBranding"].forEach(function (k) {
+    lines.push(k + ": " + (body[k] === null || body[k] === undefined ? "(κενό)" : String(body[k])));
+  });
+  lines.push(body.showBranding === false
+    ? "=> Το \"Powered by Idmon\" ΔΕΝ θα φαίνεται (πλάνο Pro)."
+    : "=> Το \"Powered by Idmon\" ΘΑ φαίνεται (Free ή Basic).");
+  return lines;
+}
+
+// Κρίνει αν το badge στο widget συμφωνεί με ό,τι λέει ο server.
+// visible: αν φαίνεται το badge. link: { text, href } του συνδέσμου του.
+function judgeBadge(visible, configBody, link) {
+  var expected = !(configBody && configBody.showBranding === false);
+  if (visible !== expected) {
+    return { ok: false, why: "ο server λέει showBranding=" + (expected ? "true" : "false") + " αλλά το badge " + (visible ? "φαίνεται" : "ΔΕΝ φαίνεται") };
+  }
+  if (visible && !(link && link.text === "Powered by Idmon" && link.href === "https://idmon.app/")) {
+    return { ok: false, why: "το badge φαίνεται αλλά με λάθος κείμενο/σύνδεσμο" };
+  }
+  return { ok: true, why: expected ? "το badge φαίνεται όπως ζητά ο server (Free/Basic)" : "το badge κρύβεται όπως ζητά ο server (Pro)" };
+}
+
 // Σενάρια πάνω στα φανταστικά έγγραφα HomeTech (tests/fixtures/hometech).
 var SCENARIOS = [
   { id: "shipping", title: "Ιστορικό: μεταφορικά ηπειρωτική, μετά νησιά",
@@ -182,9 +224,10 @@ var SCENARIOS = [
       { q: "Πόσες ημέρες έχω για να επιστρέψω ένα προϊόν;", expect: ["14"] },
       { q: "Ποιος πληρώνει τα έξοδα;", expect: ["4[,.]0|4 ?€|4 ευρώ"] },
       { q: "Τι ώρες είναι ανοιχτό το κατάστημα στη Θεσσαλονίκη;", expect: ["9:30", "20:30"] } ] },
-  { id: "fallback", title: "Άγνωστη ερώτηση: μήνυμα επικοινωνίας", settings: { contact: true },
+  { id: "fallback", title: "Άγνωστη ερώτηση: μήνυμα επικοινωνίας", settings: { contact: true, serverConfig: false },
     turns: [
       { q: "Πουλάτε ηλιακούς θερμοσίφωνες;", expectFallbackPrompt: true } ] },
+  { id: "badge", title: "Powered by Idmon: το widget ακολουθεί τον server (Free/Basic ναι, Pro όχι)", kind: "badge" },
 ];
 // --- widget-test-page:helpers END ---
 
@@ -197,6 +240,7 @@ function readConfig() {
   return {
     embedId: $("embedId").value, server: $("server").value, color: $("color").value, botName: $("botName").value,
     lang: $("lang").value, position: $("position").value, contact: $("contact").checked, fresh: $("fresh").checked,
+    serverConfig: $("serverConfig").checked,
   };
 }
 
@@ -216,6 +260,18 @@ function loadConfig() {
   $("position").value = saved.position || "bottom-right";
   $("contact").checked = !!saved.contact;
   $("fresh").checked = saved.fresh !== false;
+  $("serverConfig").checked = saved.serverConfig !== false;
+  syncControls();
+}
+
+// Στη λειτουργία "ρυθμίσεις από τον server" τα χρώμα/όνομα/επικοινωνία δεν έχουν ισχύ.
+function syncControls() {
+  var server = $("serverConfig").checked;
+  ["rowColor", "rowName", "rowContact"].forEach(function (id) { $(id).classList.toggle("off", server); });
+  ["color", "botName", "contact"].forEach(function (id) { $(id).disabled = server; });
+  $("serverNote").textContent = server
+    ? "Χρώμα, όνομα, λογότυπο, επικοινωνία και «Powered by Idmon» έρχονται από τον server, όπως σε πελάτη. Άλλαξέ τα στον editor (ρυθμίσεις) ή το πλάνο του λογαριασμού."
+    : "Προεπισκόπηση: το widget δεν ρωτά τον server (data-config=off) και χρησιμοποιεί τις επιλογές παρακάτω. Το «Powered by Idmon» φαίνεται πάντα.";
 }
 
 function setStatus(text, isError) {
@@ -254,6 +310,13 @@ function widgetRoot() {
   return host && host.shadowRoot ? host.shadowRoot : null;
 }
 
+// Το widget δείχνει τις αλλαγές γραμμής με <br>· το textContent τις χάνει και οι απαντήσεις φαίνονται "κολλημένες".
+function textWithBreaks(el) {
+  var clone = el.cloneNode(true);
+  clone.querySelectorAll("br").forEach(function (b) { b.replaceWith("\n"); });
+  return clone.textContent;
+}
+
 // Στέλνει μία ερώτηση μέσα από το πραγματικό UI του widget και περιμένει την απάντηση.
 async function askThroughWidget(question) {
   var root = widgetRoot();
@@ -268,7 +331,7 @@ async function askThroughWidget(question) {
     if (!input.disabled) break; // το widget ξαναενεργοποιεί το πεδίο όταν τελειώσει
   }
   var bots = root.querySelectorAll(".msg.bot");
-  var answer = bots.length > botsBefore ? bots[bots.length - 1].textContent : "";
+  var answer = bots.length > botsBefore ? textWithBreaks(bots[bots.length - 1]) : "";
   return { answer: answer.trim(), fallbackPromptShown: !!root.querySelector(".msg.fallback-contact") };
 }
 
@@ -281,7 +344,46 @@ function logLine(className, build) {
   return div;
 }
 
+async function waitFor(check, timeoutMs) {
+  var started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (check()) return true;
+    await sleep(100);
+  }
+  return false;
+}
+
+// Σενάριο badge: το "Powered by Idmon" στο widget πρέπει να συμφωνεί με ό,τι λέει ο server.
+async function runBadgeScenario(sc) {
+  var cfg = readConfig();
+  cfg.serverConfig = true;
+  logLine("scn-title", function (d) { d.textContent = sc.title; });
+  var fail = function (text) { logLine("turn bad", function (d) { d.textContent = "✗ " + text; }); return { passed: 0, failed: 1 }; };
+  if (!(await loadWidget(cfg))) return fail("το widget δεν φορτώθηκε.");
+  var root = widgetRoot();
+  if (!root) return fail("δεν βρέθηκε το widget στη σελίδα.");
+  await waitFor(function () { return !root.querySelector(".bubble").classList.contains("pending"); }, 6000);
+  await sleep(300);
+
+  var server = normalizeServer(cfg.server);
+  var res, body = null;
+  try {
+    res = await fetch(server + "/embed/" + encodeURIComponent(cfg.embedId.trim()) + "/config");
+    body = res.ok ? await res.json() : null;
+  } catch (e) { return fail("η σελίδα δεν μπόρεσε να διαβάσει τις ρυθμίσεις από τον server."); }
+  if (!res.ok) return fail(summarizeConfig(res.status, null)[0]);
+
+  var powered = root.querySelector(".powered");
+  var a = powered && powered.querySelector("a");
+  var verdict = judgeBadge(!!powered && !powered.hidden, body, a ? { text: a.textContent, href: a.href } : null);
+  logLine("turn " + (verdict.ok ? "ok" : "bad"), function (d) {
+    d.textContent = (verdict.ok ? "✓ " : "✗ ") + verdict.why;
+  });
+  return verdict.ok ? { passed: 1, failed: 0 } : { passed: 0, failed: 1 };
+}
+
 async function runScenario(sc) {
+  if (sc.kind === "badge") return runBadgeScenario(sc);
   var cfg = readConfig();
   Object.keys(sc.settings || {}).forEach(function (k) { cfg[k] = sc.settings[k]; });
   logLine("scn-title", function (d) { d.textContent = sc.title; });
@@ -347,6 +449,21 @@ function init() {
     wrap.appendChild(b); wrap.appendChild(span); $("scenarios").appendChild(wrap);
   });
   $("applyBtn").addEventListener("click", function () { saveConfig(); loadWidget(readConfig()); });
+  $("serverConfig").addEventListener("change", function () { syncControls(); saveConfig(); });
+  $("configBtn").addEventListener("click", async function () {
+    var cfg = readConfig();
+    var server = normalizeServer(cfg.server);
+    if (!server || !isValidEmbedId(cfg.embedId)) { setStatus("Βάλε έγκυρο Embed ID και server.", true); return; }
+    try {
+      var res = await fetch(server + "/embed/" + encodeURIComponent(cfg.embedId.trim()) + "/config");
+      var body = null;
+      if (res.ok) { try { body = await res.json(); } catch (e) { body = null; } }
+      logLine("scn-title", function (d) { d.textContent = "Ρυθμίσεις που επιστρέφει ο server"; });
+      logLine("cfg-block", function (d) {
+        var pre = document.createElement("pre"); pre.className = "cfg"; pre.textContent = summarizeConfig(res.status, body).join("\n"); d.appendChild(pre);
+      });
+    } catch (e) { setStatus("Δεν μπόρεσα να φτάσω τον server.", true); }
+  });
   $("runAllBtn").addEventListener("click", function () { saveConfig(); runScenarios(SCENARIOS); });
   $("clearLogBtn").addEventListener("click", function () { $("log").innerHTML = ""; });
   if (isValidEmbedId($("embedId").value)) loadWidget(readConfig());

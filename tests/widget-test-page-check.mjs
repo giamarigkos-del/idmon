@@ -37,7 +37,7 @@ if (s === -1 || e === -1 || e < s) {
 }
 const lib = new Function(
   pageHtml.slice(s, e) +
-    "\nreturn { isValidEmbedId, normalizeServer, buildAttrs, buildSnippet, checkTurn, SCENARIOS, COLOR_PRESETS, DEFAULT_SERVER };"
+    "\nreturn { isValidEmbedId, normalizeServer, buildAttrs, buildSnippet, checkTurn, summarizeConfig, judgeBadge, SCENARIOS, COLOR_PRESETS, DEFAULT_SERVER };"
 )();
 
 function testEmbedId() {
@@ -61,24 +61,28 @@ function testNormalizeServer() {
 }
 
 function testBuildAttrs() {
-  console.log("\n[data-attributes του snippet]");
+  console.log("\n[data-attributes του snippet -- λειτουργία server και λειτουργία προεπισκόπησης]");
   const min = lib.buildAttrs({ embedId: " emb-abcd1234 " });
-  assert(JSON.stringify(min) === JSON.stringify({ "data-embed-id": "emb-abcd1234" }), "μόνο embed ID όταν δεν ορίζεται τίποτα άλλο (κενά κόβονται)");
-  const full = lib.buildAttrs({ embedId: "emb-abcd1234", color: "#2F5BEA", botName: " Βοηθός ", lang: "en", position: "bottom-left", contact: true });
-  assert(full["data-accent-color"] === "#2F5BEA", "χρώμα");
-  assert(full["data-bot-name"] === "Βοηθός", "όνομα (κενά κόβονται)");
-  assert(full["data-lang"] === "en", "γλώσσα");
-  assert(full["data-position"] === "bottom-left", "θέση αριστερά");
-  assert(full["data-contact-label"] && full["data-contact-url"] && full["data-contact-phone"], "τα τρία data-contact-*");
+  assert(JSON.stringify(min) === JSON.stringify({ "data-embed-id": "emb-abcd1234" }), "προεπιλογή (server): μόνο embed ID, κενά κόβονται");
+  const server = lib.buildAttrs({ embedId: "emb-abcd1234", color: "#2F5BEA", botName: "Βοηθός", contact: true, lang: "en", position: "bottom-left" });
+  assert(JSON.stringify(Object.keys(server).sort()) === JSON.stringify(["data-embed-id", "data-lang", "data-position"]), "λειτουργία server: ΜΟΝΟ embed ID, γλώσσα, θέση (το χρώμα/όνομα/επικοινωνία δεν μπαίνουν στο snippet)");
+  assert(!("data-config" in server), "λειτουργία server: ΚΑΝΕΝΑ data-config=off (το widget ρωτά τον server)");
+
+  const preview = lib.buildAttrs({ serverConfig: false, embedId: "emb-abcd1234", color: "#2F5BEA", botName: " Βοηθός ", lang: "en", position: "bottom-left", contact: true });
+  assert(preview["data-config"] === "off", "προεπισκόπηση: data-config=off");
+  assert(preview["data-accent-color"] === "#2F5BEA", "προεπισκόπηση: χρώμα");
+  assert(preview["data-bot-name"] === "Βοηθός", "προεπισκόπηση: όνομα (κενά κόβονται)");
+  assert(preview["data-lang"] === "en" && preview["data-position"] === "bottom-left", "γλώσσα και θέση");
+  assert(preview["data-contact-label"] && preview["data-contact-url"] && preview["data-contact-phone"], "προεπισκόπηση: τα τρία data-contact-*");
   assert(!("data-position" in lib.buildAttrs({ embedId: "emb-abcd1234", position: "bottom-right" })), "θέση δεξιά: δεν προστίθεται attribute (προεπιλογή)");
-  assert(lib.buildAttrs({ embedId: "emb-abcd1234", color: "red" })["data-accent-color"] === "red", "άκυρο χρώμα περνά ΩΣ ΕΧΕΙ, ώστε να δοκιμάζεται η άμυνα του widget");
+  assert(lib.buildAttrs({ serverConfig: false, embedId: "emb-abcd1234", color: "red" })["data-accent-color"] === "red", "άκυρο χρώμα περνά ΩΣ ΕΧΕΙ, ώστε να δοκιμάζεται η άμυνα του widget");
   assert(lib.COLOR_PRESETS.some((p) => p.value === "red"), "υπάρχει preset με άκυρο χρώμα για αυτόν τον έλεγχο");
-  assert(!("data-bot-name" in lib.buildAttrs({ embedId: "emb-abcd1234", botName: "   " })), "κενό όνομα: χωρίς attribute");
+  assert(!("data-bot-name" in lib.buildAttrs({ serverConfig: false, embedId: "emb-abcd1234", botName: "   " })), "κενό όνομα: χωρίς attribute");
 }
 
 function testBuildSnippet() {
   console.log("\n[Snippet που εμφανίζεται]");
-  const snippet = lib.buildSnippet({ embedId: "emb-abcd1234", botName: 'Βοηθός "Α" <b>' }, "https://app.idmon.app");
+  const snippet = lib.buildSnippet({ serverConfig: false, embedId: "emb-abcd1234", botName: 'Βοηθός "Α" <b>' }, "https://app.idmon.app");
   assert(snippet.startsWith('<script src="https://app.idmon.app/widget.js"'), "ξεκινά με το σωστό script src");
   assert(snippet.endsWith("></script>"), "τελειώνει με κλείσιμο script");
   assert(snippet.includes('data-embed-id="emb-abcd1234"'), "περιέχει το embed ID");
@@ -101,13 +105,43 @@ function testCheckTurn() {
   assert(lib.checkTurn("οτιδήποτε", {}).ok, "turn χωρίς προσδοκίες περνά");
 }
 
+function testSummarizeConfig() {
+  console.log("\n[Περιγραφή απάντησης του /config]");
+  const free = lib.summarizeConfig(200, { accentColor: "#6B7280", botName: "Assistant", logoUrl: null, contactLabel: null, contactUrl: null, contactPhone: null, showBranding: true });
+  assert(free[0] === "200 OK" && free.some((l) => l === "logoUrl: (κενό)"), "200: κενά πεδία εμφανίζονται ως (κενό)");
+  assert(free.some((l) => l === "accentColor: #6B7280") && free.some((l) => l === "botName: Assistant"), "200: εμφανίζονται οι τιμές");
+  assert(free[free.length - 1].includes("ΘΑ φαίνεται"), "showBranding=true: λέει ότι το badge ΘΑ φαίνεται");
+  const pro = lib.summarizeConfig(200, { showBranding: false });
+  assert(pro[pro.length - 1].includes("ΔΕΝ θα φαίνεται"), "showBranding=false: λέει ότι ΔΕΝ θα φαίνεται (Pro)");
+  assert(lib.summarizeConfig(403, null)[0].includes("ΔΕΝ είναι στη λίστα"), "403: εξηγεί ότι λείπει το domain από τη λίστα");
+  assert(lib.summarizeConfig(404, null)[0].includes("άγνωστο Embed ID"), "404: εξηγεί ότι το Embed ID είναι άγνωστο");
+  assert(lib.summarizeConfig(500, null)[0].startsWith("500"), "άλλος κωδικός: αναφέρεται");
+  assert(lib.summarizeConfig(200, null)[0].includes("απροσδόκητη"), "200 χωρίς σώμα: απροσδόκητο");
+}
+
+function testJudgeBadge() {
+  console.log("\n[Κρίση του badge: το widget πρέπει να συμφωνεί με τον server]");
+  const goodLink = { text: "Powered by Idmon", href: "https://idmon.app/" };
+  assert(lib.judgeBadge(true, { showBranding: true }, goodLink).ok, "ο server λέει true, το badge φαίνεται με σωστό σύνδεσμο: OK");
+  assert(lib.judgeBadge(false, { showBranding: false }, null).ok, "ο server λέει false (Pro), το badge κρύβεται: OK");
+  assert(lib.judgeBadge(true, {}, goodLink).ok, "χωρίς το πεδίο ο server: αναμένεται να φαίνεται");
+  const leak = lib.judgeBadge(true, { showBranding: false }, goodLink);
+  assert(!leak.ok && leak.why.includes("φαίνεται"), "ο server λέει false αλλά το badge φαίνεται: ΑΠΟΤΥΧΙΑ (ένας Pro θα έβλεπε το badge)");
+  const missing = lib.judgeBadge(false, { showBranding: true }, null);
+  assert(!missing.ok && missing.why.includes("ΔΕΝ φαίνεται"), "ο server λέει true αλλά το badge λείπει: ΑΠΟΤΥΧΙΑ");
+  assert(!lib.judgeBadge(true, { showBranding: true }, { text: "Powered by Someone", href: "https://idmon.app/" }).ok, "λάθος κείμενο: ΑΠΟΤΥΧΙΑ");
+  assert(!lib.judgeBadge(true, { showBranding: true }, { text: "Powered by Idmon", href: "https://evil.example.com/" }).ok, "λάθος σύνδεσμος: ΑΠΟΤΥΧΙΑ");
+  assert(!lib.judgeBadge(true, { showBranding: true }, null).ok, "badge χωρίς σύνδεσμο: ΑΠΟΤΥΧΙΑ");
+  assert(lib.judgeBadge(true, null, goodLink).ok, "χωρίς σώμα (null): αναμένεται να φαίνεται");
+}
+
 function testScenarioStructure() {
   console.log("\n[Δομή σεναρίων]");
   const ids = lib.SCENARIOS.map((x) => x.id);
   assert(new Set(ids).size === ids.length, "μοναδικά id");
   for (const sc of lib.SCENARIOS) {
-    assert(typeof sc.title === "string" && sc.turns.length >= 1, `«${sc.id}»: έχει τίτλο και τουλάχιστον ένα turn`);
-    for (const t of sc.turns) {
+    assert(typeof sc.title === "string" && (sc.kind === "badge" || sc.turns.length >= 1), `«${sc.id}»: έχει τίτλο και τουλάχιστον ένα turn (ή είναι ειδικό σενάριο)`);
+    for (const t of sc.turns || []) {
       assert(typeof t.q === "string" && t.q.length > 3, `«${sc.id}»: ερώτηση "${t.q}"`);
       for (const p of [...(t.expect || []), ...(t.forbid || [])]) {
         let valid = true;
@@ -116,7 +150,9 @@ function testScenarioStructure() {
       }
     }
   }
-  assert(lib.SCENARIOS.find((x) => x.id === "fallback").settings.contact === true, "το σενάριο fallback ενεργοποιεί τα στοιχεία επικοινωνίας");
+  const fb = lib.SCENARIOS.find((x) => x.id === "fallback");
+  assert(fb.settings.contact === true && fb.settings.serverConfig === false, "το σενάριο fallback ενεργοποιεί τα στοιχεία επικοινωνίας μέσω attributes (προεπισκόπηση), γιατί ο λογαριασμός δοκιμών δεν έχει ρυθμισμένη επικοινωνία");
+  assert(lib.SCENARIOS.some((x) => x.id === "badge" && x.kind === "badge"), "υπάρχει σενάριο ελέγχου του badge");
   assert(lib.SCENARIOS.some((x) => x.turns.length >= 4), "υπάρχει σενάριο με 4+ γύρους (ξεπερνά το όριο ιστορικού των 6 μηνυμάτων)");
 }
 
@@ -127,7 +163,7 @@ function testScenariosGroundedInFixtures() {
   assert(files.length === 5, `υπάρχουν 5 έγγραφα δοκιμής (βρέθηκαν ${files.length})`);
   const corpus = files.map((f) => readFileSync(new URL(f, dir), "utf8")).join("\n");
   for (const sc of lib.SCENARIOS) {
-    for (const t of sc.turns) {
+    for (const t of sc.turns || []) {
       for (const p of t.expect || []) assert(new RegExp(p, "i").test(corpus), `«${sc.id}»: το αναμενόμενο "${p}" υπάρχει στα έγγραφα`);
       for (const p of t.forbid || []) assert(new RegExp(p, "i").test(corpus), `«${sc.id}»: το απαγορευμένο "${p}" υπάρχει στα έγγραφα (ουσιαστικό δολώμα)`);
     }
@@ -155,10 +191,13 @@ function testPageHygiene() {
 function testWidgetContract() {
   console.log("\n[Το widget.js έχει ακόμα τα στοιχεία που οδηγεί το σενάριο]");
   const widget = read("../public/widget.js");
-  for (const needle of ["rag-embed-widget-host", "input-row", "fallback-contact", 'className = "bubble"', 'className = "msg "', "attachShadow({ mode: \"open\" })"]) {
+  for (const needle of ["rag-embed-widget-host", "input-row", "fallback-contact", 'className = "bubble pending"', 'className = "msg "', "attachShadow({ mode: \"open\" })", 'class="powered"', "/config", 'data-config']) {
     assert(widget.includes(needle), `widget.js περιέχει: ${needle}`);
   }
   assert(pageHtml.includes('.input-row input') && pageHtml.includes('.input-row button') && pageHtml.includes(".msg.bot") && pageHtml.includes(".msg.fallback-contact"), "η σελίδα χρησιμοποιεί ακριβώς αυτούς τους selectors");
+  assert(pageHtml.includes('.powered') && pageHtml.includes('.bubble') && pageHtml.includes('"pending"'), "η σελίδα χρησιμοποιεί τα .powered και .bubble.pending του widget");
+  for (const id of ["serverConfig", "configBtn", "serverNote"]) assert(pageHtml.includes(`id="${id}"`), `η σελίδα έχει το στοιχείο #${id}`);
+  assert(pageHtml.includes("textWithBreaks") && /white-space:pre-wrap/.test(pageHtml), "οι αλλαγές γραμμής των απαντήσεων διατηρούνται στο log");
 }
 
 testEmbedId();
@@ -166,6 +205,8 @@ testNormalizeServer();
 testBuildAttrs();
 testBuildSnippet();
 testCheckTurn();
+testSummarizeConfig();
+testJudgeBadge();
 testScenarioStructure();
 testScenariosGroundedInFixtures();
 testPageHygiene();

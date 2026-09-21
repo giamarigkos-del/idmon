@@ -10,6 +10,14 @@
 // ό,τι χρώμα κι αν επιλέξει ο πελάτης), data-bot-name, data-lang ("el"/"en"),
 // data-position ("bottom-right"/"bottom-left").
 //
+// Βήμα 2β: το widget ρωτά τον server για τις ρυθμίσεις του πελάτη (GET
+// /embed/{id}/config) και οι ρυθμίσεις του SERVER κερδίζουν τα data-attributes
+// (χρώμα, όνομα, λογότυπο, επικοινωνία) -- έτσι ό,τι αλλάζει ο πελάτης στον
+// editor φαίνεται χωρίς νέο snippet. Τα attributes μένουν ως εφεδρικά όταν ο
+// server δεν απαντά. Ο server αποφασίζει και αν φαίνεται το "Powered by Idmon"
+// (Free/Basic ναι, Pro όχι). data-config="off" παραλείπει το αίτημα (για
+// προεπισκόπηση/δοκιμές: τότε ισχύουν τα attributes και το badge φαίνεται πάντα).
+//
 // ΣΚΟΠΙΜΑ ΔΕΝ χρησιμοποιεί iframe: αν το UI έτρεχε μέσα σε iframe που
 // δείχνει σε δικό μας domain, κάθε request προς το backend θα είχε ΠΑΝΤΑ
 // το δικό μας domain σαν Origin -- όχι το domain του πελάτη -- και όλο το
@@ -71,6 +79,30 @@
   var onAccent = readableOn(accentColor);
   var avatarBg = onAccent === "#ffffff" ? "rgba(255,255,255,.2)" : "rgba(0,0,0,.12)";
 
+  // Έλεγχοι για τιμές που έρχονται από τον server. Ο server ήδη τις καθαρίζει
+  // (index.js: buildPublicWidgetConfig) και εδώ ξαναελέγχονται ως δεύτερη γραμμή
+  // άμυνας -- αντίγραφο των ίδιων κανόνων επίτηδες, το widget.js μένει αυτόνομο.
+  function cleanText(value, maxLength) {
+    if (typeof value !== "string") return null;
+    var trimmed = value.trim();
+    return trimmed && trimmed.length <= maxLength ? trimmed : null;
+  }
+  function isCleanUrl(value, maxLength) {
+    return typeof value === "string" && value.length > 0 && value.length <= maxLength && !/[\u0000-\u0020\u007f]/.test(value);
+  }
+  function isSafeLogoUrl(value) {
+    if (!isCleanUrl(value, 500)) return false;
+    try { return new URL(value).protocol === "https:"; } catch (e) { return false; }
+  }
+  function isSafeContactUrl(value) {
+    if (!isCleanUrl(value, 500)) return false;
+    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value)) return false;
+    return !/^(javascript|vbscript|data):/i.test(value);
+  }
+  function validPhone(value) {
+    return typeof value === "string" && /^[0-9+()\-.\s#*,]{3,30}$/.test(value.trim());
+  }
+
   var ICON_CHAT =
     '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" ' +
     'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>';
@@ -83,6 +115,7 @@
   var botName = scriptTag.getAttribute("data-bot-name") || "Assistant";
   var lang = (scriptTag.getAttribute("data-lang") || "el").toLowerCase();
   var position = scriptTag.getAttribute("data-position") === "bottom-left" ? "bottom-left" : "bottom-right";
+  var configMode = scriptTag.getAttribute("data-config") === "off" ? "off" : "server";
 
   // Section J: human handoff -- προαιρετικά, ο πελάτης μπορεί να μην έχει
   // ρυθμίσει τίποτα από αυτά ακόμα (backward compatible, καμία αλλαγή UI
@@ -110,6 +143,7 @@
       // εδώ σαν δικό του αντίγραφο επειδή το widget.js πρέπει να μείνει
       // αυτόνομο, χωρίς εξάρτηση σε shared.js.
       limitReached: "Αντιμετωπίζουμε προσωρινά τεχνικό πρόβλημα. Επικοινώνησε απευθείας μαζί μας:",
+      poweredBy: "Powered by Idmon",
     },
     en: {
       disclosure: "AI-generated answers",
@@ -121,6 +155,7 @@
       closeLabel: "Close",
       fallbackContactPrompt: "Didn't find what you needed?",
       limitReached: "We're experiencing technical difficulties right now. Please contact us directly:",
+      poweredBy: "Powered by Idmon",
     },
   };
   var t = STRINGS[lang] || STRINGS.el;
@@ -138,7 +173,14 @@
   style.textContent = [
     "*{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;}",
     // Οι "ετικέτες" χρώματος: ΜΙΑ φορά ορισμένες, όλα τα υπόλοιπα τις διαβάζουν.
-    ".bubble,.panel{--accent:" + accentColor + ";--on-accent:" + onAccent + ";--avatar-bg:" + avatarBg + ";}",
+    // (οι "ετικέτες" χρώματος --accent/--on-accent/--avatar-bg ορίζονται στο ξεχωριστό themeStyle παρακάτω)
+    ".bubble.pending{visibility:hidden;}",
+    ".avatar img{width:100%;height:100%;object-fit:cover;display:block;}",
+    ".powered{padding:0 12px 10px;text-align:center;font-size:11px;background:#fff;}",
+    ".powered[hidden]{display:none;}",
+    ".powered a{color:#8a8a93;text-decoration:none;}",
+    ".powered a:hover{text-decoration:underline;}",
+    ".powered a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}",
     ".bubble{position:fixed;bottom:20px;" + sideProp + ":20px;width:56px;height:56px;border-radius:50%;",
     "background:var(--accent);color:var(--on-accent);border:none;cursor:pointer;padding:0;",
     "box-shadow:0 6px 20px rgba(0,0,0,.28);z-index:2147483647;display:flex;align-items:center;justify-content:center;}",
@@ -184,6 +226,19 @@
   ].join("");
   root.appendChild(style);
 
+  // Οι ετικέτες χρώματος σε δικό τους <style>: όταν έρθουν οι ρυθμίσεις του
+  // server ξαναγράφεται ΜΟΝΟ αυτό και όλα τα στοιχεία αλλάζουν μαζί.
+  var themeStyle = document.createElement("style");
+  function applyTheme(hex) {
+    accentColor = hex;
+    onAccent = readableOn(hex);
+    avatarBg = onAccent === "#ffffff" ? "rgba(255,255,255,.2)" : "rgba(0,0,0,.12)";
+    themeStyle.textContent =
+      ".bubble,.panel{--accent:" + accentColor + ";--on-accent:" + onAccent + ";--avatar-bg:" + avatarBg + ";}";
+  }
+  applyTheme(accentColor);
+  root.appendChild(themeStyle);
+
   function escapeAttr(str) {
     return String(str).replace(/"/g, "&quot;");
   }
@@ -207,7 +262,9 @@
   }
 
   var bubble = document.createElement("button");
-  bubble.className = "bubble";
+  // "pending": κρυφό μέχρι να έρθουν οι ρυθμίσεις του server (ή να περάσουν 1,5"),
+  // ώστε ο επισκέπτης να μη δει ένα γκρι widget να αλλάζει χρώμα μπροστά του.
+  bubble.className = "bubble pending";
   bubble.type = "button";
   bubble.setAttribute("aria-label", t.openLabel);
   bubble.innerHTML = ICON_CHAT;
@@ -229,7 +286,8 @@
     '<div class="input-row">' +
     '  <input type="text" />' +
     "  <button type=\"button\"></button>" +
-    "</div>";
+    "</div>" +
+    '<div class="powered" hidden><a href="https://idmon.app" target="_blank" rel="noopener noreferrer"></a></div>';
   root.appendChild(panel);
 
   panel.querySelector(".header-title").textContent = botName;
@@ -237,6 +295,8 @@
   panel.querySelector(".avatar").innerHTML = ICON_AVATAR;
   panel.querySelector(".close-btn").innerHTML = ICON_CLOSE;
   panel.querySelector(".close-btn").setAttribute("aria-label", t.closeLabel);
+  var poweredEl = panel.querySelector(".powered");
+  poweredEl.querySelector("a").textContent = t.poweredBy;
   var messagesEl = panel.querySelector(".messages");
   var inputEl = panel.querySelector(".input-row input");
   var sendBtn = panel.querySelector(".input-row button");
@@ -308,6 +368,110 @@
   panel.querySelector(".close-btn").addEventListener("click", function () {
     setOpen(false);
   });
+
+  // ---- Βήμα 2β: ρυθμίσεις από τον server ---------------------------------
+  function recomputeContact() {
+    hasContactLink = !!(contactLabel && contactUrl);
+    hasContact = hasContactLink || !!contactPhone;
+  }
+
+  // Δημιουργεί/ενημερώνει/αφαιρεί το contact-bar ώστε να ταιριάζει με τις τρέχουσες τιμές.
+  function syncContactBar() {
+    var bar = panel.querySelector(".contact-bar");
+    if (!hasContact) {
+      if (bar) bar.remove();
+      return;
+    }
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.className = "contact-bar";
+      panel.insertBefore(bar, messagesEl);
+    }
+    bar.innerHTML = contactLinksHtml();
+  }
+
+  function applyLogo(url) {
+    var avatar = panel.querySelector(".avatar");
+    if (!url) {
+      avatar.innerHTML = ICON_AVATAR;
+      return;
+    }
+    var img = document.createElement("img");
+    img.alt = "";
+    img.setAttribute("referrerpolicy", "no-referrer"); // ο ιστότοπος που φιλοξενεί το λογότυπο δεν μαθαίνει από πού ήρθε ο επισκέπτης
+    img.decoding = "async";
+    img.onerror = function () { avatar.innerHTML = ICON_AVATAR; }; // αν δεν φορτώσει: το προεπιλεγμένο εικονίδιο
+    img.src = url;
+    avatar.innerHTML = "";
+    avatar.appendChild(img);
+  }
+
+  function setBranding(show) {
+    poweredEl.hidden = !show;
+  }
+
+  // Οι έγκυρες τιμές του server κερδίζουν. Μια άκυρη τιμή αγνοείται και μένει
+  // ό,τι ισχύει ήδη (attribute ή προεπιλογή).
+  function applyServerConfig(cfg) {
+    if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) throw new Error("bad config");
+
+    var hex = normalizeHex(cfg.accentColor);
+    if (hex) applyTheme(hex);
+
+    var name = cleanText(cfg.botName, 60);
+    if (name) panel.querySelector(".header-title").textContent = name;
+
+    applyLogo(isSafeLogoUrl(cfg.logoUrl) ? cfg.logoUrl : null);
+
+    // Η επικοινωνία ακολουθεί ΠΛΗΡΩΣ τον server: αν ο πελάτης την αφαίρεσε από τις
+    // ρυθμίσεις, φεύγει και από το widget, ακόμα κι αν το παλιό snippet την έχει.
+    contactLabel = cleanText(cfg.contactLabel, 40);
+    contactUrl = isSafeContactUrl(cfg.contactUrl) ? cfg.contactUrl : null;
+    contactPhone = validPhone(cfg.contactPhone) ? cfg.contactPhone.trim() : null;
+    recomputeContact();
+    syncContactBar();
+
+    // Το badge κρύβεται ΜΟΝΟ με ρητό boolean false από τον server (Pro).
+    setBranding(cfg.showBranding !== false);
+  }
+
+  var CONFIG_TIMEOUT_MS = 1500;
+  var configApplied = false;
+
+  function revealLauncher() {
+    bubble.classList.remove("pending");
+  }
+
+  function loadServerConfig() {
+    if (configMode === "off" || typeof fetch !== "function") {
+      setBranding(true);
+      revealLauncher();
+      return;
+    }
+    // Αν ο server αργεί: εμφανίζουμε το widget με τα attributes και το badge
+    // (ασφαλής προεπιλογή). Αν η απάντηση έρθει αργότερα, εφαρμόζεται τότε.
+    var timer = setTimeout(function () {
+      if (!configApplied) setBranding(true);
+      revealLauncher();
+    }, CONFIG_TIMEOUT_MS);
+
+    fetch(BASE_URL + "/embed/" + encodeURIComponent(embedId) + "/config", { method: "GET", credentials: "omit" })
+      .then(function (res) {
+        if (!res.ok) throw new Error("config " + res.status);
+        return res.json();
+      })
+      .then(function (cfg) {
+        clearTimeout(timer);
+        applyServerConfig(cfg);
+        configApplied = true;
+        revealLauncher();
+      })
+      .catch(function () {
+        clearTimeout(timer);
+        if (!configApplied) setBranding(true);
+        revealLauncher();
+      });
+  }
 
   // Βήμα 1: ιστορικό συζήτησης. Το Gemini δεν θυμάται τίποτα από μόνο του,
   // οπότε στέλνουμε μαζί με κάθε νέα ερώτηση τα τελευταία μηνύματα (ρόλοι
@@ -429,4 +593,6 @@
   inputEl.addEventListener("keydown", function (e) {
     if (e.key === "Enter") sendQuestion();
   });
+
+  loadServerConfig();
 })();

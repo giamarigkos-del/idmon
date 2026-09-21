@@ -46,7 +46,11 @@ function makeSSEBody(events) {
   };
 }
 
-async function withDom(scriptAttrs, fetchImpl) {
+// Το widget κάνει πλέον ένα GET στο .../config όταν φορτώνει (Βήμα 2β). Για να
+// μη μπερδεύει τα υπάρχοντα τεστ (που καταγράφουν ΟΛΕΣ τις κλήσεις fetch), το
+// /config περνά από ξεχωριστό configImpl· αν δεν δοθεί, "αποτυγχάνει" (το widget
+// τότε χρησιμοποιεί τα attributes και δείχνει το badge -- εφεδρική διαδρομή).
+async function withDom(scriptAttrs, fetchImpl, configImpl) {
   const dom = new JSDOM(
     `<!DOCTYPE html><html><body>
       <script src="https://operations-portal-rag.giamarigkos.workers.dev/widget.js" ${scriptAttrs}></script>
@@ -54,7 +58,16 @@ async function withDom(scriptAttrs, fetchImpl) {
     { runScripts: "outside-only", url: "https://customer-site.gr/" }
   );
   const { window } = dom;
-  window.fetch = fetchImpl || (async () => ({ ok: true, body: makeSSEBody([{ type: "chunk", text: "OK" }, { type: "done", isFallback: false }]) }));
+  const queryFetch = fetchImpl || (async () => ({ ok: true, body: makeSSEBody([{ type: "chunk", text: "OK" }, { type: "done", isFallback: false }]) }));
+  window.__configCalls = [];
+  window.fetch = async (url, options) => {
+    if (String(url).endsWith("/config")) {
+      window.__configCalls.push({ url: String(url), options });
+      if (configImpl) return configImpl(url, options);
+      throw new Error("config unavailable in this test");
+    }
+    return queryFetch(url, options);
+  };
   // jsdom δεν εγγυάται πάντα TextDecoder στο window -- το δίνουμε ρητά από
   // το Node global scope (το widget.js το χρησιμοποιεί για να διαβάσει το
   // streaming response σώμα).
@@ -414,7 +427,8 @@ async function testHistoryDoesNotLeakBetweenPages() {
 // --- Βήμα 2α: νέο στυλ (header, avatar, χρώμα πελάτη, pill κουμπιά) ----------
 function widgetCss(window) {
   const host = window.document.getElementById("rag-embed-widget-host");
-  return host.shadowRoot.querySelector("style").textContent;
+  // Το χρώμα ζει σε ξεχωριστό <style> (theme) -- ενώνουμε όλα.
+  return [...host.shadowRoot.querySelectorAll("style")].map((el) => el.textContent).join("");
 }
 
 async function testNewHeaderStructure() {
@@ -504,6 +518,207 @@ async function testPositionStillWorks() {
   assert(/\.bubble\{[^}]*right:20px/.test(right) && /\.panel\{[^}]*right:20px/.test(right), "προεπιλογή: δεξιά");
 }
 
+// --- Βήμα 2β-2: ρυθμίσεις από τον server, λογότυπο, "Powered by Idmon" -------
+const cfgOk = (cfg) => async () => ({ ok: true, json: async () => cfg });
+const FULL_CFG = {
+  accentColor: "#2F5BEA", botName: "Server Name", logoUrl: "https://cdn.example.gr/l.png",
+  contactLabel: "Επικοινωνία", contactUrl: "https://x.gr/c", contactPhone: "+30 210 123 4567", showBranding: false,
+};
+const rootOf = (window) => window.document.getElementById("rag-embed-widget-host").shadowRoot;
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function testConfigRequest() {
+  console.log("\n[Ρυθμίσεις -- το αίτημα που στέλνει το widget]");
+  const window = await withDom('data-embed-id="emb-test123"', null, cfgOk(FULL_CFG));
+  assert(window.__configCalls.length === 1, "ΕΝΑ αίτημα ρυθμίσεων ανά φόρτωση");
+  const call = window.__configCalls[0];
+  assert(call.url === "https://operations-portal-rag.giamarigkos.workers.dev/embed/emb-test123/config", "σωστό URL (origin του script + embed ID)");
+  assert(call.options.method === "GET" && call.options.credentials === "omit", "GET χωρίς credentials");
+  assert(!call.options.headers && !call.options.body, "χωρίς custom headers/body (απλό cross-origin αίτημα, καμία preflight)");
+}
+
+async function testConfigApplied() {
+  console.log("\n[Ρυθμίσεις -- εφαρμόζονται όλα τα πεδία]");
+  const window = await withDom('data-embed-id="emb-test123"', null, cfgOk(FULL_CFG));
+  await wait(20);
+  const root = rootOf(window);
+  const css = widgetCss(window);
+  assert(/--accent:#2f5bea;/i.test(css) && css.includes("--on-accent:#ffffff;"), "το χρώμα του server και το κατάλληλο χρώμα κειμένου");
+  assert(root.querySelector(".header-title").textContent === "Server Name", "το όνομα του server");
+  const img = root.querySelector(".avatar img");
+  assert(!!img && img.getAttribute("src") === "https://cdn.example.gr/l.png", "το λογότυπο μπαίνει στον avatar");
+  assert(img.getAttribute("referrerpolicy") === "no-referrer", "το λογότυπο φορτώνεται χωρίς referrer");
+  assert(!root.querySelector(".avatar svg"), "το προεπιλεγμένο εικονίδιο αντικαταστάθηκε");
+  const links = root.querySelectorAll(".contact-bar .contact-link");
+  assert(links.length === 2 && links[0].getAttribute("href") === "https://x.gr/c" && links[1].getAttribute("href") === "tel:+30 210 123 4567", "τα στοιχεία επικοινωνίας δημιουργήθηκαν");
+  assert(root.querySelector(".powered").hidden === true, "showBranding=false: το badge κρύβεται");
+  assert(!root.querySelector(".bubble").classList.contains("pending"), "το κουμπί του widget εμφανίστηκε");
+}
+
+async function testServerWinsOverAttributes() {
+  console.log("\n[Ρυθμίσεις -- ο server κερδίζει τα data-attributes του snippet]");
+  const attrs = 'data-embed-id="emb-test123" data-accent-color="#FF0000" data-bot-name="Snippet Name" data-contact-label="Παλιό" data-contact-url="https://old.gr" data-contact-phone="111 222"';
+  const window = await withDom(attrs, null, cfgOk({ accentColor: "#2F5BEA", botName: "Server Name", contactLabel: null, contactUrl: null, contactPhone: null, logoUrl: null, showBranding: true }));
+  await wait(20);
+  const root = rootOf(window);
+  assert(root.querySelector(".header-title").textContent === "Server Name", "όνομα: του server, όχι του snippet");
+  assert(/--accent:#2f5bea;/i.test(widgetCss(window)) && !/--accent:#ff0000;/i.test(widgetCss(window)), "χρώμα: του server, όχι του snippet");
+  assert(!root.querySelector(".contact-bar"), "η επικοινωνία που αφαιρέθηκε από τις ρυθμίσεις ΦΕΥΓΕΙ, παρά το παλιό snippet");
+  assert(!!root.querySelector(".avatar svg"), "χωρίς λογότυπο: προεπιλεγμένο εικονίδιο");
+}
+
+async function testBrandingRules() {
+  console.log("\n[\"Powered by Idmon\" -- το κρύβει ΜΟΝΟ ένα ρητό false από τον server]");
+  const badge = async (cfg, lang) => {
+    const window = await withDom(`data-embed-id="emb-test123"${lang ? ` data-lang="${lang}"` : ""}`, null, cfgOk(cfg));
+    await wait(20);
+    return rootOf(window).querySelector(".powered");
+  };
+  const shown = await badge({ showBranding: true });
+  assert(shown.hidden === false, "showBranding=true: φαίνεται");
+  const a = shown.querySelector("a");
+  assert(a.textContent === "Powered by Idmon", "κείμενο \"Powered by Idmon\"");
+  assert(a.getAttribute("href") === "https://idmon.app" && a.getAttribute("target") === "_blank" && a.getAttribute("rel") === "noopener noreferrer", "σύνδεσμος στο idmon.app, σε νέο tab, με noopener");
+  assert((await badge({ showBranding: false })).hidden === true, "showBranding=false (Pro): κρύβεται");
+  assert((await badge({})).hidden === false, "χωρίς το πεδίο: φαίνεται");
+  for (const weird of ["false", 0, null, "no", []]) {
+    assert((await badge({ showBranding: weird })).hidden === false, `μη-boolean ${JSON.stringify(weird)}: φαίνεται (μόνο ρητό false το κρύβει)`);
+  }
+  assert((await badge({ showBranding: true }, "en")).querySelector("a").textContent === "Powered by Idmon", "ίδιο κείμενο και στα αγγλικά");
+}
+
+async function testConfigFailureFallsBack() {
+  console.log("\n[Αν ο server δεν απαντά -- εφεδρικά attributes, και το badge ΦΑΙΝΕΤΑΙ]");
+  const attrs = 'data-embed-id="emb-test123" data-accent-color="#FF0000" data-bot-name="Snippet Name"';
+  const failures = {
+    "σφάλμα δικτύου": async () => { throw new Error("network down"); },
+    "403 (domain εκτός λίστας)": async () => ({ ok: false, status: 403, json: async () => ({ error: "x" }) }),
+    "404": async () => ({ ok: false, status: 404, json: async () => ({}) }),
+    "μη έγκυρο JSON": async () => ({ ok: true, json: async () => { throw new Error("Unexpected token <"); } }),
+    "απάντηση null": cfgOk(null),
+    "απάντηση array": cfgOk([1, 2]),
+    "απάντηση string": cfgOk("hello"),
+  };
+  for (const [label, impl] of Object.entries(failures)) {
+    const window = await withDom(attrs, null, impl);
+    await wait(20);
+    const root = rootOf(window);
+    assert(root.querySelector(".powered").hidden === false, `${label}: το badge φαίνεται (ασφαλής προεπιλογή)`);
+    assert(root.querySelector(".header-title").textContent === "Snippet Name" && /--accent:#ff0000;/i.test(widgetCss(window)), `${label}: ισχύουν τα attributes του snippet`);
+    assert(!root.querySelector(".bubble").classList.contains("pending"), `${label}: το κουμπί του widget εμφανίζεται`);
+  }
+}
+
+async function testLauncherPendingAndTimeout() {
+  console.log("\n[Κουμπί κρυφό μέχρι να έρθουν οι ρυθμίσεις -- και timeout 1,5\"]");
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const window = await withDom('data-embed-id="emb-test123" data-accent-color="#FF0000"', null, async () => { await gate; return { ok: true, json: async () => FULL_CFG }; });
+  const root = rootOf(window);
+  await wait(30);
+  assert(root.querySelector(".bubble").classList.contains("pending"), "όσο περιμένει τον server το κουμπί είναι κρυφό");
+  assert(root.querySelector(".powered").hidden === true, "και το badge δεν έχει αποφασιστεί ακόμα");
+  await wait(1600);
+  assert(!root.querySelector(".bubble").classList.contains("pending"), "μετά το timeout το κουμπί εμφανίζεται");
+  assert(root.querySelector(".powered").hidden === false, "μετά το timeout το badge φαίνεται (ασφαλής προεπιλογή)");
+  assert(/--accent:#ff0000;/i.test(widgetCss(window)), "μετά το timeout ισχύει το χρώμα του snippet");
+  release();
+  await wait(30);
+  assert(root.querySelector(".header-title").textContent === "Server Name" && /--accent:#2f5bea;/i.test(widgetCss(window)), "αν η απάντηση έρθει ΑΡΓΟΤΕΡΑ, εφαρμόζεται τότε");
+  assert(root.querySelector(".powered").hidden === true, "και η απόφαση του server για το badge (Pro) εφαρμόζεται τότε");
+}
+
+async function testConfigOffMode() {
+  console.log("\n[data-config=\"off\" -- προεπισκόπηση: κανένα αίτημα, ισχύουν τα attributes, το badge φαίνεται]");
+  const window = await withDom('data-embed-id="emb-test123" data-config="off" data-accent-color="#2F5BEA" data-bot-name="Preview"', null, cfgOk({ ...FULL_CFG, showBranding: false }));
+  await wait(20);
+  const root = rootOf(window);
+  assert(window.__configCalls.length === 0, "ΚΑΝΕΝΑ αίτημα ρυθμίσεων");
+  assert(!root.querySelector(".bubble").classList.contains("pending"), "το κουμπί εμφανίζεται αμέσως");
+  assert(root.querySelector(".header-title").textContent === "Preview" && /--accent:#2f5bea;/i.test(widgetCss(window)), "ισχύουν τα attributes");
+  assert(root.querySelector(".powered").hidden === false, "το badge φαίνεται πάντα (δεν παρακάμπτεται με data-config=off)");
+}
+
+async function testHostileConfig() {
+  console.log("\n[Επιθετικές τιμές από τον server -- δεύτερη γραμμή άμυνας στο widget]");
+  const attrs = 'data-embed-id="emb-test123" data-accent-color="#FF0000" data-bot-name="Safe Name"';
+  const run = async (cfg) => {
+    const window = await withDom(attrs, null, cfgOk({ showBranding: true, ...cfg }));
+    await wait(20);
+    return window;
+  };
+  let w = await run({ botName: "<img src=x onerror=alert(1)>" });
+  let root = rootOf(w);
+  assert(root.querySelector(".header-title").textContent === "<img src=x onerror=alert(1)>" && !root.querySelector(".header-title img"), "όνομα με HTML: εμφανίζεται ως κείμενο, καμία ετικέτα δεν ενεργοποιείται");
+  w = await run({ botName: "x".repeat(61) });
+  assert(rootOf(w).querySelector(".header-title").textContent === "Safe Name", "όνομα 61 χαρακτήρων: αγνοείται");
+  for (const bad of ["red", "#12", "javascript:1", "#fff;} body{display:none", 123]) {
+    w = await run({ accentColor: bad });
+    assert(/--accent:#ff0000;/i.test(widgetCss(w)) && !widgetCss(w).includes("body{"), `άκυρο χρώμα ${JSON.stringify(bad)}: μένει του snippet`);
+  }
+  for (const bad of ["http://cdn.example.gr/l.png", "javascript:alert(1)", "data:image/png;base64,AAAA", "//cdn.example.gr/l.png", "https://cdn.example.gr/a b.png", 123]) {
+    w = await run({ logoUrl: bad });
+    assert(!rootOf(w).querySelector(".avatar img"), `λογότυπο ${JSON.stringify(bad)}: δεν φορτώνεται`);
+  }
+  for (const bad of ["javascript:alert(1)", "JaVaScRiPt:1", "data:text/html,x", "vbscript:x", " javascript:1", "no-scheme.gr"]) {
+    w = await run({ contactLabel: "Επικοινωνία", contactUrl: bad });
+    assert(!rootOf(w).querySelector(".contact-bar"), `contactUrl ${JSON.stringify(bad)}: δεν δημιουργείται link`);
+  }
+  for (const bad of ['210" onclick="x', "call me", "<b>1</b>"]) {
+    w = await run({ contactPhone: bad });
+    assert(!rootOf(w).querySelector(".contact-bar"), `τηλέφωνο ${JSON.stringify(bad)}: αγνοείται`);
+  }
+  w = await run({ contactLabel: "x".repeat(41), contactUrl: "https://x.gr/c" });
+  assert(!rootOf(w).querySelector(".contact-bar"), "contactLabel 41 χαρακτήρων: αγνοείται (χωρίς label δεν υπάρχει link)");
+  w = await run({ contactPhone: "(210) 123-4567" });
+  assert(rootOf(w).querySelectorAll(".contact-bar .contact-link").length === 1, "έγκυρο τηλέφωνο μόνο του: δημιουργεί ένα κουμπί");
+}
+
+async function testLogoLoadFailureFallsBack() {
+  console.log("\n[Λογότυπο που δεν φορτώνει -- επιστρέφει το προεπιλεγμένο εικονίδιο]");
+  const window = await withDom('data-embed-id="emb-test123"', null, cfgOk({ logoUrl: "https://cdn.example.gr/missing.png", showBranding: true }));
+  await wait(20);
+  const root = rootOf(window);
+  const img = root.querySelector(".avatar img");
+  assert(!!img, "το λογότυπο δοκιμάστηκε");
+  img.dispatchEvent(new window.Event("error"));
+  assert(!root.querySelector(".avatar img") && !!root.querySelector(".avatar svg"), "μετά από σφάλμα φόρτωσης: πάλι το προεπιλεγμένο εικονίδιο");
+}
+
+async function testConversationStillWorksAfterConfig() {
+  console.log("\n[Η συζήτηση δουλεύει κανονικά μετά τις ρυθμίσεις (ιστορικό, contact prompt)]");
+  const bodies = [];
+  const window = await withDom('data-embed-id="emb-test123"', async (url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return { ok: true, body: makeSSEBody([{ type: "chunk", text: "Δεν γνωρίζω." }, { type: "done", isFallback: true }]) };
+  }, cfgOk(FULL_CFG));
+  await wait(20);
+  const host = window.document.getElementById("rag-embed-widget-host");
+  await ask(window, host, "Ερώτηση 1");
+  await ask(window, host, "Ερώτηση 2");
+  assert(bodies.length === 2 && bodies[1].history.length === 2, "το ιστορικό δουλεύει (2 μηνύματα στη δεύτερη ερώτηση)");
+  const prompts = rootOf(window).querySelectorAll(".msg.fallback-contact");
+  assert(prompts.length === 2 && prompts[0].querySelectorAll(".contact-link").length === 2, "το μήνυμα επικοινωνίας μετά από \"δεν γνωρίζω\" χρησιμοποιεί τα στοιχεία του server");
+  assert(rootOf(window).querySelectorAll(".msg").length === 6, "3 μηνύματα ανά ερώτηση: χρήστης, bot, επικοινωνία");
+}
+
+async function testServerColorContrast() {
+  console.log("\n[Ρυθμίσεις -- το χρώμα κειμένου προσαρμόζεται και στο χρώμα που έρχεται από τον server]");
+  const onAccent = async (attrColor, serverColor) => {
+    const attrs = 'data-embed-id="emb-test123"' + (attrColor ? ` data-accent-color="${attrColor}"` : "");
+    const window = await withDom(attrs, null, cfgOk({ accentColor: serverColor, showBranding: true }));
+    await wait(20);
+    const css = widgetCss(window);
+    return { on: /--on-accent:([^;]+);/.exec(css)[1], accent: /--accent:([^;]+);/.exec(css)[1].toLowerCase(), avatar: /--avatar-bg:([^;]+);/.exec(css)[1] };
+  };
+  let r = await onAccent(null, "#FFE14D");
+  assert(r.accent === "#ffe14d" && r.on === "#111111", "ανοιχτό κίτρινο από τον server (πάνω σε γκρι snippet): σκούρο κείμενο");
+  assert(r.avatar.startsWith("rgba(0,0,0"), "και σκούρο περίγραμμα avatar (όχι λευκό)");
+  r = await onAccent("#FFE14D", "#111111");
+  assert(r.accent === "#111111" && r.on === "#ffffff", "σκούρο από τον server (πάνω σε κίτρινο snippet): άσπρο κείμενο");
+  assert(r.avatar.startsWith("rgba(255,255,255"), "και λευκό περίγραμμα avatar");
+}
+
 async function run() {
   await testCreatesHostAndShadowRoot();
   await testMissingEmbedIdDoesNothing();
@@ -530,6 +745,17 @@ async function run() {
   await testAutomaticContrast();
   await testPillShapesAndAccessibilityCss();
   await testPositionStillWorks();
+  await testConfigRequest();
+  await testConfigApplied();
+  await testServerWinsOverAttributes();
+  await testBrandingRules();
+  await testConfigFailureFallsBack();
+  await testLauncherPendingAndTimeout();
+  await testConfigOffMode();
+  await testHostileConfig();
+  await testLogoLoadFailureFallsBack();
+  await testConversationStillWorksAfterConfig();
+  await testServerColorContrast();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
