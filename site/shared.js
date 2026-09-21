@@ -131,12 +131,97 @@ function escapeHtml(str) {
 // Μετατρέπει **bold** και newlines σε πραγματικό HTML -- χρησιμοποιείται
 // τόσο στο chat widget όσο και στο δοκιμαστικό ερώτημα του editor, ώστε
 // και τα δύο να δείχνουν καθαρή, μορφοποιημένη απάντηση, ποτέ raw κείμενο.
-function formatAnswer(text) {
-  let safe = escapeHtml(text);
-  safe = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  safe = safe.replace(/\n/g, "<br>");
-  return safe;
+// --- formatAnswer (Βήμα 2δ) -- ΑΡΧΗ ---
+// Ελάχιστος και ΑΣΦΑΛΗΣ μορφοποιητής markdown για τις απαντήσεις (Βήμα 2δ). Το Gemini
+// γράφει λίστες (`* κείμενο`, `1. κείμενο`), πλάγια (`*κείμενο*`) και έντονα (`**κείμενο**`).
+// ΙΔΙΑ λογική στο widget.js και στο shared.js (demo σελίδα, test panel του editor).
+// Πρώτα ξεφεύγουν ΟΛΟΙ οι ειδικοί χαρακτήρες HTML και μετά προστίθενται μόνο οι δικές μας
+// ετικέτες (strong, em, ul, ol, li, br): τίποτα από το κείμενο δεν γίνεται ποτέ ετικέτα.
+// Ημιτελές markdown (π.χ. ένα `**` που δεν έκλεισε ακόμα ενώ γίνεται streaming) μένει
+// σαν κείμενο μέχρι να ολοκληρωθεί, χωρίς σφάλμα.
+function formatInline(s) {
+  return s
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[\s(])\*([^\s*](?:[^*\n]*?[^\s*])?)\*(?=$|[\s.,;:!?)])/g, "$1<em>$2</em>");
 }
+
+function formatAnswer(text) {
+  var lines = escapeHtml(text).replace(/\r\n?/g, "\n").split("\n");
+  var blocks = []; // { kind: "p" | "list", html }
+  var para = [];
+  var list = null; // { type: "ul" | "ol", start, items: [{ html, children: [] }] }
+
+  function flushPara() {
+    if (para.length) {
+      blocks.push({ kind: "p", html: para.join("<br>") });
+      para = [];
+    }
+  }
+  function flushList() {
+    if (!list) return;
+    var html = "<" + list.type + (list.type === "ol" && list.start > 1 ? ' start="' + list.start + '"' : "") + ">";
+    list.items.forEach(function (item) {
+      html += "<li>" + item.html;
+      if (item.children.length) {
+        html += "<ul>" + item.children.map(function (c) { return "<li>" + c + "</li>"; }).join("") + "</ul>";
+      }
+      html += "</li>";
+    });
+    blocks.push({ kind: "list", html: html + "</" + list.type + ">" });
+    list = null;
+  }
+
+  lines.forEach(function (line) {
+    if (!line.trim()) {
+      flushPara();
+      flushList();
+      return;
+    }
+    var bullet = /^(\s*)[*\-\u2022]\s+(\S.*)$/.exec(line);
+    var numbered = bullet ? null : /^(\s*)(\d{1,2})[.)]\s+(\S.*)$/.exec(line);
+    var heading = bullet || numbered ? null : /^\s{0,3}#{1,6}\s+(\S.*)$/.exec(line);
+
+    if (bullet) {
+      // Εσοχή 2+ χαρακτήρων μέσα σε υπάρχουσα λίστα = υπο-κουκκίδα (ένα επίπεδο).
+      if (bullet[1].length >= 2 && list && list.items.length) {
+        list.items[list.items.length - 1].children.push(formatInline(bullet[2]));
+        return;
+      }
+      flushPara();
+      if (!list || list.type !== "ul") {
+        flushList();
+        list = { type: "ul", start: 1, items: [] };
+      }
+      list.items.push({ html: formatInline(bullet[2]), children: [] });
+    } else if (numbered) {
+      flushPara();
+      if (!list || list.type !== "ol") {
+        flushList();
+        list = { type: "ol", start: parseInt(numbered[2], 10), items: [] };
+      }
+      list.items.push({ html: formatInline(numbered[3]), children: [] });
+    } else if (heading) {
+      flushPara();
+      flushList();
+      blocks.push({ kind: "p", html: "<strong>" + formatInline(heading[1]) + "</strong>" });
+    } else {
+      flushList();
+      para.push(formatInline(line.trim()));
+    }
+  });
+  flushPara();
+  flushList();
+
+  // Κενή γραμμή ανάμεσα σε δύο παραγράφους = οπτικός διαχωρισμός (όπως πριν)· γύρω από λίστες
+  // αρκούν τα περιθώρια του CSS.
+  var out = "";
+  blocks.forEach(function (b, i) {
+    if (i > 0 && b.kind === "p" && blocks[i - 1].kind === "p") out += "<br><br>";
+    out += b.html;
+  });
+  return out;
+}
+// --- formatAnswer (Βήμα 2δ) -- ΤΕΛΟΣ ---
 
 // Πλήρης μετατροπή markdown -> HTML για το κείμενο ενός εγγράφου. Χρησιμοποιεί
 // το marked.js (πλήρες markdown: επικεφαλίδες, links, πίνακες, code, quotes,
@@ -337,6 +422,7 @@ const TRANSLATIONS = {
     testQuestion: "Test question",
     testQuestionPlaceholder: "e.g. What's the approval limit?",
     testQGenericErrorMessage: "Something went wrong. Please try again in a moment.",
+    testQNewConversation: "New conversation",
     unansweredQuestions: "Unanswered questions",
     refresh: "↻ Refresh",
     deletedToggleShow: "Show deleted ({count})",
@@ -622,6 +708,7 @@ const TRANSLATIONS = {
     testQuestion: "Δοκιμαστικό ερώτημα",
     testQuestionPlaceholder: "π.χ. Ποιο είναι το όριο έγκρισης;",
     testQGenericErrorMessage: "Κάτι πήγε στραβά. Δοκίμασε ξανά σε λίγο.",
+    testQNewConversation: "Νέα συζήτηση",
     unansweredQuestions: "Ερωτήσεις χωρίς απάντηση",
     refresh: "↻ Ανανέωση",
     deletedToggleShow: "Δες διαγραμμένα ({count})",

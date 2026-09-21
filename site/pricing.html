@@ -14,6 +14,9 @@
   Οι τιμές γράφονται "με ΦΠΑ" -- ισχύει μόνο αν στο live Paddle οι τιμές οριστούν ως
   ΣΥΜΠΕΡΙΛΑΜΒΑΝΟΝΤΑΙ ο φόρος (Checkout > Sales tax settings), όπως στο live Paddle.
   Δεν αναφέρεται επωνυμία/ΑΦΜ/έδρα ακόμα: μπαίνουν όταν ολοκληρωθεί η έναρξη στη ΔΟΥ.
+  ΑΠΟΦΑΣΗ (Σεπτ. 2026): οι τιμές μένουν 29 και 59 ΜΕ ΦΠΑ (όχι +ΦΠΑ).
+  Το «Χωρίς Powered by Idmon» (Pro) αντιστοιχεί στο showBranding του server (GET /embed/{id}/config):
+  Free και Basic δείχνουν το badge στο widget, μόνο το Pro όχι. Αν αλλάξει ο κανόνας, αλλάζει ΚΑΙ εδώ.
 -->
 <!DOCTYPE html>
 <html lang="el">
@@ -119,6 +122,7 @@
     <ul>
       <li><strong>2.500</strong> μηνύματα / μήνα</li>
       <li><strong>Απεριόριστα</strong> έγγραφα</li>
+      <li>Χωρίς «Powered by Idmon» στο widget</li>
     </ul>
     <button type="button" class="cta checkout-btn" data-plan="pro" data-monthly-price="pri_01m2ynen6sh5949wn1pnsr1s51" data-annual-price="pri_01m2ynend8w7383t0nqzgd0f1z">Αναβάθμιση</button>
   </div>
@@ -136,6 +140,7 @@
 <tr><td>Chat widget για το site σου</td><td>✓</td><td>✓</td><td>✓</td></tr>
 <tr><td>Απαντήσεις βασισμένες στα δικά σου έγγραφα</td><td>✓</td><td>✓</td><td>✓</td></tr>
 <tr><td>Στατιστικά χρήσης και ερωτήσεις χωρίς απάντηση</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>Χωρίς «Powered by Idmon» στο widget</td><td>—</td><td>—</td><td>✓</td></tr>
 </table>
 </div>
 
@@ -147,6 +152,9 @@
 
 <h3>Τι γίνεται αν φτάσω το όριο;</h3>
 <p>Οι επισκέπτες σου βλέπουν ένα γενικό μήνυμα προσωρινής μη διαθεσιμότητας και εσύ βλέπεις ειδοποίηση μέσα στην εφαρμογή. Το widget ξαναδουλεύει όταν ανανεωθεί το όριο τον επόμενο μήνα ή αν αναβαθμίσεις πλάνο.</p>
+
+<h3>Τι είναι το «Powered by Idmon»;</h3>
+<p>Στα πλάνα Free και Basic, το widget δείχνει μια διακριτική γραμμή «Powered by Idmon» κάτω από το πεδίο ερώτησης. Στο Pro δεν εμφανίζεται. Αλλάζει αυτόματα όταν αλλάζεις πλάνο, χωρίς να χρειάζεται να αλλάξεις τον κώδικα που έχεις βάλει στο site σου.</p>
 
 <h3>Μπορώ να αλλάξω ή να ακυρώσω οποτεδήποτε;</h3>
 <p>Ναι. Από το Basic στο Pro αλλάζεις μέσα στην εφαρμογή και πληρώνεις μόνο τη διαφορά για το υπόλοιπο της περιόδου. Την ακύρωση και τα τιμολόγιά σου τα βρίσκεις στη «Διαχείριση συνδρομής». Δες και την <a href="/refunds.html">Πολιτική Ακύρωσης &amp; Επιστροφών</a>.</p>
@@ -213,6 +221,7 @@
     <ul>
       <li><strong>2,500</strong> messages / month</li>
       <li><strong>Unlimited</strong> documents</li>
+      <li>No “Powered by Idmon” on the widget</li>
     </ul>
     <button type="button" class="cta checkout-btn" data-plan="pro" data-monthly-price="pri_01m2ynen6sh5949wn1pnsr1s51" data-annual-price="pri_01m2ynend8w7383t0nqzgd0f1z">Upgrade</button>
   </div>
@@ -230,6 +239,7 @@
 <tr><td>Chat widget for your website</td><td>✓</td><td>✓</td><td>✓</td></tr>
 <tr><td>Answers based on your own documents</td><td>✓</td><td>✓</td><td>✓</td></tr>
 <tr><td>Usage statistics and unanswered questions</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>No “Powered by Idmon” on the widget</td><td>—</td><td>—</td><td>✓</td></tr>
 </table>
 </div>
 
@@ -241,6 +251,9 @@
 
 <h3>What happens if I reach the limit?</h3>
 <p>Your visitors see a generic temporary-unavailability message and you see a notice inside the app. The widget works again when the limit renews next month, or as soon as you upgrade.</p>
+
+<h3>What is “Powered by Idmon”?</h3>
+<p>On the Free and Basic plans, the widget shows a discreet “Powered by Idmon” line under the question field. On Pro it does not appear. It changes automatically when you change plan, without you having to change the code you put on your site.</p>
 
 <h3>Can I change or cancel at any time?</h3>
 <p>Yes. You switch from Basic to Pro inside the app and pay only the difference for the rest of the billing period. You will find cancellation and your invoices under "Manage subscription". See also our <a href="/refunds.html">Cancellation &amp; Refund Policy</a>.</p>
