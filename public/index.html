@@ -49,6 +49,11 @@
   .msg.user{align-self:flex-end;background:var(--accent-soft);color:var(--accent);padding:8px 11px;border-radius:10px 10px 2px 10px;}
   .msg.bot{background:var(--surface-2);border:1px solid var(--border);padding:8px 11px;border-radius:2px 10px 10px 10px;}
   .msg.bot.fallback{border-color:var(--warn-border);background:var(--warn-bg);}
+  .msg ul,.msg ol{margin:6px 0;padding-left:20px;}
+  .msg li{margin:2px 0;}
+  .msg li>ul{margin:2px 0;}
+  .msg>ul:first-child,.msg>ol:first-child{margin-top:0;}
+  .msg>ul:last-child,.msg>ol:last-child{margin-bottom:0;}
   .msg.bot.fallback a{color:var(--text);font-weight:600;}
   .composer{display:flex;gap:6px;}
   .composer input{flex:1;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;}

@@ -95,7 +95,7 @@ function planFromRow(workspaceId, rawPlan) {
 // Αποθηκεύονται σε ΕΝΑ KV record (όχι ξεχωριστό key ανά πεδίο) ώστε να μη
 // χρειάζονται πολλαπλά reads/writes για κάτι που πάντα διαβάζεται/γράφεται μαζί.
 const DEFAULT_WIDGET_SETTINGS = {
-  accentColor: "#6B7280",
+  accentColor: "#111111",
   botName: "Assistant",
   logoUrl: null,
   notifyEmail: null,

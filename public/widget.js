@@ -51,7 +51,7 @@
   // παίρνουν όλα τα στοιχεία του widget. Δεχόμαστε μόνο hex (#rgb ή #rrggbb),
   // όπως ήδη επιβάλλει το backend στις ρυθμίσεις -- οτιδήποτε άλλο πέφτει
   // στο προεπιλεγμένο, ώστε μια λάθος τιμή στο snippet να μη σπάει το CSS.
-  var DEFAULT_ACCENT = "#6B7280";
+  var DEFAULT_ACCENT = "#111111";
 
   function normalizeHex(value) {
     if (typeof value !== "string") return null;
@@ -207,6 +207,11 @@
     ".msg.bot{align-self:flex-start;background:#f1f1f3;color:#1a1a1a;border-bottom-left-radius:5px;}",
     ".msg.fallback-contact{align-self:flex-start;max-width:92%;background:#f1f1f3;color:#1a1a1a;",
     "border-left:3px solid var(--accent);border-bottom-left-radius:5px;}",
+    ".msg ul,.msg ol{margin:6px 0;padding-left:20px;}",
+    ".msg li{margin:2px 0;}",
+    ".msg li>ul{margin:2px 0;}",
+    ".msg>ul:first-child,.msg>ol:first-child{margin-top:0;}",
+    ".msg>ul:last-child,.msg>ol:last-child{margin-bottom:0;}",
     ".fallback-contact-text{margin-bottom:8px;}",
     ".contact-bar{display:flex;flex-wrap:wrap;gap:6px;padding:10px 16px;background:#fff;border-bottom:1px solid #ececef;}",
     // Pill κουμπιά παντού: πλήρως στρογγυλεμένες άκρες.
@@ -312,15 +317,101 @@
       .replace(/'/g, "&#39;");
   }
 
-  // Ελάχιστη μορφοποίηση **bold** -> <strong>, ίδια λογική με το
-  // formatAnswer() του κύριου εργαλείου (shared.js), αντιγραμμένη εδώ
-  // επίτηδες -- το widget.js πρέπει να μείνει ένα αυτόνομο αρχείο, χωρίς
-  // εξωτερικές εξαρτήσεις (φορτώνεται σε ξένο site, όχι στο δικό μας).
-  function formatAnswer(text) {
-    return escapeHtml(text)
+  // Μορφοποίηση απαντήσεων. Αντιγραμμένη επίτηδες από το shared.js (η ΙΔΙΑ λογική) -- το
+  // widget.js πρέπει να μείνει ένα αυτόνομο αρχείο, χωρίς εξωτερικές εξαρτήσεις (φορτώνεται
+  // σε ξένο site, όχι στο δικό μας).
+  // --- formatAnswer (Βήμα 2δ) -- ΑΡΧΗ ---
+  // Ελάχιστος και ΑΣΦΑΛΗΣ μορφοποιητής markdown για τις απαντήσεις (Βήμα 2δ). Το Gemini
+  // γράφει λίστες (`* κείμενο`, `1. κείμενο`), πλάγια (`*κείμενο*`) και έντονα (`**κείμενο**`).
+  // ΙΔΙΑ λογική στο widget.js και στο shared.js (demo σελίδα, test panel του editor).
+  // Πρώτα ξεφεύγουν ΟΛΟΙ οι ειδικοί χαρακτήρες HTML και μετά προστίθενται μόνο οι δικές μας
+  // ετικέτες (strong, em, ul, ol, li, br): τίποτα από το κείμενο δεν γίνεται ποτέ ετικέτα.
+  // Ημιτελές markdown (π.χ. ένα `**` που δεν έκλεισε ακόμα ενώ γίνεται streaming) μένει
+  // σαν κείμενο μέχρι να ολοκληρωθεί, χωρίς σφάλμα.
+  function formatInline(s) {
+    return s
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/\n/g, "<br>");
+      .replace(/(^|[\s(])\*([^\s*](?:[^*\n]*?[^\s*])?)\*(?=$|[\s.,;:!?)])/g, "$1<em>$2</em>");
   }
+
+  function formatAnswer(text) {
+    var lines = escapeHtml(text).replace(/\r\n?/g, "\n").split("\n");
+    var blocks = []; // { kind: "p" | "list", html }
+    var para = [];
+    var list = null; // { type: "ul" | "ol", start, items: [{ html, children: [] }] }
+
+    function flushPara() {
+      if (para.length) {
+        blocks.push({ kind: "p", html: para.join("<br>") });
+        para = [];
+      }
+    }
+    function flushList() {
+      if (!list) return;
+      var html = "<" + list.type + (list.type === "ol" && list.start > 1 ? ' start="' + list.start + '"' : "") + ">";
+      list.items.forEach(function (item) {
+        html += "<li>" + item.html;
+        if (item.children.length) {
+          html += "<ul>" + item.children.map(function (c) { return "<li>" + c + "</li>"; }).join("") + "</ul>";
+        }
+        html += "</li>";
+      });
+      blocks.push({ kind: "list", html: html + "</" + list.type + ">" });
+      list = null;
+    }
+
+    lines.forEach(function (line) {
+      if (!line.trim()) {
+        flushPara();
+        flushList();
+        return;
+      }
+      var bullet = /^(\s*)[*\-\u2022]\s+(\S.*)$/.exec(line);
+      var numbered = bullet ? null : /^(\s*)(\d{1,2})[.)]\s+(\S.*)$/.exec(line);
+      var heading = bullet || numbered ? null : /^\s{0,3}#{1,6}\s+(\S.*)$/.exec(line);
+
+      if (bullet) {
+        // Εσοχή 2+ χαρακτήρων μέσα σε υπάρχουσα λίστα = υπο-κουκκίδα (ένα επίπεδο).
+        if (bullet[1].length >= 2 && list && list.items.length) {
+          list.items[list.items.length - 1].children.push(formatInline(bullet[2]));
+          return;
+        }
+        flushPara();
+        if (!list || list.type !== "ul") {
+          flushList();
+          list = { type: "ul", start: 1, items: [] };
+        }
+        list.items.push({ html: formatInline(bullet[2]), children: [] });
+      } else if (numbered) {
+        flushPara();
+        if (!list || list.type !== "ol") {
+          flushList();
+          list = { type: "ol", start: parseInt(numbered[2], 10), items: [] };
+        }
+        list.items.push({ html: formatInline(numbered[3]), children: [] });
+      } else if (heading) {
+        flushPara();
+        flushList();
+        blocks.push({ kind: "p", html: "<strong>" + formatInline(heading[1]) + "</strong>" });
+      } else {
+        flushList();
+        para.push(formatInline(line.trim()));
+      }
+    });
+    flushPara();
+    flushList();
+
+    // Κενή γραμμή ανάμεσα σε δύο παραγράφους = οπτικός διαχωρισμός (όπως πριν)· γύρω από λίστες
+    // αρκούν τα περιθώρια του CSS.
+    var out = "";
+    blocks.forEach(function (b, i) {
+      if (i > 0 && b.kind === "p" && blocks[i - 1].kind === "p") out += "<br><br>";
+      out += b.html;
+    });
+    return out;
+  }
+
+  // --- formatAnswer (Βήμα 2δ) -- ΤΕΛΟΣ ---
 
   function addMessage(role, html) {
     var el = document.createElement("div");

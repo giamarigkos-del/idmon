@@ -157,6 +157,11 @@
   .test-q-answer{font-size:12.5px;line-height:1.6;background:var(--surface-2);border:1px solid var(--border);
     border-radius:6px;padding:10px;margin-top:8px;max-height:180px;overflow-y:auto;}
   .test-q-answer.fallback{border-color:var(--warn-border);background:var(--warn-bg);}
+  .test-q-answer ul,.test-q-answer ol{margin:6px 0;padding-left:20px;}
+  .test-q-answer li{margin:2px 0;}
+  .test-q-answer li>ul{margin:2px 0;}
+  .test-q-answer>ul:first-child,.test-q-answer>ol:first-child{margin-top:0;}
+  .test-q-answer>ul:last-child,.test-q-answer>ol:last-child{margin-bottom:0;}
   .test-q-meta{font-size:11px;color:var(--text-soft);margin-top:6px;}
   .test-q-details{margin-top:8px;}
   .test-q-details summary{font-size:11px;color:var(--text-soft);cursor:pointer;}
@@ -1466,7 +1471,7 @@
         <input type="text" id="settingsBotName" maxlength="60" value="${escapeHtml(settings.botName || "")}">
 
         <div class="label">${escapeHtml(t("accentColorLabel"))}</div>
-        <input type="color" id="settingsAccentColor" value="${escapeHtml(settings.accentColor || "#6B7280")}" style="width:64px;height:32px;padding:2px;cursor:pointer;">
+        <input type="color" id="settingsAccentColor" value="${escapeHtml(settings.accentColor || "#111111")}" style="width:64px;height:32px;padding:2px;cursor:pointer;">
 
         <div class="label">${escapeHtml(t("logoUrlLabel"))}</div>
         <input type="text" id="settingsLogoUrl" placeholder="https://…" value="${escapeHtml(settings.logoUrl || "")}">

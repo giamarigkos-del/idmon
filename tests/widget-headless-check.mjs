@@ -467,9 +467,9 @@ async function testAccentColorHandling() {
   assert((await accentOf("#112233")) === "#112233", "#112233 περνά όπως είναι");
   assert((await accentOf("#ABC")) === "#aabbcc", "το 3ψήφιο #ABC γίνεται #aabbcc");
   assert((await accentOf("  #2F5BEA ")) === "#2f5bea", "κενά γύρω από την τιμή αγνοούνται");
-  assert((await accentOf(null)) === "#6b7280", "χωρίς attribute: προεπιλεγμένο");
+  assert((await accentOf(null)) === "#111111", "χωρίς attribute: προεπιλεγμένο (μαύρο)");
   for (const bad of ["red", "rgb(1,2,3)", "#12", "#12345g", "#1234567", "javascript:alert(1)"]) {
-    assert((await accentOf(bad)) === "#6b7280", `άκυρη τιμή "${bad}" -> προεπιλεγμένο`);
+    assert((await accentOf(bad)) === "#111111", `άκυρη τιμή "${bad}" -> προεπιλεγμένο`);
   }
   const injected = "#fff;} body{display:none";
   const window = await withDom('data-embed-id="emb-test123" data-accent-color="' + injected + '"');

@@ -147,7 +147,7 @@ async function testDefaultsWhenNothingSaved() {
   console.log("\n[Workspace χωρίς αποθηκευμένες ρυθμίσεις -> προεπιλογές]");
   addEmbed("emb-fresh1", "ws-fresh1", "free");
   const { body } = await getConfig("emb-fresh1");
-  assert(body.accentColor === "#6B7280" && body.botName === "Assistant", "προεπιλεγμένο χρώμα και όνομα");
+  assert(body.accentColor === "#111111" && body.botName === "Assistant", "προεπιλεγμένο χρώμα (μαύρο) και όνομα");
   assert(body.logoUrl === null && body.contactLabel === null && body.contactUrl === null && body.contactPhone === null, "χωρίς λογότυπο/επικοινωνία -> null");
 }
 
@@ -180,7 +180,7 @@ async function testOutputSanitization() {
     return (await getConfig("emb-bad1")).body;
   };
   for (const bad of ["red", "#12", "#12345", "#12345g", "rgb(1,2,3)", "#fff;} body{display:none", 123, null]) {
-    assert((await cfg({ accentColor: bad })).accentColor === "#6B7280", `χρώμα ${JSON.stringify(bad)} -> προεπιλεγμένο`);
+    assert((await cfg({ accentColor: bad })).accentColor === "#111111", `χρώμα ${JSON.stringify(bad)} -> προεπιλεγμένο`);
   }
   assert((await cfg({ botName: "x".repeat(61) })).botName === "Assistant", "όνομα 61 χαρακτήρων -> προεπιλεγμένο");
   assert((await cfg({ botName: "   " })).botName === "Assistant", "κενό όνομα -> προεπιλεγμένο");
