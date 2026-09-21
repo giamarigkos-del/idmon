@@ -411,6 +411,99 @@ async function testHistoryDoesNotLeakBetweenPages() {
   assert(!("history" in bodies2[0]), "νέα σελίδα = καθόλου ιστορικό");
 }
 
+// --- Βήμα 2α: νέο στυλ (header, avatar, χρώμα πελάτη, pill κουμπιά) ----------
+function widgetCss(window) {
+  const host = window.document.getElementById("rag-embed-widget-host");
+  return host.shadowRoot.querySelector("style").textContent;
+}
+
+async function testNewHeaderStructure() {
+  console.log("\n[Νέο στυλ -- header: avatar, τίτλος δύο γραμμών, κλείσιμο]");
+  const window = await withDom('data-embed-id="emb-test123" data-bot-name="HomeTech Βοηθός" data-lang="el"');
+  const root = window.document.getElementById("rag-embed-widget-host").shadowRoot;
+  const header = root.querySelector(".header");
+  assert(!!header.querySelector(".avatar svg"), "υπάρχει avatar με προεπιλεγμένο εικονίδιο");
+  assert(header.querySelector(".header-text .header-title").textContent === "HomeTech Βοηθός", "ο τίτλος είναι το όνομα του bot");
+  const sub = header.querySelector(".header-text .header-sub").textContent;
+  assert(sub.includes("AI"), "ο υπότιτλος αναφέρει AI (AI Act Article 50)");
+  assert(!sub.includes("🤖"), "ο υπότιτλος δεν έχει πια emoji (το avatar κάνει τη δουλειά)");
+  assert(!root.querySelector(".header-top"), "δεν υπάρχει το παλιό .header-top");
+  const kids = [...header.children].map((c) => c.className);
+  assert(kids[0] === "avatar" && kids[1] === "header-text" && kids[2] === "close-btn", "σειρά: avatar, κείμενο, κουμπί κλεισίματος");
+  const close = header.querySelector(".close-btn");
+  assert(!!close.querySelector("svg") && close.getAttribute("aria-label") === "Κλείσιμο", "το κλείσιμο έχει εικονίδιο και aria-label");
+  assert(root.querySelectorAll(".msg").length === 0, "δεν προστέθηκαν στοιχεία .msg (τα μηνύματα μετριούνται από τα τεστ)");
+}
+
+async function testLauncherIcon() {
+  console.log("\n[Νέο στυλ -- ο εκκινητής (bubble) έχει εικονίδιο και aria-label]");
+  const window = await withDom('data-embed-id="emb-test123" data-lang="el"');
+  const bubble = window.document.getElementById("rag-embed-widget-host").shadowRoot.querySelector(".bubble");
+  assert(!!bubble.querySelector("svg"), "εικονίδιο SVG αντί για emoji");
+  assert(bubble.getAttribute("aria-label") === "Άνοιγμα βοηθού", "aria-label διατηρείται");
+}
+
+async function testAccentColorHandling() {
+  console.log("\n[Νέο στυλ -- το χρώμα του πελάτη: έγκυρα hex περνούν, όλα τα άλλα πέφτουν στο προεπιλεγμένο]");
+  const accentOf = async (attr) => {
+    const window = await withDom('data-embed-id="emb-test123"' + (attr === null ? "" : ` data-accent-color="${attr}"`));
+    const m = /\.bubble,\.panel\{--accent:([^;]+);/.exec(widgetCss(window));
+    return m ? m[1].toLowerCase() : null;
+  };
+  assert((await accentOf("#112233")) === "#112233", "#112233 περνά όπως είναι");
+  assert((await accentOf("#ABC")) === "#aabbcc", "το 3ψήφιο #ABC γίνεται #aabbcc");
+  assert((await accentOf("  #2F5BEA ")) === "#2f5bea", "κενά γύρω από την τιμή αγνοούνται");
+  assert((await accentOf(null)) === "#6b7280", "χωρίς attribute: προεπιλεγμένο");
+  for (const bad of ["red", "rgb(1,2,3)", "#12", "#12345g", "#1234567", "javascript:alert(1)"]) {
+    assert((await accentOf(bad)) === "#6b7280", `άκυρη τιμή "${bad}" -> προεπιλεγμένο`);
+  }
+  const injected = "#fff;} body{display:none";
+  const window = await withDom('data-embed-id="emb-test123" data-accent-color="' + injected + '"');
+  const css = widgetCss(window);
+  assert(!css.includes("body{"), "προσπάθεια εισαγωγής CSS μέσω του attribute δεν περνά (κανένας κανόνας body{...} στο στυλ)");
+}
+
+async function testAutomaticContrast() {
+  console.log("\n[Νέο στυλ -- το χρώμα κειμένου πάνω στο χρώμα του πελάτη διαλέγεται αυτόματα]");
+  const onAccentOf = async (hex) => {
+    const window = await withDom(`data-embed-id="emb-test123" data-accent-color="${hex}"`);
+    const m = /--on-accent:([^;]+);/.exec(widgetCss(window));
+    return m ? m[1] : null;
+  };
+  for (const dark of ["#111111", "#000000", "#2F5BEA", "#6B7280", "#8B0000", "#0A7B3E"]) {
+    assert((await onAccentOf(dark)) === "#ffffff", `σκούρο/μεσαίο ${dark} -> άσπρο κείμενο`);
+  }
+  for (const light of ["#FFE14D", "#FFFFFF", "#FFEB3B", "#00FF00", "#F5F5F5", "#7FDBFF"]) {
+    assert((await onAccentOf(light)) === "#111111", `ανοιχτό ${light} -> σκούρο κείμενο`);
+  }
+}
+
+async function testPillShapesAndAccessibilityCss() {
+  console.log("\n[Νέο στυλ -- pill κουμπιά παντού, ορατό focus, σεβασμός στο reduced-motion]");
+  const window = await withDom('data-embed-id="emb-test123" data-contact-label="Επικοινωνία" data-contact-url="https://x.gr"');
+  const css = widgetCss(window);
+  const radiusOf = (selector) => {
+    const re = new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\{[^}]*border-radius:([^;}]+)");
+    const m = re.exec(css);
+    return m ? m[1] : null;
+  };
+  assert(radiusOf(".input-row button") === "999px", "το κουμπί αποστολής είναι pill");
+  assert(radiusOf(".input-row input") === "999px", "το πεδίο ερώτησης είναι pill");
+  assert(radiusOf(".contact-link") === "999px", "τα κουμπιά επικοινωνίας είναι pill");
+  assert(css.includes(".bubble:focus-visible"), "ορατό focus στον εκκινητή (bubble) για πληκτρολόγιο");
+  assert(css.includes(".input-row button:focus-visible"), "ορατό focus στο κουμπί αποστολής");
+  assert(css.includes(".close-btn:focus-visible"), "ορατό focus στο κουμπί κλεισίματος");
+  assert(css.includes("prefers-reduced-motion"), "η κίνηση απενεργοποιείται όταν ζητείται reduced-motion");
+}
+
+async function testPositionStillWorks() {
+  console.log("\n[Νέο στυλ -- η θέση bottom-left/bottom-right εξακολουθεί να δουλεύει]");
+  const left = widgetCss(await withDom('data-embed-id="emb-test123" data-position="bottom-left"'));
+  assert(/\.bubble\{[^}]*left:20px/.test(left) && /\.panel\{[^}]*left:20px/.test(left), "bottom-left: και το bubble και το panel αριστερά");
+  const right = widgetCss(await withDom('data-embed-id="emb-test123"'));
+  assert(/\.bubble\{[^}]*right:20px/.test(right) && /\.panel\{[^}]*right:20px/.test(right), "προεπιλογή: δεξιά");
+}
+
 async function run() {
   await testCreatesHostAndShadowRoot();
   await testMissingEmbedIdDoesNothing();
@@ -431,6 +524,12 @@ async function run() {
   await testFailedExchangeNotRemembered();
   await testLimitReachedNotRemembered();
   await testHistoryDoesNotLeakBetweenPages();
+  await testNewHeaderStructure();
+  await testLauncherIcon();
+  await testAccentColorHandling();
+  await testAutomaticContrast();
+  await testPillShapesAndAccessibilityCss();
+  await testPositionStillWorks();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);

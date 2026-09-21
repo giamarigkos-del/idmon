@@ -4,8 +4,11 @@
 //   <script src="https://operations-portal-rag.giamarigkos.workers.dev/widget.js"
 //           data-embed-id="emb-xxxxxxxxxxxx"></script>
 //
-// Προαιρετικά data-* attributes: data-accent-color, data-bot-name, data-lang
-// ("el"/"en"), data-position ("bottom-right"/"bottom-left").
+// Προαιρετικά data-* attributes: data-accent-color (hex, π.χ. #111111 -- το
+// χρώμα του header/των κουμπιών/της φούσκας του επισκέπτη· το χρώμα του
+// κειμένου πάνω του διαλέγεται ΑΥΤΟΜΑΤΑ, άσπρο ή σκούρο, ώστε να διαβάζεται
+// ό,τι χρώμα κι αν επιλέξει ο πελάτης), data-bot-name, data-lang ("el"/"en"),
+// data-position ("bottom-right"/"bottom-left").
 //
 // ΣΚΟΠΙΜΑ ΔΕΝ χρησιμοποιεί iframe: αν το UI έτρεχε μέσα σε iframe που
 // δείχνει σε δικό μας domain, κάθε request προς το backend θα είχε ΠΑΝΤΑ
@@ -36,7 +39,47 @@
   }
 
   var BASE_URL = new URL(scriptTag.src).origin;
-  var accentColor = scriptTag.getAttribute("data-accent-color") || "#6B7280";
+  // Βήμα 2α: το χρώμα του πελάτη είναι η ΜΙΑ "ετικέτα" (--accent) απ' όπου
+  // παίρνουν όλα τα στοιχεία του widget. Δεχόμαστε μόνο hex (#rgb ή #rrggbb),
+  // όπως ήδη επιβάλλει το backend στις ρυθμίσεις -- οτιδήποτε άλλο πέφτει
+  // στο προεπιλεγμένο, ώστε μια λάθος τιμή στο snippet να μη σπάει το CSS.
+  var DEFAULT_ACCENT = "#6B7280";
+
+  function normalizeHex(value) {
+    if (typeof value !== "string") return null;
+    var v = value.trim();
+    var short = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(v);
+    if (short) return ("#" + short[1] + short[1] + short[2] + short[2] + short[3] + short[3]).toLowerCase();
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) return v.toLowerCase();
+    return null;
+  }
+
+  // Σχετική φωτεινότητα κατά WCAG και επιλογή του χρώματος κειμένου (άσπρο
+  // ή σχεδόν μαύρο) με τη μεγαλύτερη αντίθεση πάνω στο χρώμα του πελάτη.
+  function readableOn(hex) {
+    function channel(i) {
+      var c = parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16) / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    }
+    var lum = 0.2126 * channel(0) + 0.7152 * channel(1) + 0.0722 * channel(2);
+    var contrastWhite = 1.05 / (lum + 0.05);
+    var contrastDark = (lum + 0.05) / 0.05;
+    return contrastWhite >= contrastDark ? "#ffffff" : "#111111";
+  }
+
+  var accentColor = normalizeHex(scriptTag.getAttribute("data-accent-color")) || DEFAULT_ACCENT;
+  var onAccent = readableOn(accentColor);
+  var avatarBg = onAccent === "#ffffff" ? "rgba(255,255,255,.2)" : "rgba(0,0,0,.12)";
+
+  var ICON_CHAT =
+    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>';
+  var ICON_AVATAR =
+    '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8L12 2z"/>' +
+    '<path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>';
+  var ICON_CLOSE =
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" ' +
+    'stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
   var botName = scriptTag.getAttribute("data-bot-name") || "Assistant";
   var lang = (scriptTag.getAttribute("data-lang") || "el").toLowerCase();
   var position = scriptTag.getAttribute("data-position") === "bottom-left" ? "bottom-left" : "bottom-right";
@@ -92,39 +135,53 @@
   var sideProp = position === "bottom-left" ? "left" : "right";
 
   var style = document.createElement("style");
-  style.textContent =
-    "*{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;}" +
-    ".bubble{position:fixed;bottom:20px;" + sideProp + ":20px;width:56px;height:56px;border-radius:50%;" +
-    "background:" + accentColor + ";color:#fff;border:none;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25);" +
-    "z-index:2147483647;display:flex;align-items:center;justify-content:center;font-size:26px;}" +
-    ".panel{position:fixed;bottom:88px;" + sideProp + ":20px;width:340px;max-width:calc(100vw - 40px);" +
-    "height:460px;max-height:calc(100vh - 120px);background:#fff;border-radius:12px;" +
-    "box-shadow:0 8px 30px rgba(0,0,0,.25);display:none;flex-direction:column;overflow:hidden;" +
-    "z-index:2147483647;}" +
-    ".panel.open{display:flex;}" +
-    ".header{background:" + accentColor + ";color:#fff;padding:14px 16px;display:flex;" +
-    "flex-direction:column;gap:2px;}" +
-    ".header-top{display:flex;align-items:center;justify-content:space-between;}" +
-    ".header-title{font-size:14.5px;font-weight:700;}" +
-    ".header-sub{font-size:11px;opacity:.85;}" +
-    ".close-btn{background:none;border:none;color:#fff;font-size:18px;cursor:pointer;line-height:1;padding:2px 4px;}" +
-    ".messages{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:#f7f7f8;}" +
-    ".msg{max-width:82%;padding:9px 12px;border-radius:10px;font-size:13.5px;line-height:1.45;word-wrap:break-word;}" +
-    ".msg.user{align-self:flex-end;background:" + accentColor + ";color:#fff;border-bottom-right-radius:2px;}" +
-    ".msg.bot{align-self:flex-start;background:#fff;color:#1a1a1a;border:1px solid #e3e3e6;border-bottom-left-radius:2px;}" +
-    ".msg.fallback-contact{align-self:flex-start;max-width:92%;background:#fff;color:#1a1a1a;" +
-    "border:1px solid #e3e3e6;border-left:3px solid " + accentColor + ";border-bottom-left-radius:2px;}" +
-    ".fallback-contact-text{margin-bottom:6px;}" +
-    ".contact-bar{display:flex;flex-wrap:wrap;gap:6px;padding:8px 14px;background:#fff;border-bottom:1px solid #e3e3e6;}" +
-    ".contact-link{display:inline-block;font-size:11.5px;font-weight:700;color:#fff;background:" + accentColor + ";" +
-    "padding:4px 10px;border-radius:12px;text-decoration:none;white-space:nowrap;}" +
-    ".contact-link:hover{opacity:.85;}" +
-    ".input-row{display:flex;gap:8px;padding:10px;border-top:1px solid #e3e3e6;background:#fff;}" +
-    ".input-row input{flex:1;border:1px solid #d8d8dc;border-radius:8px;padding:9px 10px;font-size:13.5px;outline:none;}" +
-    ".input-row input:focus{border-color:" + accentColor + ";}" +
-    ".input-row button{background:" + accentColor + ";color:#fff;border:none;border-radius:8px;" +
-    "padding:0 14px;font-size:13px;font-weight:600;cursor:pointer;}" +
-    ".input-row button:disabled{opacity:.5;cursor:default;}";
+  style.textContent = [
+    "*{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;}",
+    // Οι "ετικέτες" χρώματος: ΜΙΑ φορά ορισμένες, όλα τα υπόλοιπα τις διαβάζουν.
+    ".bubble,.panel{--accent:" + accentColor + ";--on-accent:" + onAccent + ";--avatar-bg:" + avatarBg + ";}",
+    ".bubble{position:fixed;bottom:20px;" + sideProp + ":20px;width:56px;height:56px;border-radius:50%;",
+    "background:var(--accent);color:var(--on-accent);border:none;cursor:pointer;padding:0;",
+    "box-shadow:0 6px 20px rgba(0,0,0,.28);z-index:2147483647;display:flex;align-items:center;justify-content:center;}",
+    ".panel{position:fixed;bottom:88px;" + sideProp + ":20px;width:360px;max-width:calc(100vw - 32px);",
+    "height:520px;max-height:calc(100vh - 110px);background:#fff;border-radius:20px;",
+    "box-shadow:0 12px 40px rgba(0,0,0,.28);display:none;flex-direction:column;overflow:hidden;z-index:2147483647;}",
+    ".panel.open{display:flex;animation:pop .16s ease-out;}",
+    "@keyframes pop{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}",
+    "@media (prefers-reduced-motion:reduce){.panel.open{animation:none;}}",
+    // Header: σκούρα ζώνη, ίσια άκρη πάνω στο λευκό σώμα.
+    ".header{background:var(--accent);color:var(--on-accent);padding:14px 14px 14px 16px;display:flex;align-items:center;gap:12px;}",
+    ".avatar{flex:none;width:38px;height:38px;border-radius:50%;background:var(--avatar-bg);",
+    "display:flex;align-items:center;justify-content:center;overflow:hidden;}",
+    ".avatar svg{width:20px;height:20px;}",
+    ".header-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}",
+    ".header-title{font-size:15px;font-weight:700;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
+    ".header-sub{font-size:12px;line-height:1.25;opacity:.75;}",
+    ".close-btn{flex:none;background:none;border:none;color:var(--on-accent);cursor:pointer;line-height:0;padding:8px;border-radius:50%;opacity:.85;}",
+    ".close-btn:hover{opacity:1;background:var(--avatar-bg);}",
+    // Σώμα: λευκό, δύο ξεχωριστά στυλ φούσκας (επισκέπτης = χρώμα πελάτη, bot = ανοιχτό γκρι).
+    ".messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px;background:#fff;scrollbar-width:thin;}",
+    ".msg{max-width:84%;padding:10px 14px;border-radius:18px;font-size:14px;line-height:1.5;word-wrap:break-word;}",
+    ".msg.user{align-self:flex-end;background:var(--accent);color:var(--on-accent);border-bottom-right-radius:5px;}",
+    ".msg.bot{align-self:flex-start;background:#f1f1f3;color:#1a1a1a;border-bottom-left-radius:5px;}",
+    ".msg.fallback-contact{align-self:flex-start;max-width:92%;background:#f1f1f3;color:#1a1a1a;",
+    "border-left:3px solid var(--accent);border-bottom-left-radius:5px;}",
+    ".fallback-contact-text{margin-bottom:8px;}",
+    ".contact-bar{display:flex;flex-wrap:wrap;gap:6px;padding:10px 16px;background:#fff;border-bottom:1px solid #ececef;}",
+    // Pill κουμπιά παντού: πλήρως στρογγυλεμένες άκρες.
+    ".contact-link{display:inline-block;font-size:12px;font-weight:700;color:var(--on-accent);background:var(--accent);",
+    "padding:6px 14px;border-radius:999px;text-decoration:none;white-space:nowrap;}",
+    ".contact-link:hover{opacity:.85;}",
+    ".input-row{display:flex;gap:8px;padding:12px;border-top:1px solid #ececef;background:#fff;}",
+    ".input-row input{flex:1;min-width:0;border:1px solid #d8d8dc;border-radius:999px;padding:10px 16px;font-size:14px;",
+    "outline:none;background:#fff;color:#1a1a1a;}",
+    ".input-row input:focus{border-color:var(--accent);}",
+    ".input-row button{flex:none;background:var(--accent);color:var(--on-accent);border:none;border-radius:999px;",
+    "padding:0 18px;font-size:13.5px;font-weight:600;cursor:pointer;}",
+    ".input-row button:disabled{opacity:.5;cursor:default;}",
+    // Προσβασιμότητα: ορατό focus για χρήστες πληκτρολογίου.
+    ".bubble:focus-visible,.input-row button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}",
+    ".close-btn:focus-visible{outline:2px solid var(--on-accent);outline-offset:1px;}",
+  ].join("");
   root.appendChild(style);
 
   function escapeAttr(str) {
@@ -153,18 +210,19 @@
   bubble.className = "bubble";
   bubble.type = "button";
   bubble.setAttribute("aria-label", t.openLabel);
-  bubble.textContent = "💬";
+  bubble.innerHTML = ICON_CHAT;
   root.appendChild(bubble);
 
   var panel = document.createElement("div");
   panel.className = "panel";
   panel.innerHTML =
     '<div class="header">' +
-    '  <div class="header-top">' +
+    '  <div class="avatar"></div>' +
+    '  <div class="header-text">' +
     '    <span class="header-title"></span>' +
-    '    <button type="button" class="close-btn" aria-label=""></button>' +
+    '    <span class="header-sub"></span>' +
     "  </div>" +
-    '  <span class="header-sub"></span>' +
+    '  <button type="button" class="close-btn" aria-label=""></button>' +
     "</div>" +
     (hasContact ? '<div class="contact-bar">' + contactLinksHtml() + "</div>" : "") +
     '<div class="messages"></div>' +
@@ -175,8 +233,9 @@
   root.appendChild(panel);
 
   panel.querySelector(".header-title").textContent = botName;
-  panel.querySelector(".header-sub").textContent = "🤖 " + t.disclosure;
-  panel.querySelector(".close-btn").textContent = "✕";
+  panel.querySelector(".header-sub").textContent = t.disclosure;
+  panel.querySelector(".avatar").innerHTML = ICON_AVATAR;
+  panel.querySelector(".close-btn").innerHTML = ICON_CLOSE;
   panel.querySelector(".close-btn").setAttribute("aria-label", t.closeLabel);
   var messagesEl = panel.querySelector(".messages");
   var inputEl = panel.querySelector(".input-row input");
