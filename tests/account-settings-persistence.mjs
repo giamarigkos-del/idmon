@@ -100,7 +100,7 @@ async function testIsolationBetweenAccounts(sessionA) {
   const sessionB = await signup(EMAIL_B);
 
   const defaultColorB = await getAccentColor(sessionB);
-  assert(defaultColorB === "#6B7280", "νέος λογαριασμός B ξεκινάει με το ΠΡΟΕΠΙΛΕΓΜΕΝΟ χρώμα, όχι το χρώμα του A");
+  assert(defaultColorB === "#111111", "νέος λογαριασμός B ξεκινάει με το ΠΡΟΕΠΙΛΕΓΜΕΝΟ χρώμα (μαύρο), όχι το χρώμα του A");
 
   await patchAccentColor(sessionB, COLOR_B);
   const colorBAfterPatch = await getAccentColor(sessionB);
