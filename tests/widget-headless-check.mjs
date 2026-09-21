@@ -284,6 +284,133 @@ async function testNormalAnswerNeverShowsContactPrompt() {
   );
 }
 
+// --- Βήμα 1: ιστορικό συζήτησης ---------------------------------------------
+// Στέλνει μία ερώτηση μέσα από το UI και περιμένει να τελειώσει η ροή.
+async function ask(window, host, text) {
+  const input = host.shadowRoot.querySelector(".input-row input");
+  const sendBtn = host.shadowRoot.querySelector(".input-row button");
+  input.value = text;
+  sendBtn.dispatchEvent(new window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+}
+
+function answeringFetch(capturedBodies, answerFor) {
+  return async (url, options) => {
+    const body = JSON.parse(options.body);
+    capturedBodies.push(body);
+    return {
+      ok: true,
+      body: makeSSEBody([
+        { type: "chunk", text: answerFor(body.question) },
+        { type: "done", isFallback: false, primarySource: null, relatedSections: [] },
+      ]),
+    };
+  };
+}
+
+async function testFirstQuestionHasNoHistory() {
+  console.log("\n[Ιστορικό -- η ΠΡΩΤΗ ερώτηση στέλνεται ακριβώς όπως πριν, χωρίς πεδίο history]");
+  const bodies = [];
+  const window = await withDom('data-embed-id="emb-test123"', answeringFetch(bodies, (q) => "Απάντηση για " + q));
+  const host = window.document.getElementById("rag-embed-widget-host");
+  await ask(window, host, "Τι ώρες είστε ανοιχτά;");
+  assert(bodies.length === 1, "έγινε μία κλήση");
+  assert(!("history" in bodies[0]), "το body ΔΕΝ έχει πεδίο history στην πρώτη ερώτηση");
+  assert(bodies[0].question === "Τι ώρες είστε ανοιχτά;", "η ερώτηση στέλνεται κανονικά");
+}
+
+async function testSecondQuestionSendsHistory() {
+  console.log("\n[Ιστορικό -- η ΔΕΥΤΕΡΗ ερώτηση στέλνει την πρώτη ανταλλαγή]");
+  const bodies = [];
+  const window = await withDom('data-embed-id="emb-test123"', answeringFetch(bodies, (q) => "Απάντηση για " + q));
+  const host = window.document.getElementById("rag-embed-widget-host");
+  await ask(window, host, "Τι ώρες είστε ανοιχτά;");
+  await ask(window, host, "Και το Σάββατο;");
+  assert(bodies.length === 2, "έγιναν δύο κλήσεις");
+  const h = bodies[1].history;
+  assert(Array.isArray(h) && h.length === 2, "η δεύτερη κλήση στέλνει 2 μηνύματα ιστορικού");
+  assert(h[0].role === "user" && h[0].text === "Τι ώρες είστε ανοιχτά;", "πρώτο: ο χρήστης, με τη σωστή ερώτηση");
+  assert(h[1].role === "assistant" && h[1].text === "Απάντηση για Τι ώρες είστε ανοιχτά;", "δεύτερο: ο βοηθός (όχι \"bot\"), με την πλήρη απάντηση");
+  assert(bodies[1].question === "Και το Σάββατο;", "η νέα ερώτηση ΔΕΝ είναι μέσα στο ιστορικό, στέλνεται ξεχωριστά");
+  const roles = new Set(h.map((x) => x.role));
+  assert([...roles].every((r) => r === "user" || r === "assistant"), "μόνο ρόλοι user/assistant");
+}
+
+async function testHistoryCappedAtSix() {
+  console.log("\n[Ιστορικό -- μετά από πολλές ερωτήσεις στέλνονται μόνο τα τελευταία 6 μηνύματα]");
+  const bodies = [];
+  const window = await withDom('data-embed-id="emb-test123"', answeringFetch(bodies, (q) => "Α-" + q));
+  const host = window.document.getElementById("rag-embed-widget-host");
+  for (let i = 1; i <= 6; i++) await ask(window, host, "Ερώτηση " + i);
+  const last = bodies[5].history;
+  assert(last.length === 6, "στην 6η ερώτηση το ιστορικό είναι 6 μηνύματα (όχι 10)");
+  assert(last[0].text === "Ερώτηση 3", "ξεκινά από την 3η ερώτηση (οι δύο παλιότερες ανταλλαγές έφυγαν)");
+  assert(last[5].text === "Α-Ερώτηση 5", "τελειώνει με την τελευταία ολοκληρωμένη απάντηση");
+}
+
+async function testLongMessagesTruncated() {
+  console.log("\n[Ιστορικό -- πολύ μεγάλα μηνύματα κόβονται στους 500 χαρακτήρες]");
+  const bodies = [];
+  const window = await withDom('data-embed-id="emb-test123"', answeringFetch(bodies, () => "β".repeat(3000)));
+  const host = window.document.getElementById("rag-embed-widget-host");
+  await ask(window, host, "α".repeat(2000));
+  await ask(window, host, "επόμενη");
+  const h = bodies[1].history;
+  assert(h[0].text.length === 500, "η ερώτηση στο ιστορικό κόβεται στους 500");
+  assert(h[1].text.length === 500, "η απάντηση στο ιστορικό κόβεται στους 500");
+  const shown = host.shadowRoot.querySelectorAll(".msg.bot")[0].textContent.length;
+  assert(shown === 3000, "αλλά στην οθόνη του επισκέπτη η απάντηση δείχνεται ολόκληρη");
+}
+
+async function testFailedExchangeNotRemembered() {
+  console.log("\n[Ιστορικό -- αποτυχημένη ερώτηση (σφάλμα δικτύου) ΔΕΝ μπαίνει στο ιστορικό]");
+  const bodies = [];
+  let call = 0;
+  const fetchImpl = async (url, options) => {
+    bodies.push(JSON.parse(options.body));
+    call++;
+    if (call === 2) throw new Error("network down");
+    return { ok: true, body: makeSSEBody([{ type: "chunk", text: "ΟΚ" + call }, { type: "done", isFallback: false }]) };
+  };
+  const window = await withDom('data-embed-id="emb-test123"', fetchImpl);
+  const host = window.document.getElementById("rag-embed-widget-host");
+  await ask(window, host, "Ερώτηση 1");
+  await ask(window, host, "Ερώτηση 2 (αποτυγχάνει)");
+  await ask(window, host, "Ερώτηση 3");
+  const h = bodies[2].history;
+  assert(h.length === 2, "στην 3η ερώτηση το ιστορικό έχει μόνο την 1η (επιτυχημένη) ανταλλαγή");
+  assert(!h.some((x) => x.text.includes("αποτυγχάνει")), "η αποτυχημένη ερώτηση δεν υπάρχει στο ιστορικό");
+}
+
+async function testLimitReachedNotRemembered() {
+  console.log("\n[Ιστορικό -- το μήνυμα ορίου (429) ΔΕΝ μπαίνει στο ιστορικό]");
+  const bodies = [];
+  let call = 0;
+  const fetchImpl = async (url, options) => {
+    bodies.push(JSON.parse(options.body));
+    call++;
+    if (call === 2) return { ok: false, status: 429, json: async () => ({ limitReached: true }) };
+    return { ok: true, body: makeSSEBody([{ type: "chunk", text: "ΟΚ" }, { type: "done", isFallback: false }]) };
+  };
+  const window = await withDom('data-embed-id="emb-test123"', fetchImpl);
+  const host = window.document.getElementById("rag-embed-widget-host");
+  await ask(window, host, "Ερώτηση 1");
+  await ask(window, host, "Ερώτηση 2 (όριο)");
+  await ask(window, host, "Ερώτηση 3");
+  assert(bodies[2].history.length === 2, "στην 3η ερώτηση το ιστορικό έχει μόνο την 1η ανταλλαγή");
+}
+
+async function testHistoryDoesNotLeakBetweenPages() {
+  console.log("\n[Ιστορικό -- κάθε φόρτωση σελίδας ξεκινά νέα συζήτηση (τίποτα δεν αποθηκεύεται)]");
+  const bodies = [];
+  const w1 = await withDom('data-embed-id="emb-test123"', answeringFetch(bodies, () => "ΟΚ"));
+  await ask(w1, w1.document.getElementById("rag-embed-widget-host"), "Ερώτηση 1");
+  const bodies2 = [];
+  const w2 = await withDom('data-embed-id="emb-test123"', answeringFetch(bodies2, () => "ΟΚ"));
+  await ask(w2, w2.document.getElementById("rag-embed-widget-host"), "Ερώτηση σε νέα σελίδα");
+  assert(!("history" in bodies2[0]), "νέα σελίδα = καθόλου ιστορικό");
+}
+
 async function run() {
   await testCreatesHostAndShadowRoot();
   await testMissingEmbedIdDoesNothing();
@@ -297,6 +424,13 @@ async function run() {
   await testFallbackShowsContactPrompt();
   await testFallbackWithoutContactConfiguredShowsNothingExtra();
   await testNormalAnswerNeverShowsContactPrompt();
+  await testFirstQuestionHasNoHistory();
+  await testSecondQuestionSendsHistory();
+  await testHistoryCappedAtSix();
+  await testLongMessagesTruncated();
+  await testFailedExchangeNotRemembered();
+  await testLimitReachedNotRemembered();
+  await testHistoryDoesNotLeakBetweenPages();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);

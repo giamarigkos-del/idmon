@@ -250,6 +250,21 @@
     setOpen(false);
   });
 
+  // Βήμα 1: ιστορικό συζήτησης. Το Gemini δεν θυμάται τίποτα από μόνο του,
+  // οπότε στέλνουμε μαζί με κάθε νέα ερώτηση τα τελευταία μηνύματα (ρόλοι
+  // "user"/"assistant", ίδιοι με το backend). Μένει ΜΟΝΟ στη μνήμη της
+  // σελίδας: κλείσιμο/ανανέωση = νέα συζήτηση, τίποτα δεν αποθηκεύεται.
+  // Θυμόμαστε μόνο ολοκληρωμένες ανταλλαγές -- όχι σφάλματα ή μήνυμα ορίου.
+  var MAX_HISTORY_MESSAGES = 6;
+  var MAX_HISTORY_MESSAGE_CHARS = 500;
+  var chatHistory = [];
+
+  function rememberExchange(question, answer) {
+    chatHistory.push({ role: "user", text: question.slice(0, MAX_HISTORY_MESSAGE_CHARS) });
+    chatHistory.push({ role: "assistant", text: answer.slice(0, MAX_HISTORY_MESSAGE_CHARS) });
+    if (chatHistory.length > MAX_HISTORY_MESSAGES) chatHistory = chatHistory.slice(-MAX_HISTORY_MESSAGES);
+  }
+
   async function sendQuestion() {
     var question = inputEl.value.trim();
     if (!question) return;
@@ -265,7 +280,8 @@
       var res = await fetch(BASE_URL + "/embed/" + encodeURIComponent(embedId) + "/query/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: question }),
+        // Χωρίς ιστορικό (πρώτη ερώτηση) το body μένει ακριβώς όπως πριν.
+        body: JSON.stringify(chatHistory.length ? { question: question, history: chatHistory } : { question: question }),
       });
 
       // Section Q: το backend επιστρέφει 429 + {limitReached:true} ΠΡΙΝ
@@ -336,6 +352,10 @@
         if (!accumulatedText) botEl.innerHTML = escapeHtml(t.unavailable);
       } else if (finalEvent.isFallback && hasContact) {
         addFallbackContactPrompt();
+      }
+
+      if (finalEvent && finalEvent.type === "done" && accumulatedText) {
+        rememberExchange(question, accumulatedText);
       }
     } catch (err) {
       botEl.innerHTML = escapeHtml(t.genericError);

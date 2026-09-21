@@ -237,6 +237,21 @@
     botDiv.classList.add("fallback");
   }
 
+  // Βήμα 1: ιστορικό συζήτησης -- ΙΔΙΑ συμπεριφορά με το widget των πελατών.
+  // Στέλνουμε μαζί με κάθε νέα ερώτηση τα τελευταία μηνύματα (ρόλοι
+  // "user"/"assistant", ίδιοι με το backend) ώστε τα follow-ups να έχουν
+  // νόημα. Μένει μόνο στη μνήμη της σελίδας (ανανέωση = νέα συζήτηση) και
+  // θυμόμαστε μόνο ολοκληρωμένες ανταλλαγές, όχι σφάλματα ή μήνυμα ορίου.
+  const MAX_HISTORY_MESSAGES = 6;
+  const MAX_HISTORY_MESSAGE_CHARS = 500;
+  let chatHistory = [];
+
+  function rememberExchange(question, answer) {
+    chatHistory.push({ role: "user", text: question.slice(0, MAX_HISTORY_MESSAGE_CHARS) });
+    chatHistory.push({ role: "assistant", text: answer.slice(0, MAX_HISTORY_MESSAGE_CHARS) });
+    if (chatHistory.length > MAX_HISTORY_MESSAGES) chatHistory = chatHistory.slice(-MAX_HISTORY_MESSAGES);
+  }
+
   async function askQuestion() {
     const input = el("questionInput");
     const question = input.value.trim();
@@ -253,7 +268,8 @@
       const res = await fetch("/query/stream", {
         method: "POST",
         headers: HEADERS,
-        body: JSON.stringify({ question }),
+        // Χωρίς ιστορικό (πρώτη ερώτηση) το body μένει ακριβώς όπως πριν.
+        body: JSON.stringify(chatHistory.length ? { question, history: chatHistory } : { question }),
       });
 
       // Section Q: το backend επιστρέφει 429 + {limitReached:true} ΠΡΙΝ
@@ -291,6 +307,10 @@
         if (finalEvent.isFallback) botDiv.classList.add("fallback");
         if (!finalEvent.isFallback) addSourceLink(botDiv, finalEvent.primarySource);
         renderSource(finalEvent.primarySource);
+      }
+
+      if (finalEvent && finalEvent.type === "done" && accumulatedText) {
+        rememberExchange(question, accumulatedText);
       }
     } catch (err) {
       botDiv.innerHTML = formatAnswer(t("connectionErrorPrefix") + err.message);
