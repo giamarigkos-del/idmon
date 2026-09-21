@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Idmon widget test</title>
+<style>
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:#1f2328;background:#f4f1ea;
+    display:grid;grid-template-columns:380px 1fr;min-height:100vh;}
+  /* ---- Πίνακας δοκιμών ---- */
+  .lab{background:#fff;border-right:1px solid #ddd8cc;padding:18px 18px 40px;height:100vh;overflow-y:auto;position:sticky;top:0;font-size:13px;}
+  .lab h1{font-size:16px;margin:0 0 2px;}
+  .lab .sub{color:#6b6b6b;font-size:12px;margin-bottom:14px;line-height:1.4;}
+  .lab h2{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#6b6b6b;margin:18px 0 8px;}
+  .row{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
+  .row label{flex:0 0 78px;color:#444;}
+  .row input[type=text],.row select{flex:1;min-width:0;padding:6px 8px;border:1px solid #cfcabd;border-radius:6px;font-size:13px;background:#fff;}
+  .check{display:flex;gap:8px;align-items:center;margin-bottom:6px;}
+  button.btn{border:1px solid #1f2328;background:#1f2328;color:#fff;border-radius:999px;padding:7px 14px;font-size:12.5px;cursor:pointer;}
+  button.btn.ghost{background:#fff;color:#1f2328;}
+  button.btn:disabled{opacity:.5;cursor:default;}
+  .scenario{display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;}
+  .scenario button{flex:none;}
+  .scenario span{color:#555;line-height:1.35;padding-top:5px;font-size:12px;}
+  pre.snippet{background:#f6f5f1;border:1px solid #e2ded2;border-radius:6px;padding:8px;white-space:pre-wrap;word-break:break-all;font-size:11px;margin:0;}
+  #status{margin:8px 0 0;font-size:12px;min-height:16px;}
+  #status.err{color:#b3261e;}
+  .log{border-top:1px solid #e2ded2;margin-top:6px;}
+  .turn{padding:8px 0;border-bottom:1px solid #eee9dd;}
+  .turn .q{font-weight:600;}
+  .turn .a{color:#444;margin-top:3px;line-height:1.4;word-break:break-word;}
+  .turn .why{color:#b3261e;margin-top:3px;font-size:12px;}
+  .turn.ok .mark{color:#1a7f37;} .turn.bad .mark{color:#b3261e;}
+  .summary{font-weight:700;padding:8px 0;}
+  .scn-title{font-weight:700;padding-top:10px;}
+  /* ---- Ψεύτικη σελίδα πελάτη ---- */
+  .shop{padding:0 0 120px;}
+  .shop header{background:#fff;border-bottom:1px solid #ddd8cc;padding:18px 32px;display:flex;justify-content:space-between;align-items:center;}
+  .shop header strong{font-size:20px;}
+  .shop nav{color:#555;display:flex;gap:22px;font-size:14px;}
+  .shop .hero{padding:44px 32px 20px;}
+  .shop .hero h2{font-size:30px;margin:0 0 8px;}
+  .shop .hero p{color:#555;max-width:520px;line-height:1.5;margin:0;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:16px;padding:20px 32px;}
+  .card{background:#fff;border:1px solid #e2ded2;border-radius:12px;padding:16px;}
+  .card .img{height:90px;border-radius:8px;background:linear-gradient(135deg,#e9e4d6,#d7d0bd);margin-bottom:10px;}
+  .card b{display:block;margin-bottom:4px;} .card span{color:#555;font-size:13px;}
+  @media (max-width:900px){body{grid-template-columns:1fr;} .lab{height:auto;position:static;}}
+</style>
+</head>
+<body>
+
+<aside class="lab">
+  <h1>Idmon widget test</h1>
+  <div class="sub">Σελίδα δοκιμών σε ξεχωριστό domain: το widget τρέχει όπως σε πελάτη. Δεν συνδέεται από πουθενά και δεν ευρετηριάζεται.</div>
+
+  <h2>Σύνδεση</h2>
+  <div class="row"><label for="embedId">Embed ID</label><input type="text" id="embedId" placeholder="emb-xxxxxxxxxxxx" autocomplete="off"></div>
+  <div class="row"><label for="server">Server</label><input type="text" id="server" autocomplete="off"></div>
+
+  <h2>Εμφάνιση (data-attributes του snippet)</h2>
+  <div class="row"><label for="color">Χρώμα</label><select id="color"></select></div>
+  <div class="row"><label for="botName">Όνομα</label><input type="text" id="botName" placeholder="(κενό = Assistant)" autocomplete="off"></div>
+  <div class="row"><label for="lang">Γλώσσα</label><select id="lang"><option value="el">Ελληνικά</option><option value="en">English</option></select></div>
+  <div class="row"><label for="position">Θέση</label><select id="position"><option value="bottom-right">Κάτω δεξιά</option><option value="bottom-left">Κάτω αριστερά</option></select></div>
+  <div class="check"><input type="checkbox" id="contact"><label for="contact">Στοιχεία επικοινωνίας (link + τηλέφωνο)</label></div>
+  <div class="check"><input type="checkbox" id="fresh" checked><label for="fresh">Φρέσκο widget.js (παρακάμπτει το cache)</label></div>
+  <div class="row" style="margin-top:10px"><button class="btn" id="applyBtn" type="button">Φόρτωση widget</button></div>
+  <div id="status"></div>
+
+  <h2>Snippet που φορτώθηκε</h2>
+  <pre class="snippet" id="snippet">(δεν έχει φορτωθεί ακόμα)</pre>
+
+  <h2>Σενάρια (αυτόματη δοκιμή)</h2>
+  <div id="scenarios"></div>
+  <div class="row"><button class="btn" id="runAllBtn" type="button">Εκτέλεση όλων</button>
+  <button class="btn ghost" id="clearLogBtn" type="button">Καθαρισμός</button></div>
+  <div class="sub" style="margin-top:6px">Τα σενάρια περιμένουν να έχουν ανέβει και δημοσιευτεί τα 5 έγγραφα HomeTech (tests/fixtures/hometech) στον λογαριασμό του Embed ID. Κάθε σενάριο ξεκινά με φρέσκο widget, δηλαδή χωρίς ιστορικό.</div>
+  <div class="log" id="log"></div>
+</aside>
+
+<main class="shop">
+  <header><strong>HomeTech</strong><nav><span>Προϊόντα</span><span>Προσφορές</span><span>Καταστήματα</span><span>Επικοινωνία</span></nav></header>
+  <section class="hero"><h2>Ηλεκτρικά οικιακά για κάθε σπίτι</h2><p>Ψεύτικη σελίδα πελάτη, μόνο για δοκιμή του widget. Το widget εμφανίζεται κάτω από την οθόνη, όπως σε κάθε ιστότοπο.</p></section>
+  <section class="grid">
+    <div class="card"><div class="img"></div><b>BrewMaster 15</b><span>Μηχανή espresso · 189 €</span></div>
+    <div class="card"><div class="img"></div><b>CleanPro V8</b><span>Επαναφορτιζόμενη σκούπα · 249 €</span></div>
+    <div class="card"><div class="img"></div><b>AirCrisp 5L</b><span>Air fryer · 129 €</span></div>
+    <div class="card"><div class="img"></div><b>FrostLine 300</b><span>Ψυγείο · 649 €</span></div>
+    <div class="card"><div class="img"></div><b>WashWell 9</b><span>Πλυντήριο ρούχων · 479 €</span></div>
+    <div class="card"><div class="img"></div><b>BlendX 1000</b><span>Μπλέντερ · 89 €</span></div>
+  </section>
+</main>
+
+<script>
+// --- widget-test-page:helpers START ---
+// Καθαρές συναρτήσεις (χωρίς DOM) -- ελέγχονται από το tests/widget-test-page-check.mjs.
+var DEFAULT_SERVER = "https://app.idmon.app";
+
+var COLOR_PRESETS = [
+  { label: "Χωρίς attribute (προεπιλογή του widget)", value: "" },
+  { label: "Μαύρο #111111", value: "#111111" },
+  { label: "Γκρι #6B7280 (όπως στους υπάρχοντες πελάτες)", value: "#6B7280" },
+  { label: "Μπλε #2F5BEA", value: "#2F5BEA" },
+  { label: "Ανοιχτό κίτρινο #FFE14D (έλεγχος αντίθεσης)", value: "#FFE14D" },
+  { label: "ΑΚΥΡΟ: red (πρέπει να πέσει στο προεπιλεγμένο)", value: "red" },
+];
+
+function isValidEmbedId(value) {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{4,64}$/.test(value.trim());
+}
+
+// Δεχόμαστε μόνο https, ή http προς τον τοπικό server (wrangler dev).
+function normalizeServer(value) {
+  try {
+    var u = new URL(String(value).trim());
+    if (u.protocol === "https:") return u.origin;
+    if (u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost")) return u.origin;
+  } catch (e) { /* άκυρο URL */ }
+  return null;
+}
+
+function buildAttrs(cfg) {
+  var a = { "data-embed-id": String(cfg.embedId || "").trim() };
+  if (cfg.color) a["data-accent-color"] = cfg.color;
+  if (cfg.botName && cfg.botName.trim()) a["data-bot-name"] = cfg.botName.trim();
+  if (cfg.lang) a["data-lang"] = cfg.lang;
+  if (cfg.position === "bottom-left") a["data-position"] = "bottom-left";
+  if (cfg.contact) {
+    a["data-contact-label"] = "Επικοινωνία";
+    a["data-contact-url"] = "https://example.com/contact";
+    a["data-contact-phone"] = "210 123 4567";
+  }
+  return a;
+}
+
+function escapeAttrValue(v) {
+  return String(v).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+// Το snippet όπως θα το έβαζε πελάτης (χωρίς το ?t= του cache-bust).
+function buildSnippet(cfg, server) {
+  var attrs = buildAttrs(cfg);
+  // Οι ετικέτες script σπάνε σε δύο κομμάτια: ένα κανονικό κλείσιμο ετικέτας script
+  // μέσα σε inline script θα τερμάτιζε όλο το script από τον browser.
+  var parts = ["<scr" + 'ipt src="' + escapeAttrValue(server) + '/widget.js"'];
+  Object.keys(attrs).forEach(function (k) { parts.push('  ' + k + '="' + escapeAttrValue(attrs[k]) + '"'); });
+  return parts.join("\n") + "></scr" + "ipt>";
+}
+
+// Κρίνει μία απάντηση. turn.expect: regex (ως strings) που ΠΡΕΠΕΙ να ταιριάζουν,
+// turn.forbid: που ΔΕΝ πρέπει, turn.expectFallbackPrompt: πρέπει να φανεί το
+// μήνυμα επικοινωνίας που εμφανίζεται κάτω από "δεν γνωρίζω".
+function checkTurn(answer, turn, state) {
+  var missing = (turn.expect || []).filter(function (p) { return !new RegExp(p, "i").test(answer); });
+  var forbidden = (turn.forbid || []).filter(function (p) { return new RegExp(p, "i").test(answer); });
+  var promptMissing = !!(turn.expectFallbackPrompt && !(state && state.fallbackPromptShown));
+  return { ok: !missing.length && !forbidden.length && !promptMissing, missing: missing, forbidden: forbidden, promptMissing: promptMissing };
+}
+
+// Σενάρια πάνω στα φανταστικά έγγραφα HomeTech (tests/fixtures/hometech).
+var SCENARIOS = [
+  { id: "shipping", title: "Ιστορικό: μεταφορικά ηπειρωτική, μετά νησιά",
+    turns: [
+      { q: "Πόσο κοστίζουν τα μεταφορικά για την ηπειρωτική Ελλάδα;", expect: ["3[,.]5"] },
+      { q: "Και για τα νησιά;", expect: ["6[,.]9"] } ] },
+  { id: "airfryer", title: "Ιστορικό: air fryer (12 προϊόντα ίδιας δομής)",
+    turns: [
+      { q: "Τι χωρητικότητα έχει το air fryer AirCrisp 5L;", expect: ["5 ?λίτρ|5 ?L"] },
+      { q: "Και πόσο κοστίζει;", expect: ["129"], forbid: ["179"] },
+      { q: "Και το μεγαλύτερο μοντέλο;", expect: ["8 ?λίτρ|8 ?L|179"] } ] },
+  { id: "washer", title: "Ιστορικό: πλυντήριο, τρία έγγραφα σε μία συζήτηση",
+    turns: [
+      { q: "Πόσο κοστίζει το πλυντήριο WashWell 9;", expect: ["479"] },
+      { q: "Πώς παραδίδεται;", expect: ["19"] },
+      { q: "Και αν το θέλω σε νησί;", expect: ["35"] },
+      { q: "Και υπάρχει εγκατάσταση;", expect: ["39"] } ] },
+  { id: "topic-switch", title: "Αλλαγή θέματος στη μέση της συζήτησης",
+    turns: [
+      { q: "Πόσες ημέρες έχω για να επιστρέψω ένα προϊόν;", expect: ["14"] },
+      { q: "Ποιος πληρώνει τα έξοδα;", expect: ["4[,.]0|4 ?€|4 ευρώ"] },
+      { q: "Τι ώρες είναι ανοιχτό το κατάστημα στη Θεσσαλονίκη;", expect: ["9:30", "20:30"] } ] },
+  { id: "fallback", title: "Άγνωστη ερώτηση: μήνυμα επικοινωνίας", settings: { contact: true },
+    turns: [
+      { q: "Πουλάτε ηλιακούς θερμοσίφωνες;", expectFallbackPrompt: true } ] },
+];
+// --- widget-test-page:helpers END ---
+
+// ---------------------------------------------------------------- DOM / ροή
+var STORAGE_KEY = "idmon-widget-test";
+var $ = function (id) { return document.getElementById(id); };
+var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+
+function readConfig() {
+  return {
+    embedId: $("embedId").value, server: $("server").value, color: $("color").value, botName: $("botName").value,
+    lang: $("lang").value, position: $("position").value, contact: $("contact").checked, fresh: $("fresh").checked,
+  };
+}
+
+function saveConfig() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(readConfig())); } catch (e) { /* αγνόησε */ }
+}
+
+function loadConfig() {
+  var saved = {};
+  try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch (e) { saved = {}; }
+  var fromUrl = new URLSearchParams(location.search).get("embed");
+  $("embedId").value = fromUrl || saved.embedId || "";
+  $("server").value = saved.server || DEFAULT_SERVER;
+  $("color").value = saved.color != null ? saved.color : "#111111";
+  $("botName").value = saved.botName || "HomeTech Βοηθός";
+  $("lang").value = saved.lang || "el";
+  $("position").value = saved.position || "bottom-right";
+  $("contact").checked = !!saved.contact;
+  $("fresh").checked = saved.fresh !== false;
+}
+
+function setStatus(text, isError) {
+  var el = $("status");
+  el.textContent = text || "";
+  el.className = isError ? "err" : "";
+}
+
+function removeWidget() {
+  var host = document.getElementById("rag-embed-widget-host");
+  if (host) host.remove();
+  document.querySelectorAll("script[data-widget-test-script]").forEach(function (s) { s.remove(); });
+}
+
+// Φορτώνει το widget όπως θα το έβαζε πελάτης: <script src=".../widget.js" data-*>.
+function loadWidget(cfg) {
+  removeWidget();
+  var server = normalizeServer(cfg.server);
+  if (!server) { setStatus("Άκυρο server URL (μόνο https, ή http://127.0.0.1 / localhost).", true); return Promise.resolve(false); }
+  if (!isValidEmbedId(cfg.embedId)) { setStatus("Βάλε ένα έγκυρο Embed ID (από το πάνελ ενσωμάτωσης του editor).", true); return Promise.resolve(false); }
+  var s = document.createElement("script");
+  s.src = server + "/widget.js" + (cfg.fresh ? "?t=" + Date.now() : "");
+  var attrs = buildAttrs(cfg);
+  Object.keys(attrs).forEach(function (k) { s.setAttribute(k, attrs[k]); });
+  s.setAttribute("data-widget-test-script", "1");
+  $("snippet").textContent = buildSnippet(cfg, server);
+  return new Promise(function (resolve) {
+    s.onload = function () { setStatus("Το widget φορτώθηκε."); resolve(true); };
+    s.onerror = function () { setStatus("Δεν φορτώθηκε το " + server + "/widget.js", true); resolve(false); };
+    document.body.appendChild(s);
+  });
+}
+
+function widgetRoot() {
+  var host = document.getElementById("rag-embed-widget-host");
+  return host && host.shadowRoot ? host.shadowRoot : null;
+}
+
+// Στέλνει μία ερώτηση μέσα από το πραγματικό UI του widget και περιμένει την απάντηση.
+async function askThroughWidget(question) {
+  var root = widgetRoot();
+  var input = root.querySelector(".input-row input");
+  var button = root.querySelector(".input-row button");
+  var botsBefore = root.querySelectorAll(".msg.bot").length;
+  input.value = question;
+  button.click();
+  var started = Date.now();
+  while (Date.now() - started < 60000) {
+    await sleep(150);
+    if (!input.disabled) break; // το widget ξαναενεργοποιεί το πεδίο όταν τελειώσει
+  }
+  var bots = root.querySelectorAll(".msg.bot");
+  var answer = bots.length > botsBefore ? bots[bots.length - 1].textContent : "";
+  return { answer: answer.trim(), fallbackPromptShown: !!root.querySelector(".msg.fallback-contact") };
+}
+
+function logLine(className, build) {
+  var div = document.createElement("div");
+  div.className = className;
+  build(div);
+  $("log").appendChild(div);
+  div.scrollIntoView({ block: "nearest" });
+  return div;
+}
+
+async function runScenario(sc) {
+  var cfg = readConfig();
+  Object.keys(sc.settings || {}).forEach(function (k) { cfg[k] = sc.settings[k]; });
+  logLine("scn-title", function (d) { d.textContent = sc.title; });
+  var ok = await loadWidget(cfg);
+  if (!ok) { logLine("turn bad", function (d) { d.textContent = "✗ το widget δεν φορτώθηκε (δες την κατάσταση πάνω αριστερά)."; }); return { passed: 0, failed: 1 }; }
+  await sleep(300);
+  if (!widgetRoot()) { logLine("turn bad", function (d) { d.textContent = "✗ δεν βρέθηκε το widget στη σελίδα."; }); return { passed: 0, failed: 1 }; }
+  widgetRoot().querySelector(".bubble").click(); // ανοίγει το panel
+
+  var passed = 0, failed = 0;
+  for (var i = 0; i < sc.turns.length; i++) {
+    var turn = sc.turns[i];
+    var result = await askThroughWidget(turn.q);
+    var verdict = checkTurn(result.answer, turn, result);
+    if (verdict.ok) passed++; else failed++;
+    logLine("turn " + (verdict.ok ? "ok" : "bad"), function (d) {
+      var q = document.createElement("div"); q.className = "q";
+      var mark = document.createElement("span"); mark.className = "mark"; mark.textContent = verdict.ok ? "✓ " : "✗ ";
+      q.appendChild(mark); q.appendChild(document.createTextNode(turn.q)); d.appendChild(q);
+      var a = document.createElement("div"); a.className = "a";
+      a.textContent = result.answer ? (result.answer.length > 320 ? result.answer.slice(0, 320) + "…" : result.answer) : "(καμία απάντηση)";
+      d.appendChild(a);
+      if (!verdict.ok) {
+        var why = [];
+        if (verdict.missing.length) why.push("λείπει: " + verdict.missing.join(" , "));
+        if (verdict.forbidden.length) why.push("δεν έπρεπε να υπάρχει: " + verdict.forbidden.join(" , "));
+        if (verdict.promptMissing) why.push("δεν εμφανίστηκε το μήνυμα επικοινωνίας");
+        var w = document.createElement("div"); w.className = "why"; w.textContent = why.join(" | "); d.appendChild(w);
+      }
+    });
+  }
+  return { passed: passed, failed: failed };
+}
+
+var running = false;
+async function runScenarios(list) {
+  if (running) return;
+  running = true;
+  document.querySelectorAll("button.btn").forEach(function (b) { b.disabled = true; });
+  var total = { passed: 0, failed: 0 };
+  try {
+    for (var i = 0; i < list.length; i++) {
+      var r = await runScenario(list[i]);
+      total.passed += r.passed; total.failed += r.failed;
+    }
+    logLine("summary", function (d) { d.textContent = "Σύνολο: " + total.passed + " σωστά, " + total.failed + " λάθος"; });
+  } finally {
+    running = false;
+    document.querySelectorAll("button.btn").forEach(function (b) { b.disabled = false; });
+  }
+}
+
+function init() {
+  COLOR_PRESETS.forEach(function (p) {
+    var o = document.createElement("option"); o.value = p.value; o.textContent = p.label; $("color").appendChild(o);
+  });
+  loadConfig();
+  SCENARIOS.forEach(function (sc) {
+    var wrap = document.createElement("div"); wrap.className = "scenario";
+    var b = document.createElement("button"); b.className = "btn ghost"; b.type = "button"; b.textContent = "▶";
+    b.addEventListener("click", function () { saveConfig(); runScenarios([sc]); });
+    var span = document.createElement("span"); span.textContent = sc.title;
+    wrap.appendChild(b); wrap.appendChild(span); $("scenarios").appendChild(wrap);
+  });
+  $("applyBtn").addEventListener("click", function () { saveConfig(); loadWidget(readConfig()); });
+  $("runAllBtn").addEventListener("click", function () { saveConfig(); runScenarios(SCENARIOS); });
+  $("clearLogBtn").addEventListener("click", function () { $("log").innerHTML = ""; });
+  if (isValidEmbedId($("embedId").value)) loadWidget(readConfig());
+  else setStatus("Βάλε το Embed ID και πάτα «Φόρτωση widget».");
+}
+
+init();
+</script>
+</body>
+</html>

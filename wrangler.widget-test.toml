@@ -1,0 +1,12 @@
+# Μόνιμη σελίδα δοκιμών του widget, ΞΕΧΩΡΙΣΤΟ Worker από την εφαρμογή
+# (operations-portal-rag) και από το marketing site (idmon-site).
+# Μόνο στατικά αρχεία από τον φάκελο widget-test/, καμία λογική στον server.
+#
+# Deploy:  npx wrangler deploy -c wrangler.widget-test.toml
+# Διεύθυνση: https://idmon-widget-test.giamarigkos.workers.dev
+name = "idmon-widget-test"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[assets]
+directory = "./widget-test"
