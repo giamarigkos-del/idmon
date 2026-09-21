@@ -79,7 +79,15 @@ const LIMIT_NOTIFY_COOLDOWN_SECONDS = 60 * 60 * 24; // 1 φορά/ημέρα, ό
 async function getPlanForWorkspace(env, workspaceId) {
   if (workspaceId === PROTECTED_WORKSPACE_ID) return "pro";
   const row = await env.DB.prepare("SELECT plan FROM users WHERE workspace_id = ?").bind(workspaceId).first();
-  if (row && row.plan && PLAN_LIMITS[row.plan]) return row.plan;
+  return planFromRow(workspaceId, row && row.plan);
+}
+
+// Ο ΙΔΙΟΣ κανόνας με το getPlanForWorkspace, για όποιον έχει ήδη διαβάσει τη
+// γραμμή του χρήστη (π.χ. το δημόσιο /embed/{id}/config, που τη διαβάζει ήδη
+// για να βρει το workspace και δεν χρειάζεται δεύτερο query).
+function planFromRow(workspaceId, rawPlan) {
+  if (workspaceId === PROTECTED_WORKSPACE_ID) return "pro";
+  if (rawPlan && PLAN_LIMITS[rawPlan]) return rawPlan;
   return "free";
 }
 
@@ -876,6 +884,97 @@ async function getWorkspaceSettings(env, workspaceId) {
   return { ...DEFAULT_WIDGET_SETTINGS, ...JSON.parse(raw) };
 }
 
+// --- Βήμα 2β-1: δημόσιες ρυθμίσεις widget (GET /embed/{embedId}/config) -- ΑΡΧΗ ---
+// Το widget στον ιστότοπο του πελάτη ρωτά αυτό το endpoint όταν φορτώνει, ώστε
+// ό,τι αλλάζει ο πελάτης στις ρυθμίσεις να φαίνεται χωρίς νέο snippet, και ώστε
+// το αν θα δείξει "Powered by Idmon" να το αποφασίζει ο SERVER (από το πλάνο) και
+// όχι το snippet, που ο πελάτης μπορεί να αλλάξει.
+//
+// Δύο κανόνες ασφαλείας:
+// 1. Η απάντηση χτίζεται ΠΕΔΙΟ-ΠΕΔΙΟ. Ποτέ δεν επιστρέφουμε ολόκληρο το αντικείμενο
+//    ρυθμίσεων -- περιέχει και το notifyEmail του πελάτη, που δεν πρέπει να φτάσει
+//    σε κανέναν επισκέπτη. Ούτε το όνομα του πλάνου φεύγει, μόνο ένα ναι/όχι.
+// 2. Κάθε πεδίο ξαναελέγχεται ΣΤΗΝ ΕΞΟΔΟ, όχι μόνο στην αποθήκευση: μια παλιά κακή
+//    τιμή που αποθηκεύτηκε πριν υπάρξει ο έλεγχος (π.χ. logoUrl, που δεν ελεγχόταν
+//    πουθενά) δεν φεύγει ποτέ προς τους επισκέπτες.
+const PUBLIC_CONFIG_LIMITS = { botName: 60, contactLabel: 40, contactUrl: 500, contactPhone: 30, logoUrl: 500 };
+const PHONE_RE = /^[0-9+()\-.\s#*,]{3,30}$/;
+
+// Γενικός έλεγχος "καθαρό URL": κείμενο, όριο μήκους, χωρίς κενά/χαρακτήρες ελέγχου.
+function isCleanUrlString(value, maxLength) {
+  return typeof value === "string" && value.length > 0 && value.length <= maxLength && !/[\u0000-\u0020\u007f]/.test(value);
+}
+
+// Λογότυπο: ΜΟΝΟ https (όχι http: mixed content/tracking, όχι data: τεράστιο/επικίνδυνο).
+function isSafeLogoUrl(value) {
+  if (!isCleanUrlString(value, PUBLIC_CONFIG_LIMITS.logoUrl)) return false;
+  try {
+    return new URL(value).protocol === "https:";
+  } catch (err) {
+    return false;
+  }
+}
+
+// Ίδια πολιτική με τον έλεγχο αποθήκευσης (handlePatchSettings): οποιοδήποτε
+// κανονικό scheme (https, mailto, tel, whatsapp κλπ) εκτός από javascript/vbscript/data.
+function isSafeContactUrl(value) {
+  if (!isCleanUrlString(value, PUBLIC_CONFIG_LIMITS.contactUrl)) return false;
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value)) return false;
+  return !/^(javascript|vbscript|data):/i.test(value);
+}
+
+function cleanShortText(value, maxLength) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed && trimmed.length <= maxLength ? trimmed : null;
+}
+
+function buildPublicWidgetConfig(settings, plan) {
+  const s = settings || {};
+  return {
+    accentColor: HEX_COLOR_RE.test(s.accentColor || "") ? s.accentColor : DEFAULT_WIDGET_SETTINGS.accentColor,
+    botName: cleanShortText(s.botName, PUBLIC_CONFIG_LIMITS.botName) || DEFAULT_WIDGET_SETTINGS.botName,
+    logoUrl: isSafeLogoUrl(s.logoUrl) ? s.logoUrl : null,
+    contactLabel: cleanShortText(s.contactLabel, PUBLIC_CONFIG_LIMITS.contactLabel),
+    contactUrl: isSafeContactUrl(s.contactUrl) ? s.contactUrl : null,
+    contactPhone: typeof s.contactPhone === "string" && PHONE_RE.test(s.contactPhone.trim()) ? s.contactPhone.trim() : null,
+    // Free και Basic δείχνουν το "Powered by Idmon", μόνο το Pro το αφαιρεί.
+    showBranding: plan !== "pro",
+  };
+}
+
+async function handleEmbedConfig(request, env, embedId) {
+  const origin = request.headers.get("Origin");
+
+  // ΕΝΑ query για workspace ΚΑΙ πλάνο (αντί για δύο).
+  const row = await env.DB.prepare(
+    "SELECT workspace_id, plan FROM users WHERE embed_id = ?"
+  ).bind(embedId).first();
+  if (!row) return jsonError(404, "Unknown embed id");
+
+  // Ίδιοι κανόνες domain με τα /query endpoints.
+  if (!origin) return jsonError(403, "Missing Origin header");
+  const allowed = await isOriginAllowedForWorkspace(env, row.workspace_id, origin);
+  if (!allowed) return jsonError(403, "This domain is not authorized for this embed");
+
+  const settings = await getWorkspaceSettings(env, row.workspace_id);
+  const config = buildPublicWidgetConfig(settings, planFromRow(row.workspace_id, row.plan));
+
+  return new Response(JSON.stringify(config), {
+    status: 200,
+    headers: {
+      ...JSON_HEADERS,
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      // "private": μόνο ο browser του επισκέπτη θυμάται την απάντηση (5 λεπτά), όχι
+      // ενδιάμεσοι proxies -- η απάντηση εξαρτάται από το Origin.
+      "Cache-Control": "private, max-age=300",
+      "Vary": "Origin",
+    },
+  });
+}
+// --- Βήμα 2β-1: δημόσιες ρυθμίσεις widget (GET /embed/{embedId}/config) -- ΤΕΛΟΣ ---
+
 async function handleGetSettings(request, env) {
   const workspaceId = await resolveWorkspaceId(request, env);
   if (!workspaceId) {
@@ -952,6 +1051,15 @@ async function handlePatchSettings(request, env) {
     // (είναι έγκυρα URI schemes), γι' αυτό ξεχωριστός, ρητός αποκλεισμός.
     return new Response(
       JSON.stringify({ error: "contactUrl scheme not allowed" }),
+      { status: 400, headers: JSON_HEADERS }
+    );
+  }
+  // logoUrl (Βήμα 2β-1): πριν δεν ελεγχόταν πουθενά. Ελέγχεται ΜΟΝΟ όταν το πεδίο
+  // υπάρχει στο body -- έτσι μια παλιά, ήδη αποθηκευμένη κακή τιμή δεν μπλοκάρει
+  // την αποθήκευση άσχετων ρυθμίσεων (το /embed/.../config την κόβει στην έξοδο).
+  if ("logoUrl" in body && body.logoUrl !== null && body.logoUrl !== "" && !isSafeLogoUrl(body.logoUrl)) {
+    return new Response(
+      JSON.stringify({ error: "logoUrl must be an https:// URL (max 500 characters)" }),
       { status: 400, headers: JSON_HEADERS }
     );
   }
@@ -4329,6 +4437,12 @@ export default {
     // Public embed endpoint -- ΔΕΝ χρησιμοποιεί resolveWorkspaceId (session/
     // X-Workspace-Id). Το embedId έρχεται από το path, το CORS middleware
     // ελέγχει το Origin πριν προχωρήσει καθόλου στη λογική RAG.
+    // Βήμα 2β-1: δημόσιες ρυθμίσεις του widget (GET, χωρίς preflight -- απλό cross-origin request).
+    const embedConfigMatch = url.pathname.match(/^\/embed\/([^/]+)\/config$/);
+    if (embedConfigMatch && request.method === "GET") {
+      return handleEmbedConfig(request, env, embedConfigMatch[1]);
+    }
+
     const embedQueryMatch = url.pathname.match(/^\/embed\/([^/]+)\/query$/);
     if (embedQueryMatch) {
       const embedId = embedQueryMatch[1];
