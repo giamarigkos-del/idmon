@@ -16,6 +16,8 @@ Documentation (verification steps, exception handling, FAQs, compliance notes) u
 
 **Chat assistant**
 - Conversational Q&A: ask a question in plain language, get an answer grounded in the published documents, with a source reference
+- Conversation context: follow-up questions (e.g. "and what colors?") keep context from earlier turns in the same conversation, consistently across the customer widget, the demo page chat, and the editor's test-question panel
+- Answers support basic markdown formatting (bold, italics, bullet and numbered lists), rendered identically in the customer widget and the editor's test panel
 - Answers come back in whichever language the question was asked in (Greek or English), independent of the UI language
 - Streaming responses (SSE): text appears progressively instead of after a long wait
 - Full bilingual UI (English / Greek) with a persistent language toggle
@@ -28,7 +30,9 @@ Documentation (verification steps, exception handling, FAQs, compliance notes) u
 - CORS middleware on the public `/embed/{embedId}/query` endpoints
 - AI disclosure label always visible in the widget header (EU AI Act Article 50)
 - Human handoff: a persistent contact bar under the header (label, URL, phone) plus a more prominent contact prompt under fallback ("I don't know") answers
-- Per-workspace customization: bot name, accent color, and logo, applied live
+- Dark, pill-based visual design (header, avatar, message bubbles, buttons) with automatic text-contrast against the chosen accent color
+- Per-workspace customization (bot name, accent color, logo) fetched live from the server on load (`GET /embed/{embedId}/config`), so changes made in the editor apply immediately without re-pasting the embed snippet
+- "Powered by Idmon" badge shown on Free and Basic plans, hidden on Pro
 
 **Content management (`/editor`)**
 - WYSIWYG document editor (TOAST UI Editor): no markdown syntax required from editors
@@ -44,6 +48,7 @@ Documentation (verification steps, exception handling, FAQs, compliance notes) u
 - Analytics panel: daily question and fallback counts with a 7 / 30 / 90 day range toggle (counters only, no question text is stored)
 - Embed panel: manage the domain allow-list and get the embed snippet
 - Widget settings panel (gear icon): bot name, accent color, logo URL, contact handoff fields, and notification email
+- Test-question panel: a threaded conversation (with a "New conversation" button) so multi-turn context can be verified before publishing changes
 - Account section (real accounts only): data export and account deletion
 - Usage banner: shown to the workspace owner when the plan's message or document limit is reached
 
@@ -88,6 +93,7 @@ Limits are defined in `PLAN_LIMITS` in `src/index.js` and stored per account in 
 | Basic | 500 | 20 | Accounts that existed before plans were introduced (migration default) |
 | Pro | 2,500 | Unlimited | Set manually |
 
+- Free and Basic plans show a "Powered by Idmon" badge in the widget; Pro hides it
 - Message limits are enforced per workspace per month in `checkAndIncrementUsage()`, called before any model request is made
 - Document limits are enforced on every path that creates a document (manual upload, URL sync, file upload, Drive import)
 - `GET /usage/status` returns the current plan, limits, and usage, and powers the editor banner
@@ -119,6 +125,8 @@ The paid-access helper grants access when a subscription is `active` or `trialin
   (widget.js)              ├──▶ Paddle API                  checkout, subscriptions, customer portal, and webhooks
                           └──▶ Resend API                  transactional email: fallback alerts, verification, password reset
 ```
+
+The bare `idmon.app` domain is served by a second, assets-only Worker (`idmon-site`, `wrangler.site.toml`) that carries the public marketing and pricing pages (`pricing.html`, `terms.html`, `privacy.html`, `refunds.html`). Its content is generated from `public/` into a separate `site/` folder by `scripts/sync-site.mjs`, so both Workers stay in sync without duplicating the source files. `app.idmon.app` (the diagram above) remains the product itself.
 
 Design decisions worth calling out:
 
@@ -219,6 +227,7 @@ Unless noted otherwise, endpoints resolve the workspace from `X-Session-Token` i
 |---|---|---|
 | `GET` | `/workspace/settings` | Get widget settings (bot name, accent color, logo, contact fields, notification email) |
 | `PATCH` | `/workspace/settings` | Update widget settings (whitelisted fields, validated; `contactUrl` rejects `javascript:`, `vbscript:`, and `data:` schemes) |
+| `GET` | `/embed/{embedId}/config` | Public: live widget settings for that embed (name, accent color, logo, contact fields, and whether the "Powered by Idmon" badge shows, decided by plan) — no session required |
 | `GET` | `/embed/domains` | List the domain allow-list for the workspace's embed widget |
 | `PATCH` | `/embed/domains` | Update the domain allow-list (there is a maximum number of domains per workspace) |
 
@@ -296,6 +305,14 @@ npx wrangler dev          # local development
 npx wrangler deploy       # deploy to Cloudflare
 ```
 
+The bare `idmon.app` marketing site (pricing, terms, privacy, refunds) is a separate deploy, with its own Worker and no bindings or secrets of its own:
+
+```bash
+npx wrangler deploy -c wrangler.site.toml
+```
+
+It serves the static pages generated into `site/` by `scripts/sync-site.mjs`; run that script after editing any of the public marketing pages in `public/`, before deploying `wrangler.site.toml`.
+
 Notes on local development:
 - Wrangler's KV, Vectorize, and D1 commands default to a local emulated store. Pass `--remote` to any command that should touch production data
 - Vectorize cannot be emulated locally, so the `[[vectorize]]` binding uses `remote = true`: **local dev talks to the real Vectorize index.** This is safe because test workspaces use random IDs isolated by namespace, and the tests clean up after themselves
@@ -322,21 +339,27 @@ idmon/
 │   ├── article.html        # Single published document, read-only view
 │   ├── terms.html          # Terms of Service (bilingual)
 │   ├── privacy.html        # Privacy Policy (bilingual)
+│   ├── pricing.html        # Public pricing page (Free/Basic/Pro, monthly/annual toggle)
+│   ├── refunds.html        # Public refund policy
 │   ├── widget.js           # Embeddable chat widget (Shadow DOM)
 │   ├── shared.css          # Design tokens, shared component styles, scrollbar styling, i18n toggle
 │   └── shared.js           # Shared frontend logic: workspace/session resolution, i18n, markdown rendering, slugs
+├── site/                   # Generated copy of the public marketing pages, served by the idmon-site Worker
+├── scripts/
+│   └── sync-site.mjs       # Copies the relevant public/ pages from public/ into site/
 ├── migrations/             # D1 migrations (0002 onward), for upgrading databases created earlier
 │   └── 0008_paddle_mirror.sql # Paddle customers/subscriptions mirror tables
 ├── tests/                  # Integration and headless tests, see Testing
 ├── .env.example            # Paddle variable names and non-secret Live price IDs
 ├── schema.sql              # Complete current D1 schema for fresh setups, including billing mirror tables
-└── wrangler.toml
+├── wrangler.toml            # Main app Worker (operations-portal-rag) → app.idmon.app
+└── wrangler.site.toml        # Marketing site Worker (idmon-site) → idmon.app
 ```
 
 ## Known limitations
 
 - Single embedding/generation provider (Gemini), no fallback if the API is unavailable
-- Each `/query` is independent: there is no conversation history, so a follow-up such as "and what colors?" has no context yet
+- Follow-up questions in the same conversation run two parallel retrieval searches (the new question alone, and combined with the previous question) to keep results relevant when the visitor changes topic — roughly doubling retrieval cost per follow-up turn
 - URL sync does not execute JavaScript: Cloudflare-obfuscated email addresses cannot be read, and pages that require login return the sign-in page as if it were the real content (no login-redirect detection yet)
 - Google Drive: the connector is implemented but hidden in the editor UI. `drive.readonly` is a restricted Google scope that needs an annual third-party security assessment before it can be offered outside Google's "Testing" mode. Sheets import reads only the first sheet
 - File upload supports `.txt`, `.md`, and `.pdf`; `.docx` is not supported yet
@@ -344,7 +367,7 @@ idmon/
 - The rate limiter uses per-IP buckets, so users behind a shared IP share a bucket
 - PBKDF2 is capped at 100,000 iterations by the Workers runtime (see [Accounts and sessions](#accounts-and-sessions))
 - No version history: publishing overwrites the previous embedded version (the full text is always preserved in KV, but there is no diff-able revision log)
-- The public pricing page has a Live monthly/annual toggle and checkout buttons; checkout on `app.idmon.app` remains pending Paddle's checkout-domain approval
+- The public pricing page has a Live monthly/annual toggle and checkout buttons. `idmon.app` is approved by Paddle for checkout; `app.idmon.app`, where the in-app checkout actually runs, is still pending approval (resubmission in progress)
 - Internal resource names still use the old branding (Worker `operations-portal-rag`, Vectorize index `operations-portal-rag-index`, D1 database `rag-demo-tool-accounts`); they are not visible to end users
 - The Terms of Service and Privacy Policy are templates and do not yet include a legal entity identification
 
