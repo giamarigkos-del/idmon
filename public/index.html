@@ -1,6 +1,18 @@
 <!DOCTYPE html>
 <html lang="en" data-i18n-doctitle="indexDocTitle">
 <head>
+<script>
+  // Πρόωρος, στοιχειώδης έλεγχος workspace, ΠΡΙΝ ζωγραφιστεί οτιδήποτε στη
+  // σελίδα. Η πλήρης λογική (μαζί με τα landing/skip flags) μένει στο
+  // resolveWorkspaceId() του shared.js, το οποίο τρέχει αργότερα κανονικά --
+  // αυτό εδώ είναι απλή, πρόωρη προστασία μόνο για το index.html, ώστε ένας
+  // ανώνυμος επισκέπτης χωρίς αποθηκευμένο workspace να μην προλαβαίνει να
+  // δει έστω και για μια στιγμή το "Recent documents" πριν το redirect στη
+  // landing page.
+  if (!localStorage.getItem("workspaceId")) {
+    location.replace("/landing.html");
+  }
+</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Idmon — Assistant</title>
