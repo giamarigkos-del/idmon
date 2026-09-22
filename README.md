@@ -80,6 +80,7 @@ Other account behavior:
 - **Email verification** on signup (24-hour token, bilingual email). It is "soft": an unverified account is never blocked from logging in or using the product, it just sees a dismissible banner. Accounts created before this feature were grandfathered in as verified
 - **Password reset** via a time-limited token (30 minutes) sent by email in the user's selected UI language. A successful reset invalidates all of that account's sessions
 - **Rate limiting** on login, developer login, signup, forgot-password, and reset-password: 5 attempts per 15 minutes per client IP (`CF-Connecting-IP`)
+- **Bot protection** via Cloudflare Turnstile on signup, login, and forgot-password, on top of the IP rate limiter above (not a replacement — Turnstile catches automated abuse spread across many IPs, the rate limiter catches high-volume abuse from one). Verification calls Cloudflare's `siteverify` endpoint and fails open (lets the request continue) only if that endpoint itself is unreachable; an actual "not valid" response always blocks the request. The client-side site key is served per-environment from `GET /config/public` (production and local dev use different Turnstile widgets) rather than hardcoded, since a real widget's site key only works on its registered hostnames
 - **Data export** (`GET /account/export`) returns a JSON file with the account info, documents (full content), widget settings, and embed domains
 - **Account deletion** (`POST /account/delete`) requires password re-confirmation and removes everything scoped to the workspace: documents and their embeddings, contradictions, fallback questions, settings, analytics and usage counters, third-party connections, embed domains, sessions, and finally the user row
 
@@ -147,6 +148,7 @@ Design decisions worth calling out:
 | Accounts, sessions, connections | Cloudflare D1 (SQLite) |
 | Billing | Paddle Checkout, subscriptions, customer portal, and webhooks |
 | Password hashing | Argon2id (`argon2-wasm-edge`, WASM, statically imported) |
+| Bot protection | Cloudflare Turnstile (signup, login, forgot-password) |
 | Token encryption | AES-GCM (native Web Crypto) |
 | Embeddings | Gemini `gemini-embedding-001` |
 | Answer generation | Gemini `gemini-3.6-flash` |
@@ -164,11 +166,12 @@ Unless noted otherwise, endpoints resolve the workspace from `X-Session-Token` i
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Liveness check |
+| `GET` | `/config/public` | Public, non-secret runtime config for the frontend — currently just the Turnstile site key for this environment |
 | `POST` | `/developer-login` | Exchange a password for the protected demo workspace ID (rate limited) |
-| `POST` | `/account/signup` | Create an account: `{email, password}` to `{sessionToken, workspaceId}` (rate limited) |
-| `POST` | `/account/login` | `{email, password}` to a new `{sessionToken, workspaceId}` (rate limited) |
+| `POST` | `/account/signup` | Create an account: `{email, password, turnstileToken}` to `{sessionToken, workspaceId}` (Turnstile + rate limited) |
+| `POST` | `/account/login` | `{email, password, turnstileToken}` to a new `{sessionToken, workspaceId}` (Turnstile + rate limited) |
 | `POST` | `/account/logout` | Invalidate the session behind `X-Session-Token` |
-| `POST` | `/account/forgot-password` | Send a password reset email (rate limited) |
+| `POST` | `/account/forgot-password` | Send a password reset email; body includes `turnstileToken` (Turnstile + rate limited) |
 | `POST` | `/account/reset-password` | Complete a password reset with the token from the email and set a new password (rate limited) |
 | `POST` | `/account/verify-email` | Confirm an email verification token |
 | `POST` | `/account/resend-verification` | Resend the verification email (session required) |
@@ -365,7 +368,7 @@ idmon/
 - Google Drive: the connector is implemented but hidden in the editor UI. `drive.readonly` is a restricted Google scope that needs an annual third-party security assessment before it can be offered outside Google's "Testing" mode. Sheets import reads only the first sheet
 - File upload supports `.txt`, `.md`, and `.pdf`; `.docx` is not supported yet
 - Guest and Developer access still trust a client-supplied `X-Workspace-Id` header directly (no session backing them). This is acceptable for an anonymous-trial or demo workspace, but a logged-in account is always protected via server-side session lookup
-- The rate limiter uses per-IP buckets, so users behind a shared IP share a bucket
+- The rate limiter uses per-IP buckets, so users behind a shared IP share a bucket; Cloudflare Turnstile (see [Accounts and sessions](#accounts-and-sessions)) supplements this against abuse spread across many IPs, but does not replace it
 - No version history: publishing overwrites the previous embedded version (the full text is always preserved in KV, but there is no diff-able revision log)
 - The public pricing page has a Live monthly/annual toggle and checkout buttons. `idmon.app` is approved by Paddle for checkout; `app.idmon.app`, where the in-app checkout actually runs, is still pending approval (resubmission in progress)
 - Internal resource names still use the old branding (Worker `operations-portal-rag`, Vectorize index `operations-portal-rag-index`, D1 database `rag-demo-tool-accounts`); they are not visible to end users
