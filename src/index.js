@@ -1,4 +1,14 @@
 import { encryptToken, decryptToken } from "./crypto-helpers.js";
+import { argon2id, argon2Verify, setWASMModules } from "argon2-wasm-edge";
+// Section R: το Cloudflare Workers runtime απαγορεύει δυναμικό
+// WebAssembly.compile() την ώρα του request ("Wasm code generation
+// disallowed by embedder", βρέθηκε σε ζωντανό crash 22 Σεπτεμβρίου 2026).
+// Επιτρέπει μόνο WASM που έχει μπει με στατικό import, μεταγλωττισμένο
+// στο build. Η βιβλιοθήκη εκθέτει setWASMModules() ακριβώς γι' αυτό
+// (ίδιο μοτίβο με τη δική της τεκμηρίωση για Vercel Edge).
+import argon2WASM from "argon2-wasm-edge/wasm/argon2.wasm";
+import blake2bWASM from "argon2-wasm-edge/wasm/blake2b.wasm";
+setWASMModules({ argon2WASM, blake2bWASM });
 
 const CHUNK_SIZE = 300;
 const CHUNK_OVERLAP = 30;
@@ -149,28 +159,28 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Section H: λογαριασμοί πελατών + sessions (D1).
 //
-// PBKDF2 μέσω του ενσωματωμένου Web Crypto του Workers -- καμία εξωτερική
-// βιβλιοθήκη δεν χρειάζεται.
+// Argon2id (μέσω argon2-wasm-edge, πραγματικό WASM-compiled Argon2, ΟΧΙ
+// pure-JS -- μια pure-JS υλοποίηση μετρήθηκε σε δημοσιευμένο benchmark στα
+// ~14.000ms CPU time σε Cloudflare Worker, απαγορευτικό· το compiled WASM
+// μετρήθηκε σε αντίστοιχο πραγματικό test στα ~100ms).
 //
-// PBKDF2_ITERATIONS είναι ο αριθμός που παίρνουν ΝΕΟΙ hashes από εδώ και
-// πέρα (νέο signup, ή αλλαγή password).
+// Section R, 22 Σεπτεμβρίου 2026: αντικατέστησε το PBKDF2 (βλ. git history
+// για το παλιό σχόλιο -- ήταν κλειδωμένο στις 100.000 επαναλήψεις από
+// σκληρό όριο του Cloudflare Workers WebCrypto, κάτω από τη σύσταση OWASP).
+// Καθαρή αντικατάσταση, χωρίς dual-algorithm agility, γιατί δεν υπήρχαν
+// ακόμα πραγματικοί πελάτες -- οι λίγοι υπάρχοντες δοκιμαστικοί λογαριασμοί
+// κάνουν απλό password reset μετά το deploy.
 //
-// ΣΗΜΑΝΤΙΚΟ, βρέθηκε σε ζωντανό crash, Σεπτέμβριος 2026: το Cloudflare
-// Workers WebCrypto ΔΕΝ υποστηρίζει PBKDF2 πάνω από 100.000 iterations --
-// καθόλου, ανεξάρτητα από CPU time limit. Ρητό, μόνιμο όριο της
-// πλατφόρμας: "NotSupportedError: Pbkdf2 failed: iteration counts above
-// 100000 are not supported". Δοκιμάστηκε αρχικά 600.000 (το τρέχον OWASP
-// recommendation για PBKDF2-SHA256 γενικά, σε άλλα runtimes), αλλά αυτό
-// έσπαγε ΚΑΘΕ signup/password-reset αμέσως, 100% αναπαραγώγιμο -- όχι
-// περιστασιακό πρόβλημα. Η στήλη users.password_iterations (migration
-// 0005) και η υποδομή για διαφορετικό αριθμό ανά χρήστη παραμένουν χρήσιμα
-// -- αν το Cloudflare ποτέ ανεβάσει αυτό το όριο, μπορούμε να ανεβάσουμε
-// ξανά το PBKDF2_ITERATIONS με ασφάλεια, χωρίς να σπάσει το login των
-// ήδη υπαρχόντων λογαριασμών. Προς το παρόν, 100.000 είναι ήδη το ανώτατο
-// όριο που επιτρέπει η ίδια η πλατφόρμα -- δεν υπάρχει περιθώριο βελτίωσης
-// εδώ χωρίς να αλλάξει το ίδιο το Cloudflare Workers WebCrypto.
-const PBKDF2_ITERATIONS = 100000;
-const LEGACY_PBKDF2_ITERATIONS = 100000; // ίδιο νούμερο προς το παρόν -- βλ. σχόλιο παραπάνω
+// Παράμετροι: m=19 MiB, t=2, p=1 -- η βασική σύσταση του OWASP Password
+// Storage Cheat Sheet για Argon2id σήμερα, ίδιοι αριθμοί με πραγματικό
+// μετρημένο benchmark Argon2-σε-Cloudflare-Worker (~100ms).
+const ARGON2_PARAMS = {
+  parallelism: 1,
+  iterations: 2,
+  memorySize: 19456, // KB (19 MiB)
+  hashLength: 32,
+  outputType: "encoded", // αυτοπεριγραφόμενο PHC string -- περιέχει ήδη salt + παραμέτρους
+};
 const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 ημέρες
 
 // Section I: embed layer (domain allow-list).
@@ -186,11 +196,6 @@ function bufferToHex(buffer) {
   return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function hexToBuffer(hex) {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
-  return bytes.buffer;
-}
 
 // Section P: file upload (.txt/.md/.pdf). Χρειαζόμαστε base64 encoding ενός
 // ArrayBuffer για να στείλουμε PDF bytes στο Gemini ως inlineData -- το
@@ -216,35 +221,17 @@ function randomHex(byteLength) {
   return bufferToHex(bytes.buffer);
 }
 
-async function hashPassword(password, saltHex, iterations = PBKDF2_ITERATIONS) {
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"]
-  );
-  const derivedBits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt: hexToBuffer(saltHex), iterations, hash: "SHA-256" },
-    keyMaterial,
-    256
-  );
-  return bufferToHex(derivedBits);
+// Section R: το argon2Verify() της ίδιας της βιβλιοθήκης κάνει ήδη σταθερού
+// χρόνου σύγκριση εσωτερικά -- δεν χρειάζεται πια δικό μας timingSafeEqual,
+// όπως χρειαζόταν με το χειροκίνητο PBKDF2 πριν.
+async function hashPassword(password) {
+  const salt = new Uint8Array(16);
+  crypto.getRandomValues(salt);
+  return argon2id({ ...ARGON2_PARAMS, password, salt });
 }
 
-// Σύγκριση σταθερού χρόνου -- ένα απλό "===" θα μπορούσε θεωρητικά να
-// διαρρεύσει πληροφορία μέσω του πόσο γρήγορα επιστρέφει false (timing
-// attack). Εδώ ελέγχουμε ΟΛΟΥΣ τους χαρακτήρες πάντα, ό,τι κι αν βρεθεί.
-function timingSafeEqual(a, b) {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
-async function verifyPassword(password, saltHex, expectedHashHex, iterations = LEGACY_PBKDF2_ITERATIONS) {
-  const actualHashHex = await hashPassword(password, saltHex, iterations);
-  return timingSafeEqual(actualHashHex, expectedHashHex);
+async function verifyPassword(password, hash) {
+  return argon2Verify({ password, hash });
 }
 
 function jsonError(status, message) {
@@ -323,8 +310,13 @@ async function handleSignup(request, env) {
   const existing = await env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
   if (existing) return jsonError(409, "An account with this email already exists");
 
-  const salt = randomHex(16);
-  const passwordHash = await hashPassword(password, salt); // χρησιμοποιεί το τρέχον PBKDF2_ITERATIONS
+  const passwordHash = await hashPassword(password);
+  // Section R: legacySalt/null -- οι στήλες password_salt/password_iterations
+  // ΔΕΝ χρησιμοποιούνται πια για επαλήθευση (το Argon2 hash είναι
+  // αυτοπεριγραφόμενο, salt+παράμετροι μέσα στο ίδιο το string). Κρατάμε
+  // ένα αδρανές τυχαίο salt στη στήλη μόνο για να μην ρισκάρουμε τυχόν
+  // NOT NULL constraint από το αρχικό σχήμα -- καθαρά ιστορικό πεδίο πλέον.
+  const legacySalt = randomHex(16);
   const workspaceId = `ws-${randomHex(12)}`;
   // Ξεχωριστό από το workspaceId ρητά -- αυτό είναι το ΜΟΝΟ αναγνωριστικό
   // που επιτρέπεται να εμφανίζεται σε δημόσιο <script> tag (βλ. Section I).
@@ -337,8 +329,8 @@ async function handleSignup(request, env) {
   // Πραγματικοί πληρωμένοι πελάτες αναβαθμίζονται χειροκίνητα (UPDATE users
   // SET plan=... WHERE email=...) μέχρι να μπει αυτόματη χρέωση.
   const result = await env.DB.prepare(
-    "INSERT INTO users (email, password_hash, password_salt, password_iterations, workspace_id, embed_id, plan, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-  ).bind(email, passwordHash, salt, PBKDF2_ITERATIONS, workspaceId, embedId, "free", createdAt).run();
+    "INSERT INTO users (email, password_hash, password_salt, workspace_id, embed_id, plan, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).bind(email, passwordHash, legacySalt, workspaceId, embedId, "free", createdAt).run();
 
   const session = await createSession(env, result.meta.last_row_id, workspaceId);
 
@@ -376,7 +368,7 @@ async function handleLogin(request, env) {
   }
 
   const user = await env.DB.prepare(
-    "SELECT id, password_hash, password_salt, password_iterations, workspace_id, embed_id, email_verified FROM users WHERE email = ?"
+    "SELECT id, password_hash, workspace_id, embed_id, email_verified FROM users WHERE email = ?"
   ).bind(email).first();
 
   // Το ΙΔΙΟ γενικό μήνυμα λάθους είτε δεν υπάρχει το email είτε το password
@@ -387,11 +379,7 @@ async function handleLogin(request, env) {
     return jsonError(401, "Invalid email or password");
   }
 
-  // password_iterations: NULL για λογαριασμούς από πριν το migration 0005
-  // (η στήλη έχει DEFAULT 100000 στη D1, αλλά είμαστε ρητοί εδώ αντί να
-  // βασιστούμε σιωπηλά σε αυτό).
-  const iterations = user.password_iterations || LEGACY_PBKDF2_ITERATIONS;
-  const valid = await verifyPassword(password, user.password_salt, user.password_hash, iterations);
+  const valid = await verifyPassword(password, user.password_hash);
   if (!valid) {
     await recordRateLimitAttempt(env, "login", ip);
     return jsonError(401, "Invalid email or password");
@@ -522,13 +510,12 @@ async function handleResetPassword(request, env) {
   const user = await env.DB.prepare("SELECT workspace_id, embed_id, email_verified FROM users WHERE id = ?").bind(userId).first();
   if (!user) return jsonError(400, "This reset link is invalid or has expired.");
 
-  const salt = randomHex(16);
-  // Νέο password -> νέο hash με το τρέχον (υψηλότερο) PBKDF2_ITERATIONS,
-  // ανεξάρτητα με τι είχε ο λογαριασμός πριν -- κάθε reset αναβαθμίζει
-  // αυτόματα και τον αριθμό iterations.
-  const passwordHash = await hashPassword(newPassword, salt);
-  await env.DB.prepare("UPDATE users SET password_hash = ?, password_salt = ?, password_iterations = ? WHERE id = ?")
-    .bind(passwordHash, salt, PBKDF2_ITERATIONS, userId).run();
+  // Section R: κάθε reset αναβαθμίζει αυτόματα σε Argon2id, ανεξάρτητα με
+  // τι αλγόριθμο είχε ο λογαριασμός πριν.
+  const passwordHash = await hashPassword(newPassword);
+  const legacySalt = randomHex(16); // βλ. σχόλιο στο handleSignup
+  await env.DB.prepare("UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?")
+    .bind(passwordHash, legacySalt, userId).run();
 
   // Token μιας χρήσης -- διαγράφεται αμέσως, δεν ξαναχρησιμοποιείται.
   await env.DOCUMENT_REGISTRY.delete(`password-reset:${token}`);
@@ -782,12 +769,11 @@ async function handleDeleteAccount(request, env) {
   if (!password) return jsonError(400, "Password confirmation is required");
 
   const user = await env.DB.prepare(
-    "SELECT password_hash, password_salt, password_iterations FROM users WHERE id = ?"
+    "SELECT password_hash FROM users WHERE id = ?"
   ).bind(session.user_id).first();
   if (!user) return jsonError(401, "Not logged in");
 
-  const iterations = user.password_iterations || LEGACY_PBKDF2_ITERATIONS;
-  const valid = await verifyPassword(password, user.password_salt, user.password_hash, iterations);
+  const valid = await verifyPassword(password, user.password_hash);
   if (!valid) {
     await recordRateLimitAttempt(env, "delete-account", ip);
     return jsonError(401, "Incorrect password");

@@ -12,5 +12,8 @@
   "type": "commonjs",
   "devDependencies": {
     "jsdom": "^30.0.1"
+  },
+  "dependencies": {
+    "argon2-wasm-edge": "^1.0.23"
   }
 }
