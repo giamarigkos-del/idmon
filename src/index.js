@@ -1396,8 +1396,17 @@ async function retrieveMatches(env, workspaceId, question, history) {
   const previousQuestion = lastUserQuestion(history);
 
   const primaryPromise = (async () => {
-    const embedding = await getEmbedding(question, env.GEMINI_API_KEY);
-    return searchWorkspace(env, workspaceId, embedding);
+    // Section R: ίδια προστασία με την δεύτερη (combined) αναζήτηση παρακάτω
+    // -- αν το Gemini embeddings API αποτύχει (πλήρης διακοπή, όχι μόνο στο
+    // μοντέλο απαντήσεων), δεν σκάει το request, επιστρέφει απλά καμία
+    // αντιστοίχιση, οπότε ο επισκέπτης βλέπει το κανονικό "δεν γνωρίζω" αντί
+    // για σελίδα σφάλματος.
+    try {
+      const embedding = await getEmbedding(question, env.GEMINI_API_KEY);
+      return await searchWorkspace(env, workspaceId, embedding);
+    } catch (err) {
+      return [];
+    }
   })();
 
   if (!previousQuestion) {
@@ -1426,14 +1435,26 @@ async function retrieveMatches(env, workspaceId, question, history) {
 }
 // --- Βήμα 1: ιστορικό συζήτησης (context window) -- ΤΕΛΟΣ ---
 
-async function askGemini(context, question, apiKey, history = []) {
+// Section R: URL μέσω του Cloudflare AI Gateway (idmon-ai) αντί για
+// απευθείας generativelanguage.googleapis.com -- Στάδιο Α, καθαρό
+// pass-through, ΙΔΙΟ σχήμα request/response με πριν, καμία αλλαγή
+// συμπεριφοράς. Θεμέλιο για μελλοντικό fallback σε δεύτερο πάροχο (Στάδιο
+// Β, δεν έχει γίνει ακόμα) και δωρεάν logging/analytics στο μεταξύ.
+function geminiGatewayUrl(env, modelAndAction) {
+  return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${env.AI_GATEWAY_ID}/google-ai-studio/v1beta/models/${modelAndAction}`;
+}
+
+async function askGemini(context, question, env, history = []) {
   const prompt = buildRagPrompt(context, question, history);
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
+    `${geminiGatewayUrl(env, "gemini-3.6-flash:generateContent")}?key=${env.GEMINI_API_KEY}`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "cf-aig-authorization": `Bearer ${env.AI_GATEWAY_TOKEN}`,
+      },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
       }),
@@ -1456,14 +1477,18 @@ async function askGemini(context, question, apiKey, history = []) {
 // endpoint (alt=sse) και επιστρέφει τα κομμάτια κειμένου ΚΑΘΩΣ φτάνουν, όχι
 // όλα μαζί στο τέλος. async generator -- ο καλών κάνει "for await (const
 // piece of ...)" για να τα διαβάσει ένα-ένα.
-async function* streamGeminiChunks(context, question, apiKey, history = []) {
+async function* streamGeminiChunks(context, question, env, history = []) {
   const prompt = buildRagPrompt(context, question, history);
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:streamGenerateContent?alt=sse&key=${apiKey}`,
+    `${geminiGatewayUrl(env, "gemini-3.6-flash:streamGenerateContent")}?alt=sse&key=${env.GEMINI_API_KEY}`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        "cf-aig-authorization": `Bearer ${env.AI_GATEWAY_TOKEN}`,
+      },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
     }
   );
@@ -2339,18 +2364,24 @@ async function handleUpload(request, env) {
   if (status === "published") {
     const chunks = chunkText(text);
     const vectors = [];
-    for (let i = 0; i < chunks.length; i++) {
-      const embedding = await getEmbedding(chunks[i], env.GEMINI_API_KEY);
-      vectors.push({
-        id: `${documentId}-chunk-${i}`,
-        values: embedding,
-        namespace: workspaceId,
-        metadata: {
-          documentId,
-          chunkIndex: i,
-          text: chunks[i],
-        },
-      });
+    try {
+      for (let i = 0; i < chunks.length; i++) {
+        const embedding = await getEmbedding(chunks[i], env.GEMINI_API_KEY);
+        vectors.push({
+          id: `${documentId}-chunk-${i}`,
+          values: embedding,
+          namespace: workspaceId,
+          metadata: {
+            documentId,
+            chunkIndex: i,
+            text: chunks[i],
+          },
+        });
+      }
+    } catch (err) {
+      // Section R: το Gemini embeddings API δεν έχει fallback (βλ. σχόλιο στο
+      // README) -- αποτυχία εδώ πρέπει να είναι ΚΑΘΑΡΗ, όχι crash σελίδα.
+      return jsonError(503, "The AI provider is temporarily unavailable. Please try again in a few minutes.");
     }
     await env.VECTORIZE.upsert(vectors);
     chunkCount = chunks.length;
@@ -2505,7 +2536,13 @@ async function handleSearchDocuments(request, env) {
 
   // Ίδιο search με το /query, αλλά topK μεγαλύτερο -- θέλουμε αρκετά chunks
   // ώστε να καλύψουμε πολλά διαφορετικά έγγραφα, όχι μόνο το κορυφαίο ένα.
-  const queryEmbedding = await getEmbedding(query, env.GEMINI_API_KEY);
+  let queryEmbedding;
+  try {
+    queryEmbedding = await getEmbedding(query, env.GEMINI_API_KEY);
+  } catch (err) {
+    // Section R: βλ. ίδιο σχόλιο στο handleUpload -- καθαρή αποτυχία, όχι crash.
+    return jsonError(503, "The AI provider is temporarily unavailable. Please try again in a few minutes.");
+  }
   const matches = await env.VECTORIZE.query(queryEmbedding, {
     topK: 12,
     namespace: workspaceId,
@@ -2617,7 +2654,7 @@ async function runQuery(env, workspaceId, question, history) {
     .join("\n\n---\n\n");
 
   // Βήμα 4: ρώτα το Gemini
-  const answer = await askGemini(context, question, env.GEMINI_API_KEY, safeHistory);
+  const answer = await askGemini(context, question, env, safeHistory);
 
   // Βήμα 5: εντόπισε αν η απάντηση είναι "δεν γνωρίζω" (fallback). Ελέγχουμε
   // ΚΑΙ τις δύο γλώσσες -- τώρα που ο Gemini απαντάει στη γλώσσα της
@@ -2709,7 +2746,7 @@ function buildStreamingQueryResponse(env, workspaceId, question, history) {
         // σταδιακά.
         let fullAnswer = "";
         try {
-          for await (const piece of streamGeminiChunks(context, question, env.GEMINI_API_KEY, safeHistory)) {
+          for await (const piece of streamGeminiChunks(context, question, env, safeHistory)) {
             if (!piece) continue;
             fullAnswer += piece;
             controller.enqueue(encodeSSE({ type: "chunk", text: piece }));
@@ -2719,7 +2756,7 @@ function buildStreamingQueryResponse(env, workspaceId, question, history) {
         }
 
         if (!fullAnswer) {
-          fullAnswer = await askGemini(context, question, env.GEMINI_API_KEY, safeHistory);
+          fullAnswer = await askGemini(context, question, env, safeHistory);
           controller.enqueue(encodeSSE({ type: "chunk", text: fullAnswer }));
         }
 
@@ -3020,14 +3057,19 @@ async function handleRefreshFromUrl(request, env, documentId) {
     }
     const chunks = chunkText(text);
     const vectors = [];
-    for (let i = 0; i < chunks.length; i++) {
-      const embedding = await getEmbedding(chunks[i], env.GEMINI_API_KEY);
-      vectors.push({
-        id: `${documentId}-chunk-${i}`,
-        values: embedding,
-        namespace: workspaceId,
-        metadata: { documentId, chunkIndex: i, text: chunks[i] },
-      });
+    try {
+      for (let i = 0; i < chunks.length; i++) {
+        const embedding = await getEmbedding(chunks[i], env.GEMINI_API_KEY);
+        vectors.push({
+          id: `${documentId}-chunk-${i}`,
+          values: embedding,
+          namespace: workspaceId,
+          metadata: { documentId, chunkIndex: i, text: chunks[i] },
+        });
+      }
+    } catch (err) {
+      // Section R: βλ. ίδιο σχόλιο στο handleUpload -- καθαρή αποτυχία, όχι crash.
+      return jsonError(503, "The AI provider is temporarily unavailable. Please try again in a few minutes.");
     }
     await env.VECTORIZE.upsert(vectors);
     doc.chunkCount = chunks.length;
@@ -3073,14 +3115,19 @@ async function handlePublishDocument(request, env, documentId) {
 
   const chunks = chunkText(doc.fullText || "");
   const vectors = [];
-  for (let i = 0; i < chunks.length; i++) {
-    const embedding = await getEmbedding(chunks[i], env.GEMINI_API_KEY);
-    vectors.push({
-      id: `${documentId}-chunk-${i}`,
-      values: embedding,
-      namespace: workspaceId,
-      metadata: { documentId, chunkIndex: i, text: chunks[i] },
-    });
+  try {
+    for (let i = 0; i < chunks.length; i++) {
+      const embedding = await getEmbedding(chunks[i], env.GEMINI_API_KEY);
+      vectors.push({
+        id: `${documentId}-chunk-${i}`,
+        values: embedding,
+        namespace: workspaceId,
+        metadata: { documentId, chunkIndex: i, text: chunks[i] },
+      });
+    }
+  } catch (err) {
+    // Section R: βλ. ίδιο σχόλιο στο handleUpload -- καθαρή αποτυχία, όχι crash.
+    return jsonError(503, "The AI provider is temporarily unavailable. Please try again in a few minutes.");
   }
   await env.VECTORIZE.upsert(vectors);
 

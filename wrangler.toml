@@ -81,3 +81,14 @@ PADDLE_ENV = "production"
 # τοπικό .dev.vars έχει το δοκιμαστικό site key της Cloudflare αντί γι'
 # αυτό (δουλεύει από οποιοδήποτε domain, π.χ. localhost).
 TURNSTILE_SITE_KEY = "0x4AAAAAAE_gzTpIYxx2aETD"
+
+# --- Cloudflare AI Gateway (Section R): fallback-ready path για τη
+# Gemini μέσω gateway.ai.cloudflare.com αντί για απευθείας κλήση. Στάδιο
+# Α: μόνο pass-through (ίδιο request/response σχήμα, καμία αλλαγή
+# συμπεριφοράς). Το AI_GATEWAY_TOKEN (auth στο ίδιο το gateway, όχι στη
+# Google) ΔΕΝ μπαίνει εδώ -- είναι secret:
+#   wrangler secret put AI_GATEWAY_TOKEN
+# Ούτε το CF_ACCOUNT_ID ούτε το AI_GATEWAY_ID είναι μυστικά -- και τα δύο
+# εμφανίζονται ήδη δημόσια σε κάθε URL του gateway.
+CF_ACCOUNT_ID = "12801f592f7e1b5fff2e7b2b4c661b90"
+AI_GATEWAY_ID = "idmon-ai"
