@@ -72,7 +72,7 @@ Three ways to get a workspace ID, in increasing order of permanence:
 | Guest | Random UUID generated client-side, stored in `localStorage` | 7-day rolling TTL on the workspace's data |
 | Account | Email/password signup or login (D1-backed) to a permanent workspace tied to that account | 30-day session, workspace data itself never expires |
 
-Password hashing uses PBKDF2 (SHA-256, 100,000 iterations) via the Worker runtime's native Web Crypto API, with no external dependency. 100,000 is the hard iteration ceiling of the Cloudflare Workers runtime (higher values throw `NotSupportedError`), so it cannot currently be raised to the higher figures OWASP recommends. The iteration count is stored per user (`users.password_iterations`) so it can be raised later without invalidating existing hashes.
+Password hashing uses Argon2id (`argon2-wasm-edge`, a WASM-compiled implementation — a pure-JS Argon2 implementation was benchmarked at roughly 14 seconds of CPU time on a Cloudflare Worker, far past any usable limit) with OWASP's baseline parameters (19 MiB memory, 2 iterations, 1 degree of parallelism), taking roughly 100–130ms per hash in production. The WASM module is imported statically at the top of `src/index.js` rather than compiled at request time, because the Workers runtime disallows dynamic `WebAssembly.compile()` ("Wasm code generation disallowed by embedder"). The produced hash is a single self-describing PHC-format string (algorithm, parameters, salt and hash together), so no separate iteration-count column is needed; `users.password_salt` and `users.password_iterations` are no longer used for verification and are kept only because the original schema may not allow `NULL` there. This replaced PBKDF2-SHA256, which the Cloudflare Workers runtime hard-caps at 100,000 iterations (higher values throw `NotSupportedError`), below what OWASP currently recommends for that algorithm.
 
 Sessions are opaque, cryptographically random 256-bit tokens stored server-side in D1 (`sessions` table); logout deletes the row, invalidating the token immediately. A request carrying a valid `X-Session-Token` always has its workspace resolved from that session, never from a client-supplied `X-Workspace-Id`. This prevents a logged-in client from ever claiming a different workspace by editing a header.
 
@@ -146,7 +146,7 @@ Design decisions worth calling out:
 | Document storage | Cloudflare KV |
 | Accounts, sessions, connections | Cloudflare D1 (SQLite) |
 | Billing | Paddle Checkout, subscriptions, customer portal, and webhooks |
-| Password hashing | PBKDF2-SHA256 (native Web Crypto, no dependency) |
+| Password hashing | Argon2id (`argon2-wasm-edge`, WASM, statically imported) |
 | Token encryption | AES-GCM (native Web Crypto) |
 | Embeddings | Gemini `gemini-embedding-001` |
 | Answer generation | Gemini `gemini-3.6-flash` |
@@ -248,6 +248,7 @@ Unless noted otherwise, endpoints resolve the workspace from `X-Session-Token` i
 ```bash
 git clone https://github.com/giamarigkos-del/idmon.git
 cd idmon
+npm install
 ```
 
 Create the required Cloudflare resources (or reuse existing ones and update `wrangler.toml`):
@@ -365,7 +366,6 @@ idmon/
 - File upload supports `.txt`, `.md`, and `.pdf`; `.docx` is not supported yet
 - Guest and Developer access still trust a client-supplied `X-Workspace-Id` header directly (no session backing them). This is acceptable for an anonymous-trial or demo workspace, but a logged-in account is always protected via server-side session lookup
 - The rate limiter uses per-IP buckets, so users behind a shared IP share a bucket
-- PBKDF2 is capped at 100,000 iterations by the Workers runtime (see [Accounts and sessions](#accounts-and-sessions))
 - No version history: publishing overwrites the previous embedded version (the full text is always preserved in KV, but there is no diff-able revision log)
 - The public pricing page has a Live monthly/annual toggle and checkout buttons. `idmon.app` is approved by Paddle for checkout; `app.idmon.app`, where the in-app checkout actually runs, is still pending approval (resubmission in progress)
 - Internal resource names still use the old branding (Worker `operations-portal-rag`, Vectorize index `operations-portal-rag-index`, D1 database `rag-demo-tool-accounts`); they are not visible to end users
