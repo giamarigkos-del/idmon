@@ -6,6 +6,7 @@
 <title>Idmon — Welcome</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/shared.css">
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad&render=explicit" async defer></script>
 <style>
   /* Section: ζεστή παλέτα μόνο για το landing -- override του --accent
      ΜΟΝΟ μέσα σε αυτό το :root block, που φορτώνει μόνο σε αυτή τη σελίδα
@@ -138,6 +139,7 @@
       <label for="accountPassword" style="margin-top:10px;" data-i18n="passwordLabel">Password</label>
       <input type="password" id="accountPassword" placeholder="••••••••" autocomplete="current-password">
       <a href="#" class="forgot-link" id="forgotLink" data-i18n="forgotLink" style="display:none;">Forgot password?</a>
+      <div class="cf-turnstile" id="accountTurnstile" style="margin-top:10px;"></div>
       <div class="dev-form-actions">
         <button type="button" class="submit-btn" id="accountSubmitBtn" data-i18n="signupBtn">Sign up</button>
         <button type="button" class="cancel-btn" id="accountCancelBtn" data-i18n="cancel">Cancel</button>
@@ -148,6 +150,7 @@
     <div class="dev-form" id="forgotForm">
       <label for="forgotEmail" data-i18n="emailLabel">Email</label>
       <input type="email" id="forgotEmail" placeholder="you@example.com" autocomplete="email">
+      <div class="cf-turnstile" id="forgotTurnstile" style="margin-top:10px;"></div>
       <div class="dev-form-actions">
         <button type="button" class="submit-btn" id="forgotSubmitBtn" data-i18n="sendResetLink">Send reset link</button>
         <button type="button" class="cancel-btn" id="forgotCancelBtn" data-i18n="cancel">Cancel</button>
@@ -193,6 +196,57 @@
 <script src="/shared.js"></script>
 <script>
   const el = (id) => document.getElementById(id);
+
+  // Section R: Turnstile tokens -- explicit render γιατί οι φόρμες δεν είναι
+  // πραγματικά <form> tags (JS submit, όχι native), δεν υπάρχει αυτόματο
+  // hidden input να διαβάσουμε· κρατάμε το token εμείς σε μεταβλητή μέσω
+  // του callback του κάθε widget. Ένα token είναι μιας χρήσης -- resetάρεται
+  // μετά από κάθε προσπάθεια (επιτυχή ή όχι), βλ. τις δύο submit* συναρτήσεις.
+  //
+  // Το site key ΔΕΝ είναι hardcoded εδώ -- έρχεται από GET /config/public,
+  // που επιστρέφει το σωστό key ανάλογα με το περιβάλλον (πραγματικό στο
+  // production, δοκιμαστικό στο wrangler dev). Ο λόγος: ένα πραγματικό
+  // Turnstile site key είναι δηλωμένο μόνο για συγκεκριμένα hostnames
+  // (idmon.app, app.idmon.app) και αρνείται να συνδεθεί από localhost.
+  //
+  // Race condition: το api.js της Turnstile και το δικό μας fetch τρέχουν
+  // παράλληλα, δεν ξέρουμε ποιο τελειώνει πρώτο -- render μόνο όταν ΚΑΙ τα
+  // δύο είναι έτοιμα.
+  let turnstileSiteKey = null;
+  let turnstileLibReady = false;
+  let turnstileTokens = { account: null, forgot: null };
+  let turnstileWidgetIds = { account: null, forgot: null };
+
+  function renderTurnstileWidgets() {
+    if (!turnstileLibReady || !turnstileSiteKey) return;
+    turnstileWidgetIds.account = turnstile.render("#accountTurnstile", {
+      sitekey: turnstileSiteKey,
+      callback: (token) => { turnstileTokens.account = token; },
+      "expired-callback": () => { turnstileTokens.account = null; },
+    });
+    turnstileWidgetIds.forgot = turnstile.render("#forgotTurnstile", {
+      sitekey: turnstileSiteKey,
+      callback: (token) => { turnstileTokens.forgot = token; },
+      "expired-callback": () => { turnstileTokens.forgot = null; },
+    });
+  }
+
+  window.onTurnstileLoad = function () {
+    turnstileLibReady = true;
+    renderTurnstileWidgets();
+  };
+
+  fetch("/config/public")
+    .then((res) => res.json())
+    .then((data) => {
+      turnstileSiteKey = data.turnstileSiteKey;
+      renderTurnstileWidgets();
+    })
+    .catch(() => {
+      // Αν αποτύχει, τα widgets απλά δεν εμφανίζονται -- η υπάρχουσα
+      // client-side προστασία (!turnstileTokens.account) μπλοκάρει κανονικά
+      // το submit με το δικό της μήνυμα, τίποτα δεν κρασάρει.
+    });
 
   applyTranslations();
   initLangToggle("langToggle");
@@ -305,6 +359,13 @@
     const btn = el("accountSubmitBtn");
     const errorEl = el("accountError");
     errorEl.classList.remove("show");
+
+    if (!turnstileTokens.account) {
+      errorEl.textContent = t("turnstileRequired");
+      errorEl.classList.add("show");
+      return;
+    }
+
     btn.disabled = true;
     btn.textContent = t("checking");
 
@@ -314,7 +375,7 @@
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, lang: getLang() }),
+        body: JSON.stringify({ email, password, lang: getLang(), turnstileToken: turnstileTokens.account }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
@@ -322,6 +383,8 @@
         errorEl.classList.add("show");
         btn.disabled = false;
         btn.textContent = accountMode === "signup" ? t("signupBtn") : t("login");
+        turnstile.reset(turnstileWidgetIds.account);
+        turnstileTokens.account = null;
         return;
       }
       localStorage.setItem("workspaceId", data.workspaceId);
@@ -333,6 +396,8 @@
       errorEl.classList.add("show");
       btn.disabled = false;
       btn.textContent = accountMode === "signup" ? t("signupBtn") : t("login");
+      turnstile.reset(turnstileWidgetIds.account);
+      turnstileTokens.account = null;
     }
   }
 
@@ -365,17 +430,26 @@
     const errorEl = el("forgotError");
     errorEl.classList.remove("show");
     el("forgotSuccess").classList.remove("show");
+
+    if (!turnstileTokens.forgot) {
+      errorEl.textContent = t("turnstileRequired");
+      errorEl.classList.add("show");
+      return;
+    }
+
     btn.disabled = true;
     btn.textContent = t("checking");
     try {
       const res = await fetch("/account/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, lang: getLang() }),
+        body: JSON.stringify({ email, lang: getLang(), turnstileToken: turnstileTokens.forgot }),
       });
       const data = await res.json();
       btn.disabled = false;
       btn.textContent = t("sendResetLink");
+      turnstile.reset(turnstileWidgetIds.forgot);
+      turnstileTokens.forgot = null;
       if (!res.ok) {
         errorEl.textContent = data.error || t("connectionErrorPrefix");
         errorEl.classList.add("show");
@@ -388,6 +462,8 @@
       errorEl.classList.add("show");
       btn.disabled = false;
       btn.textContent = t("sendResetLink");
+      turnstile.reset(turnstileWidgetIds.forgot);
+      turnstileTokens.forgot = null;
     }
   }
 

@@ -55,6 +55,35 @@ async function clearRateLimit(env, bucket, identifier) {
   await env.DOCUMENT_REGISTRY.delete(`ratelimit:${bucket}:${identifier}`);
 }
 
+// Section R: επαλήθευση Cloudflare Turnstile token πριν από signup/login/
+// forgot-password. Συμπληρώνει το per-IP rate limiting από πάνω, δεν το
+// αντικαθιστά -- το Turnstile πιάνει αυτοματοποιημένα bots ανεξάρτητα από
+// πόσες διαφορετικές IP χρησιμοποιούν, το rate limiting πιάνει επιθέσεις
+// όγκου από μία IP. Fail OPEN αν η ίδια η Cloudflare siteverify είναι
+// προσωρινά μη διαθέσιμη (δικτυακό σφάλμα/exception) -- δεν θέλουμε μια
+// διακοπή σε υπηρεσία τρίτου να κλειδώσει έξω πραγματικούς χρήστες, ο
+// κωδικός και ο rate limiter παραμένουν σαν πραγματικός έλεγχος ούτως ή
+// άλλως. Fail CLOSED (return false) μόνο όταν η Cloudflare απάντησε κανονικά
+// και είπε ρητά "όχι έγκυρο".
+async function verifyTurnstile(token, ip, env) {
+  if (!token) return false;
+  try {
+    const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        secret: env.TURNSTILE_SECRET_KEY,
+        response: token,
+        remoteip: ip,
+      }),
+    });
+    const data = await res.json();
+    return data.success === true;
+  } catch (err) {
+    return true; // fail open -- βλ. σχόλιο παραπάνω
+  }
+}
+
 // Section Q: pricing tiers -- πραγματικά όρια μηνυμάτων/εγγράφων ανά plan,
 // αντικαθιστούν το παλιό ενιαίο MONTHLY_MESSAGE_LIMIT (που παρέμενε ίδιο για
 // όλους, πριν υπάρξει καν πεδίο "plan" στους λογαριασμούς). Τα νούμερα
@@ -284,6 +313,11 @@ async function handleSignup(request, env) {
   if (!email || !EMAIL_RE.test(email)) return jsonError(400, "Valid email is required");
   if (!password || password.length < 8) return jsonError(400, "Password must be at least 8 characters");
 
+  // Section R: αποτυχία εδώ ΔΕΝ καταναλώνει rate-limit attempt.
+  if (!(await verifyTurnstile(body.turnstileToken, ip, env))) {
+    return jsonError(400, "Verification failed. Please try again.");
+  }
+
   await recordRateLimitAttempt(env, "signup", ip);
 
   const existing = await env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
@@ -335,6 +369,11 @@ async function handleLogin(request, env) {
   const { password } = body;
 
   if (!email || !password) return jsonError(400, "Email and password are required");
+
+  // Section R: αποτυχία εδώ ΔΕΝ καταναλώνει rate-limit attempt.
+  if (!(await verifyTurnstile(body.turnstileToken, ip, env))) {
+    return jsonError(400, "Verification failed. Please try again.");
+  }
 
   const user = await env.DB.prepare(
     "SELECT id, password_hash, password_salt, password_iterations, workspace_id, embed_id, email_verified FROM users WHERE email = ?"
@@ -413,7 +452,6 @@ async function handleForgotPassword(request, env) {
   if (await isRateLimited(env, "forgot-password", ip)) {
     return jsonError(429, "Too many requests. Please try again in a few minutes.");
   }
-  await recordRateLimitAttempt(env, "forgot-password", ip);
 
   let body;
   try {
@@ -421,6 +459,15 @@ async function handleForgotPassword(request, env) {
   } catch (err) {
     return jsonError(400, "Invalid JSON body");
   }
+
+  // Section R: έλεγχος Turnstile ΠΡΙΝ καταναλωθεί rate-limit attempt -- η
+  // εγγραφή μετακινήθηκε εδώ κάτω (πριν γινόταν πριν καν το JSON parse),
+  // ώστε μια αποτυχημένη επαλήθευση να μη μετράει στο ίδιο όριο 5/15λεπτο.
+  if (!(await verifyTurnstile(body.turnstileToken, ip, env))) {
+    return jsonError(400, "Verification failed. Please try again.");
+  }
+  await recordRateLimitAttempt(env, "forgot-password", ip);
+
   const email = (body.email || "").trim().toLowerCase();
   const lang = body.lang === "el" ? "el" : "en"; // ίδια λογική με τη γλώσσα του bot -- default en
   const genericResponse = new Response(
@@ -4320,6 +4367,19 @@ export default {
     if (url.pathname === "/health") {
       return new Response(
         JSON.stringify({ status: "ok", message: "Idmon RAG is alive" }),
+        { headers: JSON_HEADERS }
+      );
+    }
+
+    // Section R: μοναδικό μη-ευαίσθητο ρυθμιστικό στοιχείο που χρειάζεται
+    // το frontend να μάθει από τον server -- το Turnstile SITE key διαφέρει
+    // ανάμεσα σε production (πραγματικό, δηλωμένο μόνο για idmon.app/
+    // app.idmon.app) και τοπική ανάπτυξη (δοκιμαστικό, δουλεύει από
+    // οποιοδήποτε domain όπως το localhost). Το SECRET key ΔΕΝ περνάει ποτέ
+    // από εδώ, μένει μόνο server-side στο verifyTurnstile().
+    if (url.pathname === "/config/public" && request.method === "GET") {
+      return new Response(
+        JSON.stringify({ turnstileSiteKey: env.TURNSTILE_SITE_KEY || null }),
         { headers: JSON_HEADERS }
       );
     }

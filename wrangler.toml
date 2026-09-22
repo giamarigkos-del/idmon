@@ -71,3 +71,13 @@ PADDLE_PRICE_PRO_ANNUAL = "pri_01m2ynend8w7383t0nqzgd0f1z"
 # Αν λείπει κάποιο από τα δύο, το κουμπί "Αναβάθμιση" απλά δεν εμφανίζεται.
 PADDLE_CLIENT_TOKEN = "live_d06ea77dbb7841c5652998a2c8e"
 PADDLE_ENV = "production"
+
+# --- Cloudflare Turnstile (Section R, auth hardening) ---
+# Το SECRET key ΔΕΝ μπαίνει εδώ -- είναι secret:
+#   wrangler secret put TURNSTILE_SECRET_KEY
+# Το SITE key είναι δημόσιο by design (το χρησιμοποιεί το Turnstile widget
+# στον browser) -- δεν είναι secret. Ξεχωριστό ανά περιβάλλον: αυτό εδώ
+# είναι το πραγματικό, δηλωμένο μόνο για idmon.app/app.idmon.app. Το
+# τοπικό .dev.vars έχει το δοκιμαστικό site key της Cloudflare αντί γι'
+# αυτό (δουλεύει από οποιοδήποτε domain, π.χ. localhost).
+TURNSTILE_SITE_KEY = "0x4AAAAAAE_gzTpIYxx2aETD"
