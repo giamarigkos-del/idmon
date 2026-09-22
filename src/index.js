@@ -231,7 +231,19 @@ async function hashPassword(password) {
 }
 
 async function verifyPassword(password, hash) {
-  return argon2Verify({ password, hash });
+  try {
+    return await argon2Verify({ password, hash });
+  } catch (err) {
+    // Section R, βρέθηκε σε ζωντανό crash 22 Σεπτεμβρίου 2026: ένας
+    // λογαριασμός που έμεινε με παλιό PBKDF2 hash (δημιουργήθηκε πριν το
+    // deploy του Argon2) δεν είναι έγκυρο PHC-format string -- το
+    // argon2Verify() πετάει "Invalid hash" αντί να επιστρέψει false, και
+    // χωρίς αυτό το catch ολόκληρο το request έσκαγε (500, ο επισκέπτης
+    // έβλεπε σελίδα σφάλματος αντί για κανονικό "λάθος κωδικός"). Ο
+    // λογαριασμός χρειάζεται password reset ούτως ή άλλως -- αυτό εδώ
+    // απλά κάνει την αποτυχία να μοιάζει με λάθος κωδικό, όχι crash.
+    return false;
+  }
 }
 
 function jsonError(status, message) {
