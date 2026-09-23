@@ -6,23 +6,11 @@
 //   node tests/billing-reconcile.mjs
 // Προαιρετικά: $env:INDEX_PATH = "C:\\...\\index.js"
 //              $env:WEBHOOK_ONLY = "1"  (μόνο οι έλεγχοι του webhook)
-import { pathToFileURL } from "node:url";
-import path from "node:path";
-import fs from "node:fs";
-import os from "node:os";
 import crypto from "node:crypto";
+import { loadWorker } from "./helpers/load-worker.mjs";
 
-// Το repo έχει package.json με "type": "commonjs", οπότε φορτώνουμε από προσωρινό
-// φάκελο με { "type": "module" } (τα αρχικά αρχεία δεν αγγίζονται).
-const indexPath = path.resolve(process.env.INDEX_PATH || "./src/index.js");
-const srcDir = path.dirname(indexPath);
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "idmon-test-"));
-for (const name of fs.readdirSync(srcDir)) {
-  if (name.endsWith(".js")) fs.copyFileSync(path.join(srcDir, name), path.join(tmpDir, name));
-}
-fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ type: "module" }));
-const worker = (await import(pathToFileURL(path.join(tmpDir, path.basename(indexPath))).href)).default;
-process.on("exit", () => fs.rmSync(tmpDir, { recursive: true, force: true }));
+// Φόρτωση του ΠΡΑΓΜΑΤΙΚΟΥ src/index.js στο Node (και με πραγματικό Argon2id): βλ. tests/helpers/load-worker.mjs
+const worker = await loadWorker();
 
 const WEBHOOK_ONLY = process.env.WEBHOOK_ONLY === "1";
 

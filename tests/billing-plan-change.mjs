@@ -4,33 +4,10 @@
 // Χρήση (PowerShell, από τον φάκελο idmon):
 //   node tests/billing-plan-change.mjs
 // Προαιρετικά: $env:INDEX_PATH = "C:\\...\\index.js"
-import { pathToFileURL } from "node:url";
-import path from "node:path";
-import fs from "node:fs";
-import os from "node:os";
+import { loadWorker } from "./helpers/load-worker.mjs";
 
-// Το repo έχει package.json με "type": "commonjs": φορτώνουμε από προσωρινό φάκελο ESM.
-const indexPath = path.resolve(process.env.INDEX_PATH || "./src/index.js");
-const srcDir = path.dirname(indexPath);
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "idmon-test-"));
-for (const name of fs.readdirSync(srcDir)) {
-  if (name.endsWith(".js")) fs.copyFileSync(path.join(srcDir, name), path.join(tmpDir, name));
-}
-fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ type: "module" }));
-// Από τις 22 Σεπ το src/index.js φορτώνει το Argon2id με στατικά imports .wasm,
-// που το Node δεν ξέρει να φορτώσει (τα υποστηρίζει μόνο ο Cloudflare runtime).
-// Αυτό το test δεν κάνει ποτέ hashing, οπότε στο ΠΡΟΣΩΡΙΝΟ αντίγραφο τα imports
-// αντικαθίστανται με stubs που πετάνε σφάλμα αν κληθούν. Το αρχικό αρχείο δεν αλλάζει.
-{
-  const tmpIndex = path.join(tmpDir, path.basename(indexPath));
-  const patched = fs.readFileSync(tmpIndex, "utf8")
-    .replace(/^import \{ argon2id, argon2Verify, setWASMModules \} from "argon2-wasm-edge";\r?$/m,
-      'const argon2id = async () => { throw new Error("argon2 is not available in this test"); }; const argon2Verify = argon2id; const setWASMModules = () => {};')
-    .replace(/^import (argon2WASM|blake2bWASM) from "argon2-wasm-edge\/wasm\/[a-z0-9]+\.wasm";\r?$/gm, "const $1 = null;");
-  fs.writeFileSync(tmpIndex, patched);
-}
-const worker = (await import(pathToFileURL(path.join(tmpDir, path.basename(indexPath))).href)).default;
-process.on("exit", () => fs.rmSync(tmpDir, { recursive: true, force: true }));
+// Φόρτωση του ΠΡΑΓΜΑΤΙΚΟΥ src/index.js στο Node (και με πραγματικό Argon2id): βλ. tests/helpers/load-worker.mjs
+const worker = await loadWorker();
 
 let passed = 0;
 let failed = 0;
