@@ -222,8 +222,32 @@ function randomHex(byteLength) {
 }
 
 // Section R: το argon2Verify() της ίδιας της βιβλιοθήκης κάνει ήδη σταθερού
-// χρόνου σύγκριση εσωτερικά -- δεν χρειάζεται πια δικό μας timingSafeEqual,
-// όπως χρειαζόταν με το χειροκίνητο PBKDF2 πριν.
+// χρόνου σύγκριση εσωτερικά, οπότε οι ΚΩΔΙΚΟΙ δεν χρειάζονται το παρακάτω
+// timingSafeEqual. Το χρειάζεται όμως η υπογραφή των webhooks του Paddle
+// (verifyPaddleSignature).
+//
+// ΙΣΤΟΡΙΚΟ (23 Σεπτ. 2026): στη μετάβαση σε Argon2id (22 Σεπτ.) η συνάρτηση
+// αφαιρέθηκε ως "αχρησιμοποίητη", ενώ τη χρησιμοποιούσε ακόμα το Paddle webhook.
+// Αποτέλεσμα: ΚΑΘΕ webhook έσκαγε με ReferenceError (HTTP 500). Βρέθηκε με
+// Paddle simulation + `wrangler tail`. Μην την αφαιρέσεις χωρίς να ψάξεις
+// πρώτα όλο το αρχείο για "timingSafeEqual(".
+//
+// Σύγκριση δύο strings σε σταθερό χρόνο: κοιτάει ΠΑΝΤΑ όλους τους χαρακτήρες,
+// χωρίς πρόωρη έξοδο στην πρώτη διαφορά, ώστε ο χρόνος απάντησης να μη
+// "προδίδει" πόσο κοντά έπεσε μια πλαστή υπογραφή.
+function timingSafeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const encoder = new TextEncoder();
+  const x = encoder.encode(a);
+  const y = encoder.encode(b);
+  let diff = x.length ^ y.length;
+  const length = Math.max(x.length, y.length);
+  for (let i = 0; i < length; i++) {
+    diff |= (x[i] || 0) ^ (y[i] || 0);
+  }
+  return diff === 0;
+}
+
 async function hashPassword(password) {
   const salt = new Uint8Array(16);
   crypto.getRandomValues(salt);
