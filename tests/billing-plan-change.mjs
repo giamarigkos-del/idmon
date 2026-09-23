@@ -17,6 +17,18 @@ for (const name of fs.readdirSync(srcDir)) {
   if (name.endsWith(".js")) fs.copyFileSync(path.join(srcDir, name), path.join(tmpDir, name));
 }
 fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ type: "module" }));
+// Από τις 22 Σεπ το src/index.js φορτώνει το Argon2id με στατικά imports .wasm,
+// που το Node δεν ξέρει να φορτώσει (τα υποστηρίζει μόνο ο Cloudflare runtime).
+// Αυτό το test δεν κάνει ποτέ hashing, οπότε στο ΠΡΟΣΩΡΙΝΟ αντίγραφο τα imports
+// αντικαθίστανται με stubs που πετάνε σφάλμα αν κληθούν. Το αρχικό αρχείο δεν αλλάζει.
+{
+  const tmpIndex = path.join(tmpDir, path.basename(indexPath));
+  const patched = fs.readFileSync(tmpIndex, "utf8")
+    .replace(/^import \{ argon2id, argon2Verify, setWASMModules \} from "argon2-wasm-edge";\r?$/m,
+      'const argon2id = async () => { throw new Error("argon2 is not available in this test"); }; const argon2Verify = argon2id; const setWASMModules = () => {};')
+    .replace(/^import (argon2WASM|blake2bWASM) from "argon2-wasm-edge\/wasm\/[a-z0-9]+\.wasm";\r?$/gm, "const $1 = null;");
+  fs.writeFileSync(tmpIndex, patched);
+}
 const worker = (await import(pathToFileURL(path.join(tmpDir, path.basename(indexPath))).href)).default;
 process.on("exit", () => fs.rmSync(tmpDir, { recursive: true, force: true }));
 
@@ -47,6 +59,9 @@ function makeState(userOverrides = {}) {
     }],
     customers: [],
     subscriptions: [],
+    // Ο καθρέφτης που γράφει το webhook: subscription id -> τωρινό price id.
+    // Προεπιλογή: Basic ΜΗΝΙΑΙΟ. Κενό αντικείμενο = η συνδρομή δεν είναι στον καθρέφτη.
+    mirroredPrices: { [SUB]: "pri_basic_test" },
     sessions: {
       [TOKEN]: { user_id: 1, workspace_id: WS, expires_at: future },
       "tok-expired": { user_id: 1, workspace_id: WS, expires_at: new Date(Date.now() - 1000).toISOString() },
@@ -66,6 +81,10 @@ function makeEnv(state, vars = {}) {
             async first() {
               if (sql.includes("FROM sessions WHERE token")) return state.sessions[args[0]] || null;
               if (sql.includes("FROM subscriptions s") && sql.includes("LEFT JOIN customers")) return null;
+              if (sql.includes("SELECT price_id FROM subscriptions WHERE subscription_id")) {
+                const priceId = state.mirroredPrices[args[0]];
+                return priceId ? { price_id: priceId } : null;
+              }
               if (sql.includes("SELECT plan, paddle_customer_id, paddle_subscription_id, paddle_status FROM users")) return row(state.users.find((u) => u.workspace_id === args[0])) || null;
               if (sql.includes("FROM users WHERE paddle_subscription_id")) return pick(state.users.find((u) => u.paddle_subscription_id === args[0])) || null;
               if (sql.includes("FROM users WHERE workspace_id")) return pick(state.users.find((u) => u.workspace_id === args[0])) || null;
@@ -419,6 +438,67 @@ for (const [label, route, expectStatus, expectCode] of [
   const state = makeState(); const env = makeEnv(state, { PADDLE_API_KEY: undefined }); const mock = paddleMock();
   const { res } = await call(env, mock, PORTAL, {});
   check("no API key: 503 and Paddle not called", res.status === 503 && mock.calls.length === 0);
+}
+
+console.log("annual subscriptions: the change keeps the billing period");
+const BASIC_ANNUAL = "pri_basic_annual_test";
+const PRO_ANNUAL = "pri_pro_annual_test";
+const annualVars = { PADDLE_PRICE_BASIC_ANNUAL: BASIC_ANNUAL, PADDLE_PRICE_PRO_ANNUAL: PRO_ANNUAL };
+{
+  const state = makeState(); state.mirroredPrices[SUB] = BASIC_ANNUAL;
+  const env = makeEnv(state, annualVars); const mock = paddleMock();
+  mock.routes[PATCH_PREVIEW] = { body: previewBody() };
+  const { res, json } = await call(env, mock, PREVIEW, { plan: "pro" });
+  check("basic annual: preview asks for the PRO ANNUAL price", res.status === 200 && mock.calls.length === 1 && mock.calls[0].body.items[0].price_id === PRO_ANNUAL, JSON.stringify(mock.calls.map((c) => c.body)));
+  check("basic annual: preview says period annual", json.period === "annual", JSON.stringify(json));
+}
+{
+  const state = makeState(); state.mirroredPrices[SUB] = BASIC_ANNUAL;
+  const env = makeEnv(state, annualVars); const mock = paddleMock();
+  mock.routes[PATCH_SUB] = { body: changedSub({ items: [{ price: { id: PRO_ANNUAL }, quantity: 1 }] }) };
+  const { res, json } = await call(env, mock, CHANGE, { plan: "pro" });
+  check("basic annual: the change PATCHes to PRO ANNUAL and the account becomes pro", res.status === 200 && json.plan === "pro" && mock.calls[0].body.items[0].price_id === PRO_ANNUAL && state.users[0].plan === "pro", JSON.stringify([json, mock.calls[0] && mock.calls[0].body]));
+}
+{
+  const state = makeState(); // Basic μηνιαίο στον καθρέφτη
+  const env = makeEnv(state, annualVars); const mock = paddleMock();
+  mock.routes[PATCH_PREVIEW] = { body: previewBody() };
+  const { json } = await call(env, mock, PREVIEW, { plan: "pro" });
+  check("basic monthly (annual prices configured too): still PRO MONTHLY, period monthly", mock.calls[0].body.items[0].price_id === PRO && json.period === "monthly", JSON.stringify(json));
+}
+{
+  // Η συνδρομή δεν είναι στον καθρέφτη: ρωτάμε το Paddle ποιο price έχει
+  const state = makeState(); state.mirroredPrices = {};
+  const env = makeEnv(state, annualVars); const mock = paddleMock();
+  mock.routes[`GET /subscriptions/${SUB}`] = { body: { data: { id: SUB, status: "active", items: [{ price: { id: BASIC_ANNUAL }, quantity: 1 }] } } };
+  mock.routes[PATCH_PREVIEW] = { body: previewBody() };
+  const { res, json } = await call(env, mock, PREVIEW, { plan: "pro" });
+  check("not mirrored: GET the subscription first, then preview PRO ANNUAL", res.status === 200 && mock.calls.length === 2 && mock.calls[0].method === "GET" && mock.calls[0].path === `/subscriptions/${SUB}` && mock.calls[1].body.items[0].price_id === PRO_ANNUAL && json.period === "annual", JSON.stringify(mock.calls.map((c) => c.method + " " + c.path)));
+}
+{
+  // Ούτε καθρέφτης ούτε Paddle: ΔΕΝ μαντεύουμε, δεν γίνεται καμία αλλαγή
+  const state = makeState(); state.mirroredPrices = {};
+  const env = makeEnv(state, annualVars); const mock = paddleMock();
+  mock.routes[`GET /subscriptions/${SUB}`] = { status: 500, body: { error: { code: "internal_error" } } };
+  const cap = captureConsole();
+  const { res, json } = await call(env, mock, CHANGE, { plan: "pro" });
+  cap.restore();
+  check("not mirrored and Paddle down: 502, no PATCH, plan stays basic", res.status === 502 && json.code === "provider_error" && mock.calls.every((c) => c.method !== "PATCH") && state.users[0].plan === "basic", JSON.stringify(json));
+}
+{
+  // Basic ετήσιο αλλά δεν έχει ρυθμιστεί Pro ετήσιο: δεν πάμε σιωπηλά σε μηνιαίο
+  const state = makeState(); state.mirroredPrices[SUB] = BASIC_ANNUAL;
+  const env = makeEnv(state, { PADDLE_PRICE_BASIC_ANNUAL: BASIC_ANNUAL }); const mock = paddleMock();
+  const { res, json } = await call(env, mock, PREVIEW, { plan: "pro" });
+  check("basic annual without a pro annual price: 503 unavailable, Paddle not called", res.status === 503 && json.code === "unavailable" && mock.calls.length === 0, JSON.stringify(json));
+}
+{
+  // Τα νέα ονόματα (_MONTHLY) αρκούν χωρίς τα παλιά
+  const state = makeState(); const mock = paddleMock();
+  const env = makeEnv(state, { PADDLE_PRICE_PRO: undefined, PADDLE_PRICE_PRO_MONTHLY: "pri_pro_monthly_new" });
+  mock.routes[PATCH_PREVIEW] = { body: previewBody() };
+  const { res } = await call(env, mock, PREVIEW, { plan: "pro" });
+  check("PADDLE_PRICE_PRO_MONTHLY alone is enough", res.status === 200 && mock.calls[0].body.items[0].price_id === "pri_pro_monthly_new");
 }
 
 console.log("\n" + passed + " passed, " + failed + " failed");

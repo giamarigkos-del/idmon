@@ -78,6 +78,13 @@
   .plan-price small{font-size:12px;font-weight:400;color:var(--text-soft);}
   .plan-feature{font-size:12.5px;color:var(--text-soft);}
   .plan-card button{margin-top:8px;}
+  /* Επιλογή μηνιαίας/ετήσιας χρέωσης στο πάνελ αναβάθμισης -- ίδια λογική με τα
+     tabs του landing (ενεργό = accent φόντο). */
+  .period-toggle{display:inline-flex;gap:2px;background:var(--surface-2);border:1px solid var(--border);
+    border-radius:6px;padding:2px;margin-top:14px;}
+  .period-toggle button{border:none;background:none;color:var(--text-soft);font-size:12.5px;font-weight:600;
+    padding:6px 14px;border-radius:4px;cursor:pointer;font-family:inherit;}
+  .period-toggle button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent);}
 
   .layout{flex:1;display:flex;min-height:0;}
 
@@ -2238,6 +2245,44 @@
   let paddleReady = null;
   let upgradePollTimer = null;
   let lastChosenPlan = null;
+  let upgradePeriod = "monthly"; // "monthly" ή "annual", το διαλέγει ο χρήστης στο πάνελ
+
+  // Επιλογή που ήρθε από τη σελίδα τιμολόγησης (idmon.app -> εγγραφή/σύνδεση -> εδώ),
+  // π.χ. /editor.html?checkout=basic&period=annual. Διαβάζεται ΜΙΑ φορά και σβήνεται
+  // αμέσως από τη γραμμή διευθύνσεων, ώστε ένα reload να μην ξανανοίγει το checkout.
+  // Το ΤΙ επιτρέπεται να αγοραστεί το αποφασίζει και πάλι ο server (upgradeOffer):
+  // το link δεν μπορεί να ξεκλειδώσει τίποτα που ο server δεν προσφέρει.
+  let checkoutIntent = readCheckoutIntent();
+  // Ολοκληρώνεται όταν η αρχική λίστα εγγράφων έχει ζωγραφιστεί στο κεντρικό πάνελ·
+  // το πάνελ αναβάθμισης της επιλογής ανοίγει ΜΕΤΑ, ώστε να μην το σκεπάσει η λίστα.
+  let initialPanelReady = Promise.resolve();
+
+  function readCheckoutIntent() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const plan = params.get("checkout");
+      if (!params.has("checkout") && !params.has("period")) return null;
+      const period = params.get("period") === "annual" ? "annual" : "monthly";
+      params.delete("checkout");
+      params.delete("period");
+      const qs = params.toString();
+      history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : "") + window.location.hash);
+      return plan === "basic" || plan === "pro" ? { plan, period } : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // Το price ID ενός πλάνου για την περίοδο που διάλεξε ο χρήστης. Παλιότερη απάντηση
+  // του server χωρίς "prices" = μόνο μηνιαίο (priceId).
+  function offerPrice(o, period) {
+    if (o.prices && o.prices[period]) return o.prices[period];
+    return period === "monthly" && !o.prices ? o.priceId : null;
+  }
+
+  function offerHasAnnual(offer) {
+    return !!(offer && offer.offers.some((o) => o.prices && o.prices.annual));
+  }
 
   function planLabel(plan) {
     return t("planName_" + plan);
@@ -2446,16 +2491,18 @@
     startUpgradePolling();
   }
 
-  async function startCheckout(planKey) {
+  async function startCheckout(planKey, period) {
     if (readPaymentPending()) return; // ασφάλεια: ήδη πληρώθηκε, περιμένουμε
     const chosen = upgradeOffer && upgradeOffer.offers.find((o) => o.plan === planKey);
     if (!chosen) return;
+    const priceId = offerPrice(chosen, period || upgradePeriod);
+    if (!priceId) return;
     lastChosenPlan = planKey;
     setUpgradeStatus("");
     try {
       const paddle = await loadPaddle(upgradeOffer);
       paddle.Checkout.open({
-        items: [{ priceId: chosen.priceId, quantity: 1 }],
+        items: [{ priceId, quantity: 1 }],
         customData: { workspace_id: upgradeOffer.workspaceId },
         settings: { displayMode: "overlay", locale: getLang() === "el" ? "el" : "en" },
       });
@@ -2468,15 +2515,19 @@
   // πελάτης στο checkout) -- δεν τις γράφουμε χειροκίνητα στον κώδικα, άρα δεν
   // μπορούν ποτέ να διαφέρουν από τη χρέωση. Best-effort: αν αποτύχει, οι
   // κάρτες δείχνουν απλά χωρίς τιμή και το checkout δείχνει την τιμή κανονικά.
-  async function fillUpgradePrices(offer) {
+  async function fillUpgradePrices(offer, period) {
     try {
+      const shown = offer.offers.map((o) => offerPrice(o, period)).filter(Boolean);
+      if (!shown.length) return;
       const paddle = await loadPaddle(offer);
       const result = await paddle.PricePreview({
-        items: offer.offers.map((o) => ({ priceId: o.priceId, quantity: 1 })),
+        items: shown.map((priceId) => ({ priceId, quantity: 1 })),
       });
+      // Ο χρήστης μπορεί να άλλαξε περίοδο όσο περιμέναμε: δεν γράφουμε παλιές τιμές.
+      if (period !== upgradePeriod) return;
       const lines = (result && result.data && result.data.details && result.data.details.lineItems) || [];
       lines.forEach((line, i) => {
-        const priceId = (line.price && line.price.id) || (offer.offers[i] && offer.offers[i].priceId);
+        const priceId = (line.price && line.price.id) || shown[i];
         const total = line.formattedTotals && line.formattedTotals.total;
         if (!priceId || !total) return;
         const slot = Array.from(document.querySelectorAll("[data-price-for]"))
@@ -2484,7 +2535,7 @@
         if (!slot) return;
         slot.textContent = total;
         const small = document.createElement("small");
-        small.textContent = " " + t("upgradePerMonth");
+        small.textContent = " " + t(period === "annual" ? "upgradePerYear" : "upgradePerMonth");
         slot.appendChild(small);
       });
     } catch (err) {
@@ -2494,13 +2545,19 @@
 
   function renderUpgradeContent(offer) {
     const numberLocale = getLang() === "el" ? "el-GR" : "en-US";
+    const period = upgradePeriod;
+    const toggle = offerHasAnnual(offer)
+      ? `<div class="period-toggle" role="group">${["monthly", "annual"].map((p) =>
+          `<button type="button" data-period="${p}" aria-pressed="${p === period ? "true" : "false"}">${escapeHtml(t(p === "annual" ? "upgradePeriodAnnual" : "upgradePeriodMonthly"))}</button>`).join("")}</div>`
+      : "";
     const cards = offer.offers
+      .filter((o) => offerPrice(o, period))
       .map((o) => {
         const docs = o.docs == null ? t("upgradeDocsUnlimited") : t("upgradeDocsCount", { n: o.docs });
         return `
         <div class="plan-card">
           <h3>${escapeHtml(planLabel(o.plan))}</h3>
-          <div class="plan-price" data-price-for="${escapeHtml(o.priceId)}"></div>
+          <div class="plan-price" data-price-for="${escapeHtml(offerPrice(o, period))}"></div>
           <div class="plan-feature">${escapeHtml(t("upgradeMessagesPerMonth", { n: o.messages.toLocaleString(numberLocale) }))}</div>
           <div class="plan-feature">${escapeHtml(docs)}</div>
           <button type="button" class="upgrade-choose-btn" data-plan="${escapeHtml(o.plan)}">${escapeHtml(t("upgradeChoosePlan", { plan: planLabel(o.plan) }))}</button>
@@ -2513,6 +2570,7 @@
         <h2 style="margin:0 0 4px;font-size:16px;">${escapeHtml(t("upgradeTitle"))}</h2>
         <p style="margin:0 0 6px;font-size:13px;color:var(--text-soft);">${escapeHtml(t("upgradeIntro"))}</p>
         <p style="margin:0;font-size:12.5px;color:var(--text-soft);">${escapeHtml(t("upgradeCurrentPlan", { plan: planLabel(offer.currentPlan) }))}</p>
+        ${toggle}
         <div class="plan-grid">${cards}</div>
         <div class="upload-status" id="upgradeStatus"></div>
         <div style="font-size:11.5px;color:var(--text-soft);margin-top:14px;">${escapeHtml(t("upgradePoweredBy"))}</div>
@@ -2527,9 +2585,37 @@
     const main = el("mainPanel");
     main.innerHTML = renderUpgradeContent(upgradeOffer);
     main.querySelectorAll(".upgrade-choose-btn").forEach((btn) => {
-      btn.addEventListener("click", () => startCheckout(btn.dataset.plan));
+      btn.addEventListener("click", () => startCheckout(btn.dataset.plan, upgradePeriod));
     });
-    fillUpgradePrices(upgradeOffer);
+    main.querySelectorAll(".period-toggle [data-period]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.dataset.period === upgradePeriod) return;
+        upgradePeriod = btn.dataset.period === "annual" ? "annual" : "monthly";
+        renderUpgradePanel();
+      });
+    });
+    fillUpgradePrices(upgradeOffer, upgradePeriod);
+  }
+
+  // Εκτελεί ΜΙΑ φορά την επιλογή που ήρθε από τη σελίδα τιμολόγησης, αφού ο server
+  // πει τι προσφέρει. Αν το πλάνο προσφέρεται: ανοίγει το πάνελ με τη σωστή περίοδο
+  // και αμέσως το checkout. Αν όχι (π.χ. ο λογαριασμός έχει ήδη συνδρομή): εξήγηση,
+  // ποτέ checkout.
+  function consumeCheckoutIntent() {
+    if (!checkoutIntent) return;
+    const intent = checkoutIntent;
+    checkoutIntent = null;
+    initialPanelReady.catch(() => {}).then(() => {
+      if (readPaymentPending()) return;
+      const chosen = upgradeOffer && upgradeOffer.offers.find((o) => o.plan === intent.plan);
+      if (!chosen) {
+        showBillingNotice(t("checkoutIntentUnavailable"));
+        return;
+      }
+      upgradePeriod = offerPrice(chosen, intent.period) ? intent.period : "monthly";
+      renderUpgradePanel();
+      startCheckout(intent.plan, upgradePeriod);
+    });
   }
 
   el("upgradeBtn").addEventListener("click", renderUpgradePanel);
@@ -2655,10 +2741,11 @@
       return;
     }
     const today = formatMoney(data.chargeToday, data.currency);
-    const monthly = formatMoney(data.recurring, data.currency);
+    const recurringAmount = formatMoney(data.recurring, data.currency);
+    const yearly = data.period === "annual";
     const recurringText = data.nextBilledAt
-      ? t("changePlanRecurringFrom", { date: formatDate(data.nextBilledAt), amount: monthly })
-      : t("changePlanRecurringThen", { amount: monthly });
+      ? t(yearly ? "changePlanRecurringFromYear" : "changePlanRecurringFrom", { date: formatDate(data.nextBilledAt), amount: recurringAmount })
+      : t(yearly ? "changePlanRecurringThenYear" : "changePlanRecurringThen", { amount: recurringAmount });
     setMainPanel(renderChangePlanShell(`
       <p style="margin:0;font-size:13px;color:var(--text-soft);">${escapeHtml(t("changePlanIntro"))}</p>
       <div class="change-plan-summary">
@@ -2714,6 +2801,7 @@
       const data = await res.json();
       applyUpgradeOffer(data.upgrade);
       applyManageInfo(data.manage);
+      consumeCheckoutIntent();
       if (data.messagesLimitReached) {
         el("usageLimitBanner").style.display = "flex";
       }
@@ -2724,9 +2812,9 @@
 
   const driveRedirectBanner = checkGoogleDriveRedirectParams();
   if (driveRedirectBanner) {
-    loadDocuments().then(() => renderGoogleDrivePanel(driveRedirectBanner));
+    initialPanelReady = loadDocuments().then(() => renderGoogleDrivePanel(driveRedirectBanner));
   } else {
-    loadDocuments().then(renderDocBrowser);
+    initialPanelReady = loadDocuments().then(renderDocBrowser);
   }
   loadFallbackQuestions();
   loadContradictions();

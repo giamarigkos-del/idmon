@@ -1789,6 +1789,23 @@ async function handleGetAnalyticsSummary(request, env) {
 // ώστε το go-live να αλλάζει ΜΟΝΟ το wrangler.toml, όχι τον κώδικα.
 const PADDLE_LIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due", "paused"]);
 
+// Όλα τα price IDs σε ένα σημείο: πλάνο -> { monthly, annual }. Το μηνιαίο
+// διαβάζεται από το PADDLE_PRICE_<PLAN>_MONTHLY και, αν λείπει, από το παλιό
+// PADDLE_PRICE_<PLAN>, ώστε ένα wrangler.toml χωρίς τα νέα ονόματα να
+// συνεχίζει να δουλεύει. null = δεν έχει ρυθμιστεί.
+function paddlePriceIds(env) {
+  return {
+    basic: {
+      monthly: env.PADDLE_PRICE_BASIC_MONTHLY || env.PADDLE_PRICE_BASIC || null,
+      annual: env.PADDLE_PRICE_BASIC_ANNUAL || null,
+    },
+    pro: {
+      monthly: env.PADDLE_PRICE_PRO_MONTHLY || env.PADDLE_PRICE_PRO || null,
+      annual: env.PADDLE_PRICE_PRO_ANNUAL || null,
+    },
+  };
+}
+
 async function buildUpgradeOffer(env, workspaceId, plan) {
   if (workspaceId === PROTECTED_WORKSPACE_ID) return null;
   if (plan !== "free" && plan !== "basic") return null;
@@ -1798,9 +1815,17 @@ async function buildUpgradeOffer(env, workspaceId, plan) {
   if (!row) return null;
   if (row.paddle_status && PADDLE_LIVE_SUBSCRIPTION_STATUSES.has(row.paddle_status)) return null;
 
+  // Κάθε πλάνο προσφέρεται με μηνιαία και (αν έχει ρυθμιστεί) ετήσια τιμή. Το
+  // priceId μένει το μηνιαίο, για συμβατότητα με ό,τι το διαβάζει ήδη.
+  const ids = paddlePriceIds(env);
   const candidates = [];
-  if (plan === "free" && env.PADDLE_PRICE_BASIC) candidates.push({ plan: "basic", priceId: env.PADDLE_PRICE_BASIC });
-  if (env.PADDLE_PRICE_PRO) candidates.push({ plan: "pro", priceId: env.PADDLE_PRICE_PRO });
+  const addCandidate = (planKey) => {
+    const p = ids[planKey];
+    if (!p.monthly && !p.annual) return;
+    candidates.push({ plan: planKey, priceId: p.monthly || p.annual, prices: { monthly: p.monthly, annual: p.annual } });
+  };
+  if (plan === "free") addCandidate("basic");
+  addCandidate("pro");
   if (candidates.length === 0) return null;
 
   return {
@@ -1811,6 +1836,7 @@ async function buildUpgradeOffer(env, workspaceId, plan) {
     offers: candidates.map((c) => ({
       plan: c.plan,
       priceId: c.priceId,
+      prices: c.prices,
       messages: PLAN_LIMITS[c.plan].messages,
       docs: PLAN_LIMITS[c.plan].docs === Infinity ? null : PLAN_LIMITS[c.plan].docs,
     })),
@@ -1834,7 +1860,8 @@ function billingConfigured(env) {
 }
 
 function canChangeToPro(env, row) {
-  return !!(env.PADDLE_PRICE_PRO && row.plan === "basic" && row.paddle_status === "active" && row.paddle_subscription_id);
+  const pro = paddlePriceIds(env).pro;
+  return !!((pro.monthly || pro.annual) && row.plan === "basic" && row.paddle_status === "active" && row.paddle_subscription_id);
 }
 
 async function buildManageInfo(env, workspaceId) {
@@ -4277,7 +4304,8 @@ async function loadBillingContext(request, env) {
 
 // Μόνο Basic με ΕΝΕΡΓΗ συνδρομή αλλάζει σε Pro. Επιστρέφει απάντηση σφάλματος ή null.
 function planChangeBlocker(env, user) {
-  if (!billingConfigured(env) || !env.PADDLE_PRICE_PRO) return billingError(503, "unavailable", "Billing is temporarily unavailable");
+  const pro = paddlePriceIds(env).pro;
+  if (!billingConfigured(env) || !(pro.monthly || pro.annual)) return billingError(503, "unavailable", "Billing is temporarily unavailable");
   if (user.paddle_status === "past_due") {
     return billingError(409, "past_due", "Your last payment failed. Please update your payment method first.");
   }
@@ -4287,11 +4315,37 @@ function planChangeBlocker(env, user) {
   return null;
 }
 
-function planChangeBody(env) {
+function planChangeBody(priceId) {
   return {
-    items: [{ price_id: env.PADDLE_PRICE_PRO, quantity: 1 }],
+    items: [{ price_id: priceId, quantity: 1 }],
     proration_billing_mode: "prorated_immediately",
   };
+}
+
+// Η αλλαγή σε Pro κρατάει την ΙΔΙΑ περίοδο χρέωσης με την τωρινή συνδρομή:
+// Basic ετήσιο -> Pro ετήσιο, αλλιώς Pro μηνιαίο. Το τωρινό price το βρίσκουμε
+// πρώτα στον δικό μας καθρέφτη (πίνακας subscriptions, τον γράφει το webhook)
+// και, αν δεν υπάρχει εκεί (π.χ. η συνδρομή μπήκε μέσω reconcile χωρίς
+// webhook), το ρωτάμε από το Paddle. Αν ούτε αυτό απαντήσει, ΔΕΝ μαντεύουμε.
+// Επιστρέφει { priceId, period } ή { error }.
+async function proTargetForChange(env, user) {
+  const ids = paddlePriceIds(env);
+  let currentPriceId = null;
+  const mirrored = await env.DB.prepare(
+    "SELECT price_id FROM subscriptions WHERE subscription_id = ?"
+  ).bind(user.paddle_subscription_id).first();
+  if (mirrored && mirrored.price_id) {
+    currentPriceId = mirrored.price_id;
+  } else {
+    const subRes = await paddleApi(env, "GET", `/subscriptions/${user.paddle_subscription_id}`);
+    if (!subRes.ok) return { error: planChangeUpstreamError(subRes) };
+    const items = (subRes.data && Array.isArray(subRes.data.items)) ? subRes.data.items : [];
+    currentPriceId = (items[0] && items[0].price && items[0].price.id) || null;
+  }
+  const annual = !!(currentPriceId && ids.basic.annual && currentPriceId === ids.basic.annual);
+  const priceId = annual ? ids.pro.annual : ids.pro.monthly;
+  if (!priceId) return { error: billingError(503, "unavailable", "Billing is temporarily unavailable") };
+  return { priceId, period: annual ? "annual" : "monthly" };
 }
 
 // Τα ποσά του Paddle είναι strings στη μικρότερη υποδιαίρεση (π.χ. "2990" = 29,90). Δεχόμαστε
@@ -4312,7 +4366,10 @@ async function handlePlanChangePreview(request, env) {
   const blocker = planChangeBlocker(env, ctx.user);
   if (blocker) return blocker;
 
-  const res = await paddleApi(env, "PATCH", `/subscriptions/${ctx.user.paddle_subscription_id}/preview`, planChangeBody(env));
+  const target = await proTargetForChange(env, ctx.user);
+  if (target.error) return target.error;
+
+  const res = await paddleApi(env, "PATCH", `/subscriptions/${ctx.user.paddle_subscription_id}/preview`, planChangeBody(target.priceId));
   if (!res.ok) return planChangeUpstreamError(res);
 
   const d = res.data || {};
@@ -4327,6 +4384,7 @@ async function handlePlanChangePreview(request, env) {
   }
   return billingOk({
     toPlan: "pro",
+    period: target.period,
     currency,
     chargeToday,
     recurring: recurringTotal,
@@ -4350,8 +4408,11 @@ async function handlePlanChange(request, env) {
   const blocker = planChangeBlocker(env, ctx.user);
   if (blocker) return blocker;
 
+  const target = await proTargetForChange(env, ctx.user);
+  if (target.error) return target.error;
+
   const res = await paddleApi(env, "PATCH", `/subscriptions/${ctx.user.paddle_subscription_id}`, {
-    ...planChangeBody(env),
+    ...planChangeBody(target.priceId),
     on_payment_failure: "prevent_change",
   });
   if (!res.ok) return planChangeUpstreamError(res);

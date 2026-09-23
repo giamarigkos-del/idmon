@@ -20,6 +20,18 @@ for (const name of fs.readdirSync(srcDir)) {
   if (name.endsWith(".js")) fs.copyFileSync(path.join(srcDir, name), path.join(tmpDir, name));
 }
 fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ type: "module" }));
+// Από τις 22 Σεπ το src/index.js φορτώνει το Argon2id με στατικά imports .wasm,
+// που το Node δεν ξέρει να φορτώσει (τα υποστηρίζει μόνο ο Cloudflare runtime).
+// Αυτό το test δεν κάνει ποτέ hashing, οπότε στο ΠΡΟΣΩΡΙΝΟ αντίγραφο τα imports
+// αντικαθίστανται με stubs που πετάνε σφάλμα αν κληθούν. Το αρχικό αρχείο δεν αλλάζει.
+{
+  const tmpIndex = path.join(tmpDir, path.basename(indexPath));
+  const patched = fs.readFileSync(tmpIndex, "utf8")
+    .replace(/^import \{ argon2id, argon2Verify, setWASMModules \} from "argon2-wasm-edge";\r?$/m,
+      'const argon2id = async () => { throw new Error("argon2 is not available in this test"); }; const argon2Verify = argon2id; const setWASMModules = () => {};')
+    .replace(/^import (argon2WASM|blake2bWASM) from "argon2-wasm-edge\/wasm\/[a-z0-9]+\.wasm";\r?$/gm, "const $1 = null;");
+  fs.writeFileSync(tmpIndex, patched);
+}
 const worker = (await import(pathToFileURL(path.join(tmpDir, path.basename(indexPath))).href)).default;
 process.on("exit", () => fs.rmSync(tmpDir, { recursive: true, force: true }));
 
@@ -198,6 +210,31 @@ console.log("manage block: what an existing subscriber may do");
   const { body } = await status(envKey, { "X-Workspace-Id": "ws-m" });
   check("the API key never appears in the response", !JSON.stringify(body).includes("pdl_test_dummy_key"));
   check("an existing subscriber gets no upgrade offer (no double subscription)", body.upgrade === null);
+}
+
+console.log("monthly and annual prices in the offer");
+{
+  const env = makeEnv({ users: { "ws-free": { plan: "free" } }, vars: {
+    PADDLE_PRICE_BASIC_ANNUAL: "pri_basic_annual_test", PADDLE_PRICE_PRO_ANNUAL: "pri_pro_annual_test",
+  } });
+  const { body } = await status(env, { "X-Workspace-Id": "ws-free" });
+  const [b, p] = (body.upgrade && body.upgrade.offers) || [];
+  check("basic carries monthly and annual price ids", b && b.prices && b.prices.monthly === "pri_basic_test" && b.prices.annual === "pri_basic_annual_test", JSON.stringify(b));
+  check("pro carries monthly and annual price ids", p && p.prices && p.prices.monthly === "pri_pro_test" && p.prices.annual === "pri_pro_annual_test", JSON.stringify(p));
+  check("priceId stays the monthly one (compatibility)", b && b.priceId === "pri_basic_test" && p.priceId === "pri_pro_test");
+}
+{
+  const env = makeEnv({ users: { "ws-free": { plan: "free" } } });
+  const { body } = await status(env, { "X-Workspace-Id": "ws-free" });
+  check("no annual vars: annual is null, monthly still offered", body.upgrade && body.upgrade.offers.every((o) => o.prices.annual === null && o.prices.monthly === o.priceId), JSON.stringify(body.upgrade));
+}
+{
+  const env = makeEnv({ users: { "ws-free": { plan: "free" } }, vars: {
+    PADDLE_PRICE_BASIC: undefined, PADDLE_PRICE_PRO: undefined,
+    PADDLE_PRICE_BASIC_MONTHLY: "pri_bm", PADDLE_PRICE_PRO_MONTHLY: "pri_pm",
+  } });
+  const { body } = await status(env, { "X-Workspace-Id": "ws-free" });
+  check("the _MONTHLY names alone are enough", body.upgrade && body.upgrade.offers.map((o) => o.priceId).join() === "pri_bm,pri_pm", JSON.stringify(body.upgrade));
 }
 
 console.log("\n" + passed + " passed, " + failed + " failed");

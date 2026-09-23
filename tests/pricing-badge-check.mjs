@@ -80,21 +80,20 @@ function testVatAndPricesUnchanged() {
   }
 }
 
-function testPaddleIdsUnchanged() {
-  console.log("\n[Τα IDs των τιμών του Paddle (live) ΔΕΝ άλλαξαν]");
-  const expected = {
-    basic: ["pri_01m2ynemr2t4dnes8rz775p090", "pri_01m2ynemzv76wbb37zvr1q9fnb"],
-    pro: ["pri_01m2ynen6sh5949wn1pnsr1s51", "pri_01m2ynend8w7383t0nqzgd0f1z"],
-  };
+function testUpgradeGoesToAccount() {
+  // Από 24 Σεπ 2026: η σελίδα τιμολόγησης ΔΕΝ ανοίγει checkout (μια πληρωμή χωρίς λογαριασμό
+  // δεν συνδέεται με κανέναν). Το "Αναβάθμιση" πάει στην εγγραφή με πλάνο και περίοδο.
+  console.log("\n[Η Αναβάθμιση πάει στην εγγραφή, όχι σε checkout]");
   for (const lang of ["el", "en"]) {
     const buttons = [...blocks[lang].querySelectorAll(".checkout-btn")];
-    assert(buttons.length === 2, `${lang}: δύο κουμπιά αγοράς`);
-    for (const b of buttons) {
-      const plan = b.getAttribute("data-plan");
-      assert(b.getAttribute("data-monthly-price") === expected[plan][0] && b.getAttribute("data-annual-price") === expected[plan][1], `${lang}: ${plan}: σωστά μηνιαίο/ετήσιο price ID`);
-    }
+    assert(buttons.length === 2, `${lang}: δύο κουμπιά αναβάθμισης`);
+    assert(buttons.map((b) => b.getAttribute("data-plan")).join() === "basic,pro", `${lang}: basic και pro`);
+    assert(buttons.every((b) => !b.hasAttribute("data-monthly-price") && !b.hasAttribute("data-annual-price")), `${lang}: κανένα price ID στη σελίδα (ζουν μόνο στον server)`);
   }
-  assert(html.includes("live_d06ea77dbb7841c5652998a2c8e"), "το client token του Paddle παραμένει");
+  assert(!html.includes("cdn.paddle.com"), "δεν φορτώνεται το Paddle.js");
+  assert(!html.includes("Checkout.open"), "κανένα Checkout.open");
+  assert(!/live_[0-9a-f]{20,}/.test(html), "κανένα client token στη σελίδα");
+  assert(html.includes("'/landing.html?plan=' + plan + '&period=' + billingPeriod"), "το κουμπί πάει στο /landing.html?plan=...&period=...");
 }
 
 function testLimitsUnchanged() {
@@ -108,7 +107,7 @@ function testLimitsUnchanged() {
 testBothLanguagesPresent();
 testBadgeMentions();
 testVatAndPricesUnchanged();
-testPaddleIdsUnchanged();
+testUpgradeGoesToAccount();
 testLimitsUnchanged();
 
 console.log(`\n${passed} passed, ${failed} failed`);

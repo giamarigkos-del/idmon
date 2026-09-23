@@ -6,9 +6,11 @@
   Οι αριθμοί (100/500/2.500 μηνύματα, 5/20/απεριόριστα έγγραφα) είναι τα ΠΡΑΓΜΑΤΙΚΑ όρια
   του κώδικα (PLAN_LIMITS), οι τιμές (29 και 59 ευρώ) οι ίδιες με το Paddle. Αν αλλάξει
   οποιοδήποτε από τα δύο, αλλάζει ΚΑΙ εδώ.
-  ΡΟΗ ΕΓΓΡΑΦΗΣ (σημαντικό για τα κείμενα): ΟΛΑ τα κουμπιά πάνε στο /landing, δηλαδή στην επιλογή
-  Guest (δοκιμαστικός χώρος, διαγράφεται μετά από 7 ημέρες) ή Account. Ένας νέος λογαριασμός είναι ΠΑΝΤΑ Free· το
-  Basic/Pro αγοράζεται ΜΕΣΑ στην εφαρμογή (κουμπί Upgrade). Γι' αυτό τα πλάνα Basic/Pro ΔΕΝ έχουν κουμπί "αγορά" εδώ.
+  ΡΟΗ ΕΓΓΡΑΦΗΣ (σημαντικό για τα κείμενα): ΟΛΑ τα κουμπιά πάνε στο /landing. Το "Ξεκίνα δωρεάν" στην επιλογή
+  Guest (δοκιμαστικός χώρος, διαγράφεται μετά από 7 ημέρες) ή Account. Το "Αναβάθμιση" στο Basic/Pro πάει στο
+  /landing?plan=...&period=... που ανοίγει κατευθείαν τη φόρμα λογαριασμού, και μετά την εγγραφή ο editor ανοίγει
+  αμέσως το checkout (Sep 24 2026). Checkout ΔΕΝ ανοίγει ποτέ από αυτή τη σελίδα: μια πληρωμή χωρίς λογαριασμό
+  δεν θα συνδεόταν με κανέναν (το webhook βρίσκει τον λογαριασμό από το workspace_id του checkout).
   ΧΡΩΜΑΤΑ: ίδιο πορτοκαλί (#D97757) με το landing της εφαρμογής. Στα κουμπιά/badge το κείμενο πάνω στο πορτοκαλί
   είναι σκούρο (var(--bg)) και όχι --on-accent: το ανοιχτό κείμενο πάνω σε αυτό το πορτοκαλί έχει χαμηλή αντίθεση
   (~2,7:1), το σκούρο ~6:1.
@@ -131,7 +133,7 @@
       <li><strong>500</strong> μηνύματα / μήνα</li>
       <li><strong>20</strong> έγγραφα</li>
     </ul>
-    <button type="button" class="cta checkout-btn" data-plan="basic" data-monthly-price="pri_01m2ynemr2t4dnes8rz775p090" data-annual-price="pri_01m2ynemzv76wbb37zvr1q9fnb">Αναβάθμιση</button>
+    <button type="button" class="cta checkout-btn" data-plan="basic">Αναβάθμιση</button>
   </div>
   <div class="plan">
     <h2>Pro</h2>
@@ -143,7 +145,7 @@
       <li><strong>Απεριόριστα</strong> έγγραφα</li>
       <li>Χωρίς «Powered by Idmon» στο widget</li>
     </ul>
-    <button type="button" class="cta checkout-btn" data-plan="pro" data-monthly-price="pri_01m2ynen6sh5949wn1pnsr1s51" data-annual-price="pri_01m2ynend8w7383t0nqzgd0f1z">Αναβάθμιση</button>
+    <button type="button" class="cta checkout-btn" data-plan="pro">Αναβάθμιση</button>
   </div>
 </div>
 
@@ -230,7 +232,7 @@
       <li><strong>500</strong> messages / month</li>
       <li><strong>20</strong> documents</li>
     </ul>
-    <button type="button" class="cta checkout-btn" data-plan="basic" data-monthly-price="pri_01m2ynemr2t4dnes8rz775p090" data-annual-price="pri_01m2ynemzv76wbb37zvr1q9fnb">Upgrade</button>
+    <button type="button" class="cta checkout-btn" data-plan="basic">Upgrade</button>
   </div>
   <div class="plan">
     <h2>Pro</h2>
@@ -242,7 +244,7 @@
       <li><strong>Unlimited</strong> documents</li>
       <li>No “Powered by Idmon” on the widget</li>
     </ul>
-    <button type="button" class="cta checkout-btn" data-plan="pro" data-monthly-price="pri_01m2ynen6sh5949wn1pnsr1s51" data-annual-price="pri_01m2ynend8w7383t0nqzgd0f1z">Upgrade</button>
+    <button type="button" class="cta checkout-btn" data-plan="pro">Upgrade</button>
   </div>
 </div>
 
@@ -301,7 +303,6 @@
   window.__SKIP_WORKSPACE_REDIRECT__ = true;
 </script>
 <script src="shared.js"></script>
-<script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
 <script>
   document.querySelectorAll('.lang-block').forEach(function(el){ el.style.display = 'none'; });
   var activeLang = getLang();
@@ -312,8 +313,6 @@
   initLangToggle('langToggle');
 
   var billingPeriod = 'monthly';
-  var paddleReady = false;
-  var paddleToken = 'live_d06ea77dbb7841c5652998a2c8e';
   var billingText = {
     el: { monthly: ' / μήνα', annual: ' / έτος', savings: '2 μήνες δωρεάν', checkout: 'Αναβάθμιση' },
     en: { monthly: ' / month', annual: ' / year', savings: '2 months free', checkout: 'Upgrade' },
@@ -344,18 +343,15 @@
     button.addEventListener('click', function() { updateBillingPeriod(button.getAttribute('data-billing')); });
   });
 
+  // "Αναβάθμιση": ΔΕΝ ανοίγει checkout εδώ. Μια πληρωμή πρέπει να ανήκει σε λογαριασμό
+  // (το webhook τον βρίσκει από το workspace_id του checkout), οπότε πάμε στην εγγραφή
+  // κρατώντας πλάνο και περίοδο· μετά την εγγραφή ο editor ανοίγει μόνος του το checkout
+  // με τη σωστή τιμή. Τα price IDs ζουν μόνο στον server (wrangler.toml), όχι εδώ.
   document.querySelectorAll('.checkout-btn').forEach(function(button) {
     button.addEventListener('click', function() {
-      var priceId = button.getAttribute('data-' + billingPeriod + '-price');
-      if (!priceId || !window.Paddle) return;
-      if (!paddleReady) {
-        window.Paddle.Initialize({ token: paddleToken });
-        paddleReady = true;
-      }
-      window.Paddle.Checkout.open({
-        items: [{ priceId: priceId, quantity: 1 }],
-        settings: { displayMode: 'overlay', locale: activeLang === 'el' ? 'el' : 'en' },
-      });
+      var plan = button.getAttribute('data-plan');
+      if (plan !== 'basic' && plan !== 'pro') return;
+      window.location.href = '/landing.html?plan=' + plan + '&period=' + billingPeriod;
     });
   });
 

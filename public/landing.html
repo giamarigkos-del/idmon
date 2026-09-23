@@ -51,6 +51,9 @@
   .dev-form .submit-btn{background:var(--accent);color:var(--on-accent);}
   .dev-form .cancel-btn{background:none;border:1px solid var(--border);color:var(--text);}
   .dev-error{font-size:12.5px;color:var(--danger);margin-top:10px;display:none;}
+  /* Σημείωμα όταν ο επισκέπτης ήρθε από "Αναβάθμιση" της σελίδας τιμολόγησης. */
+  .intent-note{font-size:12.5px;line-height:1.5;color:var(--text);background:var(--accent-soft);
+    border:1px solid var(--accent);border-radius:6px;padding:9px 11px;margin-bottom:14px;}
   .dev-error.show{display:block;}
 
   /* Section H: tabs Sign up / Log in μέσα στο account-form -- ίδια χρωματική
@@ -130,6 +133,7 @@
     </div>
 
     <div class="dev-form" id="accountForm">
+      <div class="intent-note" id="checkoutIntentNote" style="display:none;"></div>
       <div class="account-tabs">
         <button type="button" class="active" id="signupTabBtn" data-i18n="signupTab">Sign up</button>
         <button type="button" id="loginTabBtn" data-i18n="loginTab">Log in</button>
@@ -251,6 +255,37 @@
   applyTranslations();
   initLangToggle("langToggle");
 
+  // Επιλογή πλάνου από τη σελίδα τιμολόγησης (κουμπί "Αναβάθμιση" στο idmon.app):
+  // /landing.html?plan=basic&period=annual. Μια πληρωμή πρέπει ΠΑΝΤΑ να ανήκει σε
+  // λογαριασμό (το webhook βρίσκει τον λογαριασμό από το workspace_id που στέλνει το
+  // checkout), γι' αυτό εδώ ανοίγει κατευθείαν η φόρμα λογαριασμού (όχι Guest) και μετά
+  // την εγγραφή/σύνδεση πάμε στο editor, που ανοίγει μόνο του το checkout.
+  let checkoutIntent = (() => {
+    const params = new URLSearchParams(window.location.search);
+    const plan = params.get("plan");
+    if (plan !== "basic" && plan !== "pro") return null;
+    return { plan, period: params.get("period") === "annual" ? "annual" : "monthly" };
+  })();
+
+  function afterAuthUrl() {
+    return checkoutIntent
+      ? "/editor.html?checkout=" + checkoutIntent.plan + "&period=" + checkoutIntent.period
+      : "/home.html";
+  }
+
+  if (checkoutIntent && localStorage.getItem("sessionToken")) {
+    // Ήδη συνδεδεμένος σε λογαριασμό: δεν ξαναρωτάμε, πάμε κατευθείαν.
+    navigateTo(afterAuthUrl());
+  } else if (checkoutIntent) {
+    el("checkoutIntentNote").textContent = t("checkoutIntentNote", {
+      plan: t("planName_" + checkoutIntent.plan),
+      period: t("checkoutIntentPeriod_" + checkoutIntent.period),
+    });
+    el("checkoutIntentNote").style.display = "block";
+    el("choiceGrid").style.display = "none";
+    el("accountForm").classList.add("show");
+  }
+
   // Το "←Portal" έχει νόημα ΜΟΝΟ αν υπάρχει ήδη αποθηκευμένο workspace --
   // αλλιώς το "/home.html" θα έστελνε τον χρήστη πάλι εδώ (home.html δεν βρίσκει
   // workspaceId, redirect πίσω στο landing). Χωρίς αποθηκευμένο workspace
@@ -343,6 +378,9 @@
   });
 
   el("accountCancelBtn").addEventListener("click", () => {
+    // Ακύρωση = ο επισκέπτης άλλαξε γνώμη: ξεχνάμε και την επιλογή πλάνου.
+    checkoutIntent = null;
+    el("checkoutIntentNote").style.display = "none";
     el("accountForm").classList.remove("show");
     el("choiceGrid").style.display = "flex";
     el("accountError").classList.remove("show");
@@ -390,7 +428,7 @@
       localStorage.setItem("workspaceId", data.workspaceId);
       localStorage.setItem("sessionToken", data.sessionToken);
       localStorage.setItem("emailVerified", data.emailVerified ? "1" : "0");
-      window.location.href = "/home.html";
+      navigateTo(afterAuthUrl());
     } catch (err) {
       errorEl.textContent = t("connectionErrorPrefix") + err.message;
       errorEl.classList.add("show");
