@@ -1,15 +1,17 @@
-// Έλεγχος της δημόσιας βιτρίνας του idmon.app (site/): (1) το site/ είναι ακριβώς ό,τι θα έφτιαχνε
-// το sync από το public/, (2) κανένα εσωτερικό link δεν είναι σπασμένο, (3) δεν διαρρέει τίποτα από
-// την εφαρμογή, (4) οι νομικές σελίδες φαίνονται από την πλοήγηση, όπως ζητά το Paddle.
+// Έλεγχος της δημόσιας πλευράς του idmon.app, μετά τη συγχώνευση (23 Σεπτ. 2026): ολόκληρο το
+// προϊόν ζει σε ΕΝΑ Worker στο idmon.app. Ελέγχει ότι (1) η δομή είναι σωστή (marketing σελίδα
+// στο /, εφαρμογή στο /home.html, κανένα υπόλοιπο από τον παλιό δεύτερο Worker), (2) το
+// wrangler.toml και το _redirects είναι όπως πρέπει, (3) κανένα εσωτερικό link δεν είναι
+// σπασμένο και οι νομικές σελίδες φαίνονται από την πλοήγηση, όπως ζητά το Paddle, (4) κανένα
+// link ή redirect της εφαρμογής δεν στέλνει πια στο "/" (που είναι τώρα η marketing σελίδα).
 // Χρήση (PowerShell, από τον φάκελο idmon):   node tests/site-links.mjs
 // Προαιρετικά: $env:SITE_ROOT = "C:\\...\\idmon"
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
-import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(process.env.SITE_ROOT || ".");
-const { SITE_FILES, SITE_INDEX_SOURCE, SITE_HEADERS, syncSite } = await import(pathToFileURL(path.join(root, "scripts", "sync-site.mjs")).href);
+const pub = path.join(root, "public");
+const read = (p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "");
 
 let passed = 0;
 let failed = 0;
@@ -18,68 +20,83 @@ function check(name, condition, detail) {
   else { failed++; console.log("  FAIL " + name + (detail ? "  -> " + detail : "")); }
 }
 
-const site = path.join(root, "site");
-const pub = path.join(root, "public");
-
-console.log("site/ is in sync with public/");
+console.log("structure: one Worker, marketing page at /");
 {
-  // Φτιάχνουμε ένα φρέσκο site/ σε προσωρινό φάκελο και το συγκρίνουμε με το πραγματικό.
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "idmon-site-"));
-  fs.cpSync(pub, path.join(tmp, "public"), { recursive: true });
-  syncSite(tmp);
-  const expected = fs.readdirSync(path.join(tmp, "site")).sort();
-  const actual = fs.existsSync(site) ? fs.readdirSync(site).sort() : [];
-  check("site/ exists", fs.existsSync(site), "τρέξε: node scripts/sync-site.mjs");
-  check("site/ has exactly the expected files", JSON.stringify(actual) === JSON.stringify(expected), "actual: " + actual.join(", "));
-  let same = true;
-  for (const f of expected) {
-    if (!fs.existsSync(path.join(site, f)) || !fs.readFileSync(path.join(tmp, "site", f)).equals(fs.readFileSync(path.join(site, f)))) { same = false; console.log("       differs: " + f); }
+  const index = read(path.join(pub, "index.html"));
+  const home = read(path.join(pub, "home.html"));
+  check("public/index.html is the marketing/pricing page", index.includes('id="content-el"') && index.includes(".plans"));
+  check("public/index.html never needs a workspace", index.includes("window.__SKIP_WORKSPACE_REDIRECT__ = true"));
+  check("public/home.html is the app home (chat)", home.includes('id="questionInput"') || home.includes("launcher"));
+  check("public/pricing.html is gone (served by _redirects)", !fs.existsSync(path.join(pub, "pricing.html")));
+  for (const leftover of ["site", "wrangler.site.toml", path.join("scripts", "sync-site.mjs")]) {
+    check(`old site Worker leftover removed: ${leftover}`, !fs.existsSync(path.join(root, leftover)));
   }
-  check("every file is identical to what the sync produces (nothing edited by hand, nothing stale)", same, "τρέξε: node scripts/sync-site.mjs");
-  check("the home page (/) is the pricing page", fs.existsSync(site) && fs.readFileSync(path.join(site, "index.html")).equals(fs.readFileSync(path.join(pub, SITE_INDEX_SOURCE))));
-  check("security headers file is present", fs.existsSync(site) && fs.readFileSync(path.join(site, "_headers"), "utf8") === SITE_HEADERS);
-  fs.rmSync(tmp, { recursive: true, force: true });
 }
 
-console.log("nothing from the app leaks into the public site");
+console.log("marketing page early redirect");
 {
-  const files = fs.existsSync(site) ? fs.readdirSync(site) : [];
-  for (const forbidden of ["editor.html", "landing.html", "index.js", "widget.js", "article.html", "wrangler.toml", ".dev.vars"]) {
-    check(`site/ does not contain ${forbidden}`, !files.includes(forbidden));
-  }
-  const cfg = fs.readFileSync(path.join(root, "wrangler.site.toml"), "utf8");
-  check("the site worker has no code, bindings, secrets or vars", !/^\s*main\s*=/m.test(cfg) && !/\[\[(kv_namespaces|d1_databases|vectorize)\]\]/.test(cfg) && !/\[vars\]/.test(cfg));
-  check("the site worker is bound to the bare domain idmon.app only", /pattern\s*=\s*"idmon\.app"/.test(cfg) && !/app\.idmon\.app/.test(cfg.replace(/#.*$/gm, "")));
-  check("the site worker serves the site/ folder", /directory\s*=\s*"\.\/site"/.test(cfg));
+  const index = read(path.join(pub, "index.html"));
+  const early = (index.match(/<head>\r?\n<script>([\s\S]*?)<\/script>/) || [])[1] || "";
+  check("the early script is the first thing in <head>", early.length > 0);
+  check("logged-in visitors go to /home.html", early.includes('location.replace("/home.html")'));
+  check("returning, logged-out visitors go to /landing.html", early.includes('location.replace("/landing.html")'));
+  check("internal navigation (same-origin referrer) is never redirected", /new URL\(ref\)\.origin === location\.origin\) return/.test(early));
+  const home = read(path.join(pub, "home.html"));
+  check("home.html marks the browser as returning", home.includes('localStorage.setItem("idmonReturning", "1")'));
+}
+
+console.log("wrangler.toml and _redirects");
+{
+  const cfg = read(path.join(root, "wrangler.toml"));
+  const active = cfg.replace(/#.*$/gm, "");
+  check("the app Worker is bound to idmon.app", /pattern\s*=\s*"idmon\.app"/.test(active));
+  check("app.idmon.app stays bound (for the 301 redirect rule)", /pattern\s*=\s*"app\.idmon\.app"/.test(active));
+  check("assets come from ./public", /directory\s*=\s*"\.\/public"/.test(active));
+  check("Google redirect URI is on idmon.app", active.includes('GOOGLE_REDIRECT_URI = "https://idmon.app/oauth/google/callback"'));
+  const redirects = read(path.join(pub, "_redirects")).replace(/\r/g, "").trim().split("\n").map((l) => l.trim().split(/\s+/).join(" "));
+  check("_redirects sends /pricing.html to / (301)", redirects.includes("/pricing.html / 301"));
+  check("_redirects sends /pricing to / (301)", redirects.includes("/pricing / 301"));
 }
 
 console.log("no broken links, and the legal pages are reachable from the navigation");
 {
-  const pages = ["pricing.html", "privacy.html", "terms.html", "refunds.html"];
-  const available = new Set(["/", ...fs.readdirSync(site).map((f) => "/" + f)]);
-  for (const page of pages) {
-    const html = fs.existsSync(path.join(site, page)) ? fs.readFileSync(path.join(site, page), "utf8") : "";
+  const redirectSources = read(path.join(pub, "_redirects")).replace(/\r/g, "").split("\n").map((l) => l.trim().split(/\s+/)[0]).filter(Boolean);
+  const files = fs.readdirSync(pub);
+  // Workers static assets σερβίρουν και "όμορφα" URLs χωρίς .html (π.χ. /landing -> landing.html).
+  const available = new Set(["/", ...files.map((f) => "/" + f), ...files.filter((f) => f.endsWith(".html")).map((f) => "/" + f.slice(0, -5)), ...redirectSources]);
+  for (const page of ["index.html", "privacy.html", "terms.html", "refunds.html"]) {
+    const html = read(path.join(pub, page));
+    check(`${page}: exists`, html.length > 0);
     const refs = [...html.matchAll(/\b(?:href|src)="([^"]+)"/g)].map((m) => m[1]);
     const broken = [];
     const external = [];
     for (const r of refs) {
       if (r.startsWith("mailto:") || r.startsWith("#")) continue;
       if (/^https?:\/\//.test(r)) {
-        if (!/^https:\/\/app\.idmon\.app(\/|$)/.test(r) && !/^https:\/\/cdn\.paddle\.com(\/|$)/.test(r)) external.push(r);
+        if (!/^https:\/\/cdn\.paddle\.com(\/|$)/.test(r)) external.push(r);
         continue;
       }
       const p = "/" + r.replace(/^\//, "").split(/[?#]/)[0];
       if (!available.has(p)) broken.push(r);
     }
-    check(`${page}: every internal link and file exists on the public site`, broken.length === 0, broken.join(", "));
-    check(`${page}: absolute links use approved app/CDN hosts`, external.length === 0, external.join(", "));
+    check(`${page}: every internal link and file exists`, broken.length === 0, broken.join(", "));
+    check(`${page}: absolute links only to the Paddle CDN (no app.idmon.app)`, external.length === 0, external.join(", "));
     check(`${page}: shows the contact email`, html.includes("info@idmon.app"));
-    check(`${page}: links to Terms, Privacy and Refunds (navigation)`, page === "terms.html"
-      ? html.includes("/privacy.html") && html.includes("/refunds.html")
-      : ["/terms.html", "/privacy.html", "/refunds.html"].filter((l) => !(page === "privacy.html" && l === "/privacy.html") && !(page === "refunds.html" && l === "/refunds.html")).every((l) => html.includes(l)));
+    const legal = ["/terms.html", "/privacy.html", "/refunds.html"].filter((l) => l !== "/" + page);
+    check(`${page}: links to the other legal pages (navigation)`, legal.every((l) => html.includes(l)), legal.filter((l) => !html.includes(l)).join(", "));
   }
-  const pricing = fs.readFileSync(path.join(site, "pricing.html"), "utf8");
-  check("pricing links to the app for sign-up", pricing.includes("https://app.idmon.app/landing"));
+  const index = read(path.join(pub, "index.html"));
+  const signups = [...index.matchAll(/<a class="cta[^"]*" href="([^"]+)"/g)].map((m) => m[1]);
+  check("every sign-up button on the marketing page goes to /landing", signups.length === 4 && signups.every((h) => h === "/landing"), signups.join(", "));
+}
+
+console.log("the app never sends people back to / (now the marketing page)");
+{
+  for (const page of ["home.html", "landing.html", "editor.html", "article.html"]) {
+    const html = read(path.join(pub, page));
+    const bad = (html.match(/href="\/"|location\.href\s*=\s*"\/"|location\.replace\("\/"\)/g) || []).length;
+    check(`${page}: no link or redirect to "/"`, bad === 0, bad + " found");
+  }
 }
 
 console.log("\n" + passed + " passed, " + failed + " failed");

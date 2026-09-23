@@ -51,8 +51,8 @@ function testEmbedId() {
 
 function testNormalizeServer() {
   console.log("\n[Έλεγχος server URL -- μόνο https ή τοπικό http]");
-  assert(lib.normalizeServer("https://app.idmon.app") === "https://app.idmon.app", "https δεκτό");
-  assert(lib.normalizeServer("https://app.idmon.app/some/path?x=1") === "https://app.idmon.app", "κρατά μόνο το origin");
+  assert(lib.normalizeServer("https://idmon.app") === "https://idmon.app", "https δεκτό");
+  assert(lib.normalizeServer("https://idmon.app/some/path?x=1") === "https://idmon.app", "κρατά μόνο το origin");
   assert(lib.normalizeServer("http://127.0.0.1:8787") === "http://127.0.0.1:8787", "http://127.0.0.1 δεκτό (wrangler dev)");
   assert(lib.normalizeServer("http://localhost:8787") === "http://localhost:8787", "http://localhost δεκτό");
   for (const bad of ["http://example.com", "javascript:alert(1)", "ftp://x.gr", "data:text/html,<b>", "not a url", "", null]) {
@@ -82,8 +82,8 @@ function testBuildAttrs() {
 
 function testBuildSnippet() {
   console.log("\n[Snippet που εμφανίζεται]");
-  const snippet = lib.buildSnippet({ serverConfig: false, embedId: "emb-abcd1234", botName: 'Βοηθός "Α" <b>' }, "https://app.idmon.app");
-  assert(snippet.startsWith('<script src="https://app.idmon.app/widget.js"'), "ξεκινά με το σωστό script src");
+  const snippet = lib.buildSnippet({ serverConfig: false, embedId: "emb-abcd1234", botName: 'Βοηθός "Α" <b>' }, "https://idmon.app");
+  assert(snippet.startsWith('<script src="https://idmon.app/widget.js"'), "ξεκινά με το σωστό script src");
   assert(snippet.endsWith("></script>"), "τελειώνει με κλείσιμο script");
   assert(snippet.includes('data-embed-id="emb-abcd1234"'), "περιέχει το embed ID");
   assert(!snippet.includes('"Α"') && snippet.includes("&quot;Α&quot;"), "τα εισαγωγικά στο όνομα γίνονται &quot;");
@@ -181,7 +181,7 @@ function testPageHygiene() {
   assert(!/<script/i.test(outsideInline), "κανένα άλλο script στη σελίδα εκτός από το ένα inline (κανένα εξωτερικό)");
   assert(!/<link[^>]*href=/i.test(pageHtml), "κανένα εξωτερικό stylesheet");
   assert(!/<img[^>]*src=/i.test(pageHtml), "καμία εξωτερική εικόνα");
-  assert(lib.DEFAULT_SERVER === "https://app.idmon.app", "ο προεπιλεγμένος server είναι το production");
+  assert(lib.DEFAULT_SERVER === "https://idmon.app", "ο προεπιλεγμένος server είναι το production");
   const toml = read("../wrangler.widget-test.toml");
   assert(/^name\s*=\s*"idmon-widget-test"/m.test(toml), "wrangler: όνομα Worker idmon-widget-test");
   assert(/directory\s*=\s*"\.\/widget-test"/.test(toml), "wrangler: assets από τον φάκελο widget-test");

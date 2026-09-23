@@ -1,5 +1,5 @@
-// Headless DOM simulation του chat στο public/index.html (η demo σελίδα) --
-// ΔΕΝ χρειάζεται wrangler dev. Φορτώνει τον ΠΡΑΓΜΑΤΙΚΟ κώδικα του index.html
+// Headless DOM simulation του chat στο public/home.html (η demo σελίδα, πρώην index.html) --
+// ΔΕΝ χρειάζεται wrangler dev. Φορτώνει τον ΠΡΑΓΜΑΤΙΚΟ κώδικα του home.html
 // και του shared.js μέσα σε jsdom (όχι reimplementation) και ελέγχει ότι το
 // ιστορικό συζήτησης συμπεριφέρεται ΙΔΙΑ με το widget των πελατών.
 //
@@ -22,7 +22,7 @@ function assert(condition, message) {
 }
 
 const sharedSource = readFileSync(new URL("../public/shared.js", import.meta.url), "utf8");
-const indexHtml = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+const indexHtml = readFileSync(new URL("../public/home.html", import.meta.url), "utf8");
 
 function makeSSEBody(events) {
   const text = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
@@ -41,14 +41,14 @@ function makeSSEBody(events) {
   };
 }
 
-// Φορτώνει το index.html με το shared.js "ενσωματωμένο" (αντί για <script src>).
+// Φορτώνει το home.html με το shared.js "ενσωματωμένο" (αντί για <script src>).
 // queryFetch(url, options) καλείται ΜΟΝΟ για /query/stream -- τα υπόλοιπα
 // (ρυθμίσεις workspace, λίστα εγγράφων) απαντώνται με κενά αποτελέσματα.
 async function loadPage(queryFetch) {
   const html = indexHtml.replace('<script src="/shared.js"></script>', () => `<script>${sharedSource}</script>`);
   const dom = new JSDOM(html, {
     runScripts: "dangerously",
-    url: "https://app.idmon.app/",
+    url: "https://idmon.app/home.html",
     beforeParse(window) {
       window.localStorage.setItem("workspaceId", "ws-test");
       window.TextDecoder = TextDecoder;

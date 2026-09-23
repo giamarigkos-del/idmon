@@ -1,4 +1,4 @@
-// Έλεγχος του public/pricing.html για το «Powered by Idmon» (Free/Basic ναι, Pro όχι) --
+// Έλεγχος του public/index.html (η αρχική/σελίδα τιμολόγησης, πρώην pricing.html) για το «Powered by Idmon» (Free/Basic ναι, Pro όχι) --
 // και ότι ΔΕΝ άλλαξαν οι τιμές, τα IDs του Paddle και τα κείμενα για το ΦΠΑ (απόφαση Σεπτ. 2026:
 // οι τιμές μένουν 29 και 59 ΜΕ ΦΠΑ). ΔΕΝ χρειάζεται wrangler dev ούτε δίκτυο.
 //
@@ -20,7 +20,7 @@ function assert(condition, message) {
   }
 }
 
-const html = readFileSync(new URL("../public/pricing.html", import.meta.url), "utf8");
+const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 const dom = new JSDOM(html); // χωρίς runScripts: μόνο ανάλυση της δομής
 const doc = dom.window.document;
 

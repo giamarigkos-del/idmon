@@ -84,7 +84,7 @@
 </style>
 </head>
 <body>
-  <a class="back-link-fixed" href="/">←Portal</a>
+  <a class="back-link-fixed" href="/home.html">←Portal</a>
   <div class="lang-toggle lang-toggle-fixed" id="langToggle">
     <button type="button" class="lang-btn" data-lang="en">EN</button>
     <button type="button" class="lang-btn" data-lang="el">GR</button>
@@ -183,7 +183,7 @@
     <div class="dev-form" id="verifyForm">
       <div id="verifyStatusMessage" data-i18n="verifyingEmail">Verifying your email…</div>
       <div class="dev-form-actions" id="verifyContinueWrap" style="display:none;">
-        <a class="submit-btn" id="verifyContinueLink" href="/" data-i18n="continueToApp" style="text-decoration:none;text-align:center;">Continue</a>
+        <a class="submit-btn" id="verifyContinueLink" href="/home.html" data-i18n="continueToApp" style="text-decoration:none;text-align:center;">Continue</a>
       </div>
     </div>
 
@@ -207,7 +207,7 @@
   // που επιστρέφει το σωστό key ανάλογα με το περιβάλλον (πραγματικό στο
   // production, δοκιμαστικό στο wrangler dev). Ο λόγος: ένα πραγματικό
   // Turnstile site key είναι δηλωμένο μόνο για συγκεκριμένα hostnames
-  // (idmon.app, app.idmon.app) και αρνείται να συνδεθεί από localhost.
+  // (idmon.app) και αρνείται να συνδεθεί από localhost.
   //
   // Race condition: το api.js της Turnstile και το δικό μας fetch τρέχουν
   // παράλληλα, δεν ξέρουμε ποιο τελειώνει πρώτο -- render μόνο όταν ΚΑΙ τα
@@ -252,7 +252,7 @@
   initLangToggle("langToggle");
 
   // Το "←Portal" έχει νόημα ΜΟΝΟ αν υπάρχει ήδη αποθηκευμένο workspace --
-  // αλλιώς το "/" θα έστελνε τον χρήστη πάλι εδώ (index.html δεν βρίσκει
+  // αλλιώς το "/home.html" θα έστελνε τον χρήστη πάλι εδώ (home.html δεν βρίσκει
   // workspaceId, redirect πίσω στο landing). Χωρίς αποθηκευμένο workspace
   // (π.χ. αμέσως μετά από "Αλλαγή λειτουργίας"), το κουμπί κρύβεται.
   if (!localStorage.getItem("workspaceId")) {
@@ -263,7 +263,7 @@
     // Νέο, τυχαίο, απομονωμένο workspace -- κανείς άλλος δεν το βλέπει.
     const id = crypto.randomUUID();
     localStorage.setItem("workspaceId", id);
-    window.location.href = "/";
+    window.location.href = "/home.html";
   });
 
   // Section O: το "Developer" δεν είναι πια ορατή επιλογή στο δημόσιο
@@ -309,7 +309,7 @@
         return;
       }
       localStorage.setItem("workspaceId", data.workspaceId);
-      window.location.href = "/";
+      window.location.href = "/home.html";
     } catch (err) {
       errorEl.textContent = t("connectionErrorPrefix") + err.message;
       errorEl.classList.add("show");
@@ -390,7 +390,7 @@
       localStorage.setItem("workspaceId", data.workspaceId);
       localStorage.setItem("sessionToken", data.sessionToken);
       localStorage.setItem("emailVerified", data.emailVerified ? "1" : "0");
-      window.location.href = "/";
+      window.location.href = "/home.html";
     } catch (err) {
       errorEl.textContent = t("connectionErrorPrefix") + err.message;
       errorEl.classList.add("show");
@@ -542,7 +542,7 @@
       localStorage.setItem("workspaceId", data.workspaceId);
       localStorage.setItem("sessionToken", data.sessionToken);
       localStorage.setItem("emailVerified", data.emailVerified ? "1" : "0");
-      window.location.href = "/";
+      window.location.href = "/home.html";
     } catch (err) {
       errorEl.textContent = t("connectionErrorPrefix") + err.message;
       errorEl.classList.add("show");

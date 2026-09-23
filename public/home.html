@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en" data-i18n-doctitle="indexDocTitle">
+<head>
+<script>
+  // Πρόωρος, στοιχειώδης έλεγχος workspace, ΠΡΙΝ ζωγραφιστεί οτιδήποτε στη
+  // σελίδα. Η πλήρης λογική (μαζί με τα landing/skip flags) μένει στο
+  // resolveWorkspaceId() του shared.js, το οποίο τρέχει αργότερα κανονικά --
+  // αυτό εδώ είναι απλή, πρόωρη προστασία μόνο για το home.html, ώστε ένας
+  // ανώνυμος επισκέπτης χωρίς αποθηκευμένο workspace να μην προλαβαίνει να
+  // δει έστω και για μια στιγμή το "Recent documents" πριν το redirect στη
+  // landing page.
+  //
+  // Επιπλέον: όποιος φτάνει εδώ ΜΕ workspace έχει μπει στην εφαρμογή, οπότε
+  // σημειώνουμε στον browser "idmonReturning". Η αρχική (/, marketing) το
+  // διαβάζει και, αν ο χρήστης αποσυνδεθεί αργότερα, τον στέλνει κατευθείαν
+  // στο /landing.html αντί για τη marketing σελίδα.
+  if (!localStorage.getItem("workspaceId")) {
+    location.replace("/landing.html");
+  } else {
+    localStorage.setItem("idmonReturning", "1");
+  }
+</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Idmon — Assistant</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/shared.css">
+<style>
+  .host-nav{height:56px;background:var(--surface);border-bottom:1px solid var(--border);
+    display:flex;align-items:center;padding:0 28px;gap:28px;font-size:14px;color:var(--text-soft);}
+  .host-nav strong{color:var(--text);font-size:15px;}
+  .host-body{max-width:920px;margin:48px auto;padding:0 28px 260px;}
+  .host-body h1{font-size:22px;letter-spacing:-0.01em;margin-bottom:6px;}
+  .host-body .host-intro{font-size:14px;line-height:1.6;color:var(--text-soft);max-width:600px;margin-bottom:28px;}
+
+  .doc-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));gap:16px;}
+  .doc-card{display:block;background:var(--surface);border:1px solid var(--border);border-radius:8px;
+    padding:18px;text-decoration:none;color:inherit;transition:border-color .15s;}
+  .doc-card:hover{border-color:var(--accent);}
+  .doc-card h3{font-size:15px;margin:0 0 6px;color:var(--text);}
+  .doc-card-date{font-size:11.5px;color:var(--text-soft);display:block;margin-bottom:10px;}
+  .doc-card-preview{font-size:13px;line-height:1.6;color:var(--text-soft);
+    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+  .host-empty{font-size:13.5px;color:var(--text-soft);}
+
+  .launcher{position:fixed;right:28px;bottom:28px;width:48px;height:48px;border-radius:50%;
+    background:var(--text);color:var(--bg);display:flex;align-items:center;justify-content:center;
+    font-size:20px;cursor:pointer;border:none;}
+
+  .window{position:fixed;right:28px;bottom:92px;width:380px;max-height:calc(100vh - 120px);
+    background:var(--surface);border:1.5px solid var(--border);border-radius:4px;
+    overflow-y:auto;overflow-x:hidden;display:none;}
+  .window.open{display:block;}
+
+  .window-head{padding:12px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);}
+  .window-head strong{font-size:14px;}
+  .editor-link{font-size:11.5px;font-weight:700;color:var(--text);text-decoration:none;
+    background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:5px 10px;}
+  .editor-link:hover{background:var(--accent-soft);border-color:var(--accent);}
+  .host-nav-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
+  .host-nav-right .lang-toggle{margin-left:0;}
+
+  .label{font-size:11px;color:var(--text-soft);margin-bottom:8px;}
+
+  .chat-cell{background:var(--surface);padding:14px;display:flex;flex-direction:column;gap:10px;height:420px;}
+  .thread{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;}
+  .msg{font-size:13px;line-height:1.5;max-width:92%;}
+  .msg.user{align-self:flex-end;background:var(--surface-2);color:var(--text);border:1px solid var(--accent);padding:8px 11px;border-radius:10px 10px 2px 10px;}
+  .msg.bot{background:var(--surface-2);border:1px solid var(--border);padding:8px 11px;border-radius:2px 10px 10px 10px;}
+  .msg.bot.fallback{border-color:var(--warn-border);background:var(--warn-bg);}
+  .msg ul,.msg ol{margin:6px 0;padding-left:20px;}
+  .msg li{margin:2px 0;}
+  .msg li>ul{margin:2px 0;}
+  .msg>ul:first-child,.msg>ol:first-child{margin-top:0;}
+  .msg>ul:last-child,.msg>ol:last-child{margin-bottom:0;}
+  .msg.bot.fallback a{color:var(--text);font-weight:600;}
+  .composer{display:flex;gap:6px;}
+  .composer input{flex:1;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;}
+  .composer button{border:none;background:var(--accent);color:var(--on-accent);border-radius:4px;padding:0 12px;font-size:13px;cursor:pointer;}
+  .composer button:disabled{opacity:.5;cursor:default;}
+
+  .msg-source-link{display:block;margin-top:8px;border:none;background:none;color:var(--accent);
+    font-size:12px;font-family:inherit;cursor:pointer;padding:0;text-decoration:underline;text-underline-offset:2px;}
+
+  .source-banner{display:none;align-items:center;gap:12px;background:var(--surface-2);
+    border-bottom:1px solid var(--border);padding:10px 28px;font-size:13px;color:var(--text);}
+  .source-banner.show{display:flex;}
+  .source-banner .icon{font-size:14px;}
+  .source-banner strong{font-weight:600;}
+  .source-banner button{margin-left:auto;border:1px solid var(--accent);background:none;color:var(--accent);
+    font-family:inherit;font-size:12.5px;padding:5px 12px;border-radius:4px;cursor:pointer;white-space:nowrap;}
+  .source-banner button:hover{background:var(--accent);color:var(--on-accent);}
+</style>
+</head>
+<body>
+
+  <div class="source-banner" id="sourceBanner">
+    <span class="icon">📄</span>
+    <span id="sourceBannerText"></span>
+    <button id="sourceBannerBtn" data-i18n="viewArticle">View article →</button>
+  </div>
+
+  <div class="host-nav">
+    <strong>Idmon</strong>
+    <div class="host-nav-right">
+      <a class="editor-link" id="switchModeLink" href="#" data-i18n="switchMode">Log out</a>
+      <a class="editor-link" href="/editor.html" data-i18n="manageContent">Manage content</a>
+      <div class="lang-toggle" id="langToggle">
+        <button type="button" class="lang-btn" data-lang="en">EN</button>
+        <button type="button" class="lang-btn" data-lang="el">GR</button>
+      </div>
+    </div>
+  </div>
+  <div class="host-body">
+    <h1 data-i18n="recentDocs">Recent documents</h1>
+    <p class="host-intro" data-i18n="hostIntro">Company procedures and policies. Click a document to read it, or ask the assistant bottom-right.</p>
+    <div class="doc-grid" id="docGrid"><div class="host-empty" data-i18n="loading">Loading…</div></div>
+  </div>
+
+  <button class="launcher" id="launcherBtn">✦</button>
+
+  <div class="window" id="chatWindow">
+    <div class="window-head">
+      <img id="assistantLogo" alt="" style="display:none;width:20px;height:20px;border-radius:4px;object-fit:cover;">
+      <strong id="assistantNameText" data-i18n="assistantTitle">Assistant</strong>
+    </div>
+
+    <div class="chat-cell" id="userGrid">
+      <div class="label" data-i18n="conversation">Conversation</div>
+      <div class="thread" id="thread"></div>
+      <div class="composer">
+        <input type="text" id="questionInput" data-i18n-placeholder="askPlaceholder" placeholder="Ask something…">
+        <button id="askBtn" data-i18n="send">Send</button>
+      </div>
+    </div>
+  </div>
+
+<script src="/shared.js"></script>
+<script>
+  const el = (id) => document.getElementById(id);
+  const thread = el("thread");
+
+  applyTranslations();
+  initLangToggle("langToggle");
+
+  // Section Q: κρατάει τα στοιχεία επικοινωνίας του workspace (human handoff,
+  // Section J) ώστε το showLimitReachedMessage() παρακάτω να μπορεί να τα
+  // χρησιμοποιήσει -- ο επισκέπτης πρέπει να βλέπει τα ΔΙΚΑ ΤΟΥ στοιχεία
+  // επικοινωνίας του καταστήματος, όχι κάτι hardcoded του Idmon.
+  let currentContactSettings = { contactLabel: null, contactUrl: null, contactPhone: null };
+
+  // Section G: εφαρμόζει τις ρυθμίσεις widget (χρώμα, όνομα, λογότυπο) του
+  // συγκεκριμένου workspace -- best-effort, αν αποτύχει το fetch το widget
+  // απλά μένει στα defaults (δεν μπλοκάρει τίποτα άλλο στη σελίδα).
+  async function applyWidgetSettings() {
+    try {
+      const res = await fetch("/workspace/settings", { headers: HEADERS });
+      if (!res.ok) return;
+      const settings = await res.json();
+
+      currentContactSettings = {
+        contactLabel: settings.contactLabel || null,
+        contactUrl: settings.contactUrl || null,
+        contactPhone: settings.contactPhone || null,
+      };
+
+      if (settings.accentColor) {
+        document.documentElement.style.setProperty("--accent", settings.accentColor);
+        document.documentElement.style.setProperty("--accent-soft", settings.accentColor + "22");
+      }
+      if (settings.botName) {
+        el("assistantNameText").textContent = settings.botName;
+      }
+      if (settings.logoUrl) {
+        const logo = el("assistantLogo");
+        logo.src = settings.logoUrl;
+        logo.style.display = "inline-block";
+      }
+    } catch (err) {
+      // σιωπηλή αποτυχία -- δες σχόλιο πάνω
+    }
+  }
+
+  applyWidgetSettings();
+
+  // --- host page: δυναμική λίστα εγγράφων (πραγματικά δεδομένα, όχι στατικό demo κείμενο) ---
+  async function loadHostDocuments() {
+    const grid = el("docGrid");
+    try {
+      const res = await fetch("/documents", { headers: HEADERS });
+      const data = await res.json();
+      // Section D: ο απλός χρήστης βλέπει ΜΟΝΟ δημοσιευμένα έγγραφα -- τα
+      // πρόχειρα/διαγραμμένα υπάρχουν μόνο στο editor.
+      const documents = (data.documents || []).filter(d => d.status === "published");
+
+      if (!documents.length) {
+        grid.innerHTML = `<div class="host-empty">${t("noDocsInWorkspace")}</div>`;
+        return;
+      }
+
+      grid.innerHTML = documents.map(d => `
+        <a class="doc-card" href="/article.html?id=${encodeURIComponent(d.documentId)}">
+          <h3>${escapeHtml(d.title || d.documentId)}</h3>
+          <span class="doc-card-date">${t("updatedPrefix")} ${timeAgo(d.updatedAt)}</span>
+          <div class="doc-card-preview">${escapeHtml(d.preview || "")}</div>
+        </a>
+      `).join("");
+    } catch (err) {
+      grid.innerHTML = `<div class="host-empty">${t("docsLoadError")}</div>`;
+    }
+  }
+
+  loadHostDocuments();
+
+  el("switchModeLink").addEventListener("click", (e) => {
+    e.preventDefault();
+    logoutAndSwitchMode();
+  });
+
+  el("launcherBtn").addEventListener("click", () => {
+    el("chatWindow").classList.toggle("open");
+  });
+
+  function addMessage(text, role, fallback) {
+    const div = document.createElement("div");
+    div.className = "msg " + role + (fallback ? " fallback" : "");
+    if (role === "bot") {
+      div.innerHTML = formatAnswer(text);
+    } else {
+      div.textContent = text;
+    }
+    thread.appendChild(div);
+    thread.scrollTop = thread.scrollHeight;
+    return div;
+  }
+
+  function addSourceLink(botDiv, source) {
+    if (!source || !source.documentId) return;
+    const link = document.createElement("button");
+    link.className = "msg-source-link";
+    link.textContent = `📄 ${source.title || source.documentId} →`;
+    link.onclick = () => {
+      window.location.href = `/article.html?id=${encodeURIComponent(source.documentId)}`;
+    };
+    botDiv.appendChild(link);
+    thread.scrollTop = thread.scrollHeight;
+  }
+
+  // Section Q: μήνυμα προς τον ΤΕΛΙΚΟ επισκέπτη όταν ο πελάτης-ιδιοκτήτης
+  // έχει εξαντλήσει το μηνιαίο του όριο μηνυμάτων. Σκόπιμα γενικό (καμία
+  // αναφορά σε "όριο", "πλάνο", ή Idmon) -- μόνο τα στοιχεία επικοινωνίας
+  // που έχει ήδη δηλώσει ο ίδιος ο πελάτης (Section J, human handoff).
+  function showLimitReachedMessage(botDiv) {
+    let html = escapeHtml(t("limitReachedMessage"));
+    if (currentContactSettings.contactLabel && currentContactSettings.contactUrl) {
+      html += ` <a href="${escapeHtml(currentContactSettings.contactUrl)}" target="_blank" rel="noopener">${escapeHtml(currentContactSettings.contactLabel)}</a>`;
+    } else if (currentContactSettings.contactPhone) {
+      html += ` ${escapeHtml(currentContactSettings.contactPhone)}`;
+    }
+    botDiv.innerHTML = html;
+    botDiv.classList.add("fallback");
+  }
+
+  // Βήμα 1: ιστορικό συζήτησης -- ΙΔΙΑ συμπεριφορά με το widget των πελατών.
+  // Στέλνουμε μαζί με κάθε νέα ερώτηση τα τελευταία μηνύματα (ρόλοι
+  // "user"/"assistant", ίδιοι με το backend) ώστε τα follow-ups να έχουν
+  // νόημα. Μένει μόνο στη μνήμη της σελίδας (ανανέωση = νέα συζήτηση) και
+  // θυμόμαστε μόνο ολοκληρωμένες ανταλλαγές, όχι σφάλματα ή μήνυμα ορίου.
+  const MAX_HISTORY_MESSAGES = 6;
+  const MAX_HISTORY_MESSAGE_CHARS = 500;
+  let chatHistory = [];
+
+  function rememberExchange(question, answer) {
+    chatHistory.push({ role: "user", text: question.slice(0, MAX_HISTORY_MESSAGE_CHARS) });
+    chatHistory.push({ role: "assistant", text: answer.slice(0, MAX_HISTORY_MESSAGE_CHARS) });
+    if (chatHistory.length > MAX_HISTORY_MESSAGES) chatHistory = chatHistory.slice(-MAX_HISTORY_MESSAGES);
+  }
+
+  async function askQuestion() {
+    const input = el("questionInput");
+    const question = input.value.trim();
+    if (!question) return;
+
+    addMessage(question, "user");
+    input.value = "";
+    el("askBtn").disabled = true;
+
+    const botDiv = addMessage("…", "bot");
+    let accumulatedText = "";
+
+    try {
+      const res = await fetch("/query/stream", {
+        method: "POST",
+        headers: HEADERS,
+        // Χωρίς ιστορικό (πρώτη ερώτηση) το body μένει ακριβώς όπως πριν.
+        body: JSON.stringify(chatHistory.length ? { question, history: chatHistory } : { question }),
+      });
+
+      // Section Q: το backend επιστρέφει 429 + {limitReached:true} ΠΡΙΝ
+      // ξεκινήσει το SSE stream όταν εξαντληθεί το μηνιαίο όριο -- το
+      // ελέγχουμε εδώ, πριν καν προσπαθήσουμε streamSSE(), ώστε να δείξουμε
+      // το σωστό γενικό μήνυμα αντί για το γενικό "connectionErrorPrefix".
+      if (res.status === 429) {
+        let limitData = {};
+        try { limitData = await res.json(); } catch (parseErr) { /* αγνόησε */ }
+        if (limitData.limitReached) {
+          showLimitReachedMessage(botDiv);
+          return;
+        }
+      }
+
+      if (!res.ok || !res.body) {
+        throw new Error("bad response");
+      }
+
+      let finalEvent = null;
+      await streamSSE(res, (evt) => {
+        if (evt.type === "chunk") {
+          accumulatedText += evt.text;
+          botDiv.innerHTML = formatAnswer(accumulatedText);
+          thread.scrollTop = thread.scrollHeight;
+        } else if (evt.type === "done" || evt.type === "error") {
+          finalEvent = evt;
+        }
+      });
+
+      if (!finalEvent || finalEvent.type === "error") {
+        botDiv.classList.add("fallback");
+        renderSource(null);
+      } else {
+        if (finalEvent.isFallback) botDiv.classList.add("fallback");
+        if (!finalEvent.isFallback) addSourceLink(botDiv, finalEvent.primarySource);
+        renderSource(finalEvent.primarySource);
+      }
+
+      if (finalEvent && finalEvent.type === "done" && accumulatedText) {
+        rememberExchange(question, accumulatedText);
+      }
+    } catch (err) {
+      botDiv.innerHTML = formatAnswer(t("connectionErrorPrefix") + err.message);
+      botDiv.classList.add("fallback");
+    } finally {
+      el("askBtn").disabled = false;
+    }
+  }
+
+  el("askBtn").addEventListener("click", askQuestion);
+  el("questionInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") askQuestion();
+  });
+
+  function renderSource(source) {
+    const banner = el("sourceBanner");
+
+    if (!source) {
+      banner.classList.remove("show");
+      return;
+    }
+
+    el("sourceBannerText").innerHTML = `${t("answerFrom")}<strong>${escapeHtml(source.title || source.documentId)}</strong>`;
+    banner.classList.add("show");
+    el("sourceBannerBtn").onclick = () => {
+      window.location.href = `/article.html?id=${encodeURIComponent(source.documentId)}`;
+    };
+  }
+</script>
+</body>
+</html>

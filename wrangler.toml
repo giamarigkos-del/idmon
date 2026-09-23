@@ -2,16 +2,19 @@ name = "operations-portal-rag"
 main = "src/index.js"
 compatibility_date = "2026-08-01"
 
-# Custom domain -- αυτόματα φτιάχνει DNS record + SSL πιστοποιητικό σε κάθε
+# Custom domains -- αυτόματα φτιάχνουν DNS record + SSL πιστοποιητικό σε κάθε
 # `wrangler deploy`, δεν χρειάζεται καμία χειροκίνητη ρύθμιση στο dashboard.
-# Το idmon.app (χωρίς "app.") μένει ελεύθερο για μελλοντική δημόσια σελίδα
-# marketing/pricing, ξεχωριστή από το ίδιο το εργαλείο.
+# ΑΠΟΦΑΣΗ (23 Σεπτ. 2026): ολόκληρο το προϊόν ζει στο idmon.app (marketing
+# σελίδα στο /, εφαρμογή στο /home.html, /landing.html, /editor.html...).
+# Το app.idmon.app μένει ΜΟΝΟ ώστε να υπάρχει DNS record για το Cloudflare
+# Redirect Rule που στέλνει μόνιμα (301) κάθε app.idmon.app/... στο
+# idmon.app/... -- κανένα παλιό link δεν σπάει.
 #
-# workers_dev = false ΣΚΟΠΙΜΑ (απόφαση, όχι απλά το default του Wrangler) --
-# μόνο ένα δημόσιο URL, το app.idmon.app. Το παλιό *.workers.dev URL έχει
-# ήδη απενεργοποιηθεί.
+# workers_dev = false ΣΚΟΠΙΜΑ (απόφαση, όχι απλά το default του Wrangler).
+# Το παλιό *.workers.dev URL έχει ήδη απενεργοποιηθεί.
 workers_dev = false
 routes = [
+  { pattern = "idmon.app", custom_domain = true },
   { pattern = "app.idmon.app", custom_domain = true }
 ]
 
@@ -50,7 +53,7 @@ NOTIFY_FROM_EMAIL = "notifications@idmon.app"
 # Το Client Secret ΔΕΝ μπαίνει εδώ -- είναι secret:
 #   wrangler secret put GOOGLE_CLIENT_SECRET
 GOOGLE_CLIENT_ID = "532047777604-98qlf4jfdp3kic0i7ko7pniteo89gaau.apps.googleusercontent.com"
-GOOGLE_REDIRECT_URI = "https://app.idmon.app/oauth/google/callback"
+GOOGLE_REDIRECT_URI = "https://idmon.app/oauth/google/callback"
 
 # --- Paddle billing (Section R) ---
 # Το webhook secret ΔΕΝ μπαίνει εδώ -- είναι secret:
@@ -77,7 +80,7 @@ PADDLE_ENV = "production"
 #   wrangler secret put TURNSTILE_SECRET_KEY
 # Το SITE key είναι δημόσιο by design (το χρησιμοποιεί το Turnstile widget
 # στον browser) -- δεν είναι secret. Ξεχωριστό ανά περιβάλλον: αυτό εδώ
-# είναι το πραγματικό, δηλωμένο μόνο για idmon.app/app.idmon.app. Το
+# είναι το πραγματικό, δηλωμένο μόνο για idmon.app. Το
 # τοπικό .dev.vars έχει το δοκιμαστικό site key της Cloudflare αντί γι'
 # αυτό (δουλεύει από οποιοδήποτε domain, π.χ. localhost).
 TURNSTILE_SITE_KEY = "0x4AAAAAAE_gzTpIYxx2aETD"

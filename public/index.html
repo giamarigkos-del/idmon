@@ -1,361 +1,366 @@
+<!--
+  ΣΗΜΕΙΩΣΗ ΓΙΑ ΤΟΝ GIANNIS (δεν εμφανίζεται στους επισκέπτες):
+  Αρχική σελίδα του idmon.app (/) = σελίδα τιμολόγησης του Idmon. Το παλιό /pricing.html
+  προωθείται εδώ μέσω public/_redirects. Δίγλωσση (EL/EN), ίδιος μηχανισμός με το privacy.html:
+  shared.css (design tokens, .lang-toggle, .md-content) + shared.js (getLang, initLangToggle).
+  Οι αριθμοί (100/500/2.500 μηνύματα, 5/20/απεριόριστα έγγραφα) είναι τα ΠΡΑΓΜΑΤΙΚΑ όρια
+  του κώδικα (PLAN_LIMITS), οι τιμές (29 και 59 ευρώ) οι ίδιες με το Paddle. Αν αλλάξει
+  οποιοδήποτε από τα δύο, αλλάζει ΚΑΙ εδώ.
+  ΡΟΗ ΕΓΓΡΑΦΗΣ (σημαντικό για τα κείμενα): ΟΛΑ τα κουμπιά πάνε στο /landing, δηλαδή στην επιλογή
+  Guest (δοκιμαστικός χώρος, διαγράφεται μετά από 7 ημέρες) ή Account. Ένας νέος λογαριασμός είναι ΠΑΝΤΑ Free· το
+  Basic/Pro αγοράζεται ΜΕΣΑ στην εφαρμογή (κουμπί Upgrade). Γι' αυτό τα πλάνα Basic/Pro ΔΕΝ έχουν κουμπί "αγορά" εδώ.
+  ΧΡΩΜΑΤΑ: ίδιο πορτοκαλί (#D97757) με το landing της εφαρμογής. Στα κουμπιά/badge το κείμενο πάνω στο πορτοκαλί
+  είναι σκούρο (var(--bg)) και όχι --on-accent: το ανοιχτό κείμενο πάνω σε αυτό το πορτοκαλί έχει χαμηλή αντίθεση
+  (~2,7:1), το σκούρο ~6:1.
+  Οι τιμές γράφονται "με ΦΠΑ" -- ισχύει μόνο αν στο live Paddle οι τιμές οριστούν ως
+  ΣΥΜΠΕΡΙΛΑΜΒΑΝΟΝΤΑΙ ο φόρος (Checkout > Sales tax settings), όπως στο live Paddle.
+  Δεν αναφέρεται επωνυμία/ΑΦΜ/έδρα ακόμα: μπαίνουν όταν ολοκληρωθεί η έναρξη στη ΔΟΥ.
+  ΑΠΟΦΑΣΗ (Σεπτ. 2026): οι τιμές μένουν 29 και 59 ΜΕ ΦΠΑ (όχι +ΦΠΑ).
+  Το «Χωρίς Powered by Idmon» (Pro) αντιστοιχεί στο showBranding του server (GET /embed/{id}/config):
+  Free και Basic δείχνουν το badge στο widget, μόνο το Pro όχι. Αν αλλάξει ο κανόνας, αλλάζει ΚΑΙ εδώ.
+-->
 <!DOCTYPE html>
-<html lang="en" data-i18n-doctitle="indexDocTitle">
+<html lang="el">
 <head>
 <script>
-  // Πρόωρος, στοιχειώδης έλεγχος workspace, ΠΡΙΝ ζωγραφιστεί οτιδήποτε στη
-  // σελίδα. Η πλήρης λογική (μαζί με τα landing/skip flags) μένει στο
-  // resolveWorkspaceId() του shared.js, το οποίο τρέχει αργότερα κανονικά --
-  // αυτό εδώ είναι απλή, πρόωρη προστασία μόνο για το index.html, ώστε ένας
-  // ανώνυμος επισκέπτης χωρίς αποθηκευμένο workspace να μην προλαβαίνει να
-  // δει έστω και για μια στιγμή το "Recent documents" πριν το redirect στη
-  // landing page.
-  if (!localStorage.getItem("workspaceId")) {
-    location.replace("/landing.html");
-  }
+  // Πρόωρη προώθηση, ΠΡΙΝ ζωγραφιστεί η σελίδα, ΜΟΝΟ για όποιον έχει ξαναμπεί:
+  //  - έχει workspace (είναι ήδη μέσα)          -> /home.html
+  //  - έχει μπει παλιότερα αλλά αποσυνδέθηκε     -> /landing.html
+  //  - νέος επισκέπτης / Paddle / Google         -> μένει εδώ
+  // Αν ήρθε από δικό μας link (π.χ. το "idmon.app" στους Όρους), ΔΕΝ
+  // προωθείται: έτσι κι ένας συνδεδεμένος χρήστης μπορεί να δει τις τιμές.
+  (function () {
+    try {
+      var ref = document.referrer;
+      if (ref && new URL(ref).origin === location.origin) return;
+      if (localStorage.getItem("workspaceId")) { location.replace("/home.html"); return; }
+      if (localStorage.getItem("idmonReturning")) { location.replace("/landing.html"); }
+    } catch (e) {
+      // Σε οποιοδήποτε σφάλμα (π.χ. μπλοκαρισμένο localStorage) απλά μένει εδώ.
+    }
+  })();
 </script>
 <meta charset="UTF-8">
+<title>Τιμολόγηση — Idmon</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Idmon — Assistant</title>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="stylesheet" href="/shared.css">
+<meta name="description" content="Idmon: chatbot για το site σου που απαντά μόνο από τα δικά σου έγγραφα. Δοκίμασέ το δωρεάν. Basic 29 €/μήνα, Pro 59 €/μήνα, με ΦΠΑ.">
+<link rel="stylesheet" href="shared.css">
 <style>
-  .host-nav{height:56px;background:var(--surface);border-bottom:1px solid var(--border);
-    display:flex;align-items:center;padding:0 28px;gap:28px;font-size:14px;color:var(--text-soft);}
-  .host-nav strong{color:var(--text);font-size:15px;}
-  .host-body{max-width:920px;margin:48px auto;padding:0 28px 260px;}
-  .host-body h1{font-size:22px;letter-spacing:-0.01em;margin-bottom:6px;}
-  .host-body .host-intro{font-size:14px;line-height:1.6;color:var(--text-soft);max-width:600px;margin-bottom:28px;}
-
-  .doc-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));gap:16px;}
-  .doc-card{display:block;background:var(--surface);border:1px solid var(--border);border-radius:8px;
-    padding:18px;text-decoration:none;color:inherit;transition:border-color .15s;}
-  .doc-card:hover{border-color:var(--accent);}
-  .doc-card h3{font-size:15px;margin:0 0 6px;color:var(--text);}
-  .doc-card-date{font-size:11.5px;color:var(--text-soft);display:block;margin-bottom:10px;}
-  .doc-card-preview{font-size:13px;line-height:1.6;color:var(--text-soft);
-    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
-  .host-empty{font-size:13.5px;color:var(--text-soft);}
-
-  .launcher{position:fixed;right:28px;bottom:28px;width:48px;height:48px;border-radius:50%;
-    background:var(--text);color:var(--bg);display:flex;align-items:center;justify-content:center;
-    font-size:20px;cursor:pointer;border:none;}
-
-  .window{position:fixed;right:28px;bottom:92px;width:380px;max-height:calc(100vh - 120px);
-    background:var(--surface);border:1.5px solid var(--border);border-radius:4px;
-    overflow-y:auto;overflow-x:hidden;display:none;}
-  .window.open{display:block;}
-
-  .window-head{padding:12px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);}
-  .window-head strong{font-size:14px;}
-  .editor-link{font-size:11.5px;font-weight:700;color:var(--text);text-decoration:none;
-    background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:5px 10px;}
-  .editor-link:hover{background:var(--accent-soft);border-color:var(--accent);}
-  .host-nav-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
-  .host-nav-right .lang-toggle{margin-left:0;}
-
-  .label{font-size:11px;color:var(--text-soft);margin-bottom:8px;}
-
-  .chat-cell{background:var(--surface);padding:14px;display:flex;flex-direction:column;gap:10px;height:420px;}
-  .thread{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;}
-  .msg{font-size:13px;line-height:1.5;max-width:92%;}
-  .msg.user{align-self:flex-end;background:var(--surface-2);color:var(--text);border:1px solid var(--accent);padding:8px 11px;border-radius:10px 10px 2px 10px;}
-  .msg.bot{background:var(--surface-2);border:1px solid var(--border);padding:8px 11px;border-radius:2px 10px 10px 10px;}
-  .msg.bot.fallback{border-color:var(--warn-border);background:var(--warn-bg);}
-  .msg ul,.msg ol{margin:6px 0;padding-left:20px;}
-  .msg li{margin:2px 0;}
-  .msg li>ul{margin:2px 0;}
-  .msg>ul:first-child,.msg>ol:first-child{margin-top:0;}
-  .msg>ul:last-child,.msg>ol:last-child{margin-bottom:0;}
-  .msg.bot.fallback a{color:var(--text);font-weight:600;}
-  .composer{display:flex;gap:6px;}
-  .composer input{flex:1;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;}
-  .composer button{border:none;background:var(--accent);color:var(--on-accent);border-radius:4px;padding:0 12px;font-size:13px;cursor:pointer;}
-  .composer button:disabled{opacity:.5;cursor:default;}
-
-  .msg-source-link{display:block;margin-top:8px;border:none;background:none;color:var(--accent);
-    font-size:12px;font-family:inherit;cursor:pointer;padding:0;text-decoration:underline;text-underline-offset:2px;}
-
-  .source-banner{display:none;align-items:center;gap:12px;background:var(--surface-2);
-    border-bottom:1px solid var(--border);padding:10px 28px;font-size:13px;color:var(--text);}
-  .source-banner.show{display:flex;}
-  .source-banner .icon{font-size:14px;}
-  .source-banner strong{font-weight:600;}
-  .source-banner button{margin-left:auto;border:1px solid var(--accent);background:none;color:var(--accent);
-    font-family:inherit;font-size:12.5px;padding:5px 12px;border-radius:4px;cursor:pointer;white-space:nowrap;}
-  .source-banner button:hover{background:var(--accent);color:var(--on-accent);}
+  /* Ίδια ζεστή παλέτα με το landing της εφαρμογής (override του --accent του shared.css, που είναι ουδέτερο γκρι). */
+  :root{--accent:#D97757;--accent-soft:rgba(217,119,87,.16);}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 24px;border-bottom:1px solid var(--border);}
+  .topbar a.brand{color:var(--text);font-weight:700;text-decoration:none;}
+  .page-wrap{max-width:980px;margin:0 auto;padding:40px 20px 80px;}
+  .lang-block{display:none;}
+  .lead{color:var(--text-soft);font-size:1.05rem;margin:0 0 1.6em;max-width:640px;}
+  .plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin:0 0 2.4em;}
+  .plan{border:1px solid var(--border);border-radius:10px;padding:22px 20px;display:flex;flex-direction:column;gap:6px;position:relative;}
+  .plan.featured{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
+  .plan h2{margin:0;font-size:1.15rem;}
+  .badge{position:absolute;top:-11px;right:16px;background:var(--accent);color:var(--bg);font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:999px;}
+  .price{font-size:2rem;font-weight:700;margin:6px 0 0;}
+  .price small{font-size:.85rem;font-weight:400;color:var(--text-soft);}
+  .vat{font-size:.8rem;color:var(--text-soft);margin:0 0 10px;}
+  .plan ul{list-style:none;padding:0;margin:0 0 16px;font-size:.95rem;}
+  .plan li{padding:4px 0;}
+  .plan li strong{font-weight:700;}
+  .cta{display:inline-block;text-align:center;margin-top:auto;padding:11px 14px;border-radius:6px;text-decoration:none;font-weight:700;font-size:.95rem;border:1px solid var(--accent);color:var(--accent);}
+  .cta:hover{background:var(--accent-soft);}
+  .cta.cta-primary{background:var(--accent);color:var(--bg);padding:12px 22px;font-size:1rem;}
+  .cta.cta-primary:hover{background:var(--accent);filter:brightness(1.08);}
+  .hero-note{color:var(--text-soft);font-size:.88rem;max-width:640px;margin:.4em 0 2.6em;}
+  .plan-note{margin:auto 0 0;padding:11px 0;text-align:center;font-size:.9rem;color:var(--text-soft);border-top:1px solid var(--border);}
+  .pricing-note{color:var(--text-soft);font-size:.92rem;margin:-1em 0 2.4em;}
+  .billing-toggle{display:flex;justify-content:center;gap:2px;width:max-content;margin:0 auto 20px;padding:3px;background:var(--surface-2);border:1px solid var(--border);border-radius:7px;}
+  .billing-toggle button{border:0;border-radius:5px;padding:8px 16px;background:transparent;color:var(--text-soft);font:inherit;font-size:.9rem;font-weight:700;cursor:pointer;}
+  .billing-toggle button[aria-pressed="true"]{background:var(--accent);color:var(--bg);}
+  .annual-savings{min-height:1.2em;margin:0;color:var(--accent);font-size:.8rem;font-weight:700;}
+  .plan .checkout-btn{width:100%;margin-top:auto;cursor:pointer;}
+  .table-wrap{overflow-x:auto;margin:0 0 2.4em;}
+  .faq h3{margin:1.4em 0 .3em;font-size:1.02rem;}
+  .faq p{margin:0;color:var(--text-soft);}
+  .footer-links{margin-top:3em;padding-top:1.2em;border-top:1px solid var(--border);font-size:.9rem;color:var(--text-soft);}
+  .footer-links a{color:var(--text-soft);}
 </style>
 </head>
 <body>
 
-  <div class="source-banner" id="sourceBanner">
-    <span class="icon">📄</span>
-    <span id="sourceBannerText"></span>
-    <button id="sourceBannerBtn" data-i18n="viewArticle">View article →</button>
+<div class="topbar">
+  <a class="brand" href="/">idmon.app</a>
+  <div id="langToggle" class="lang-toggle">
+    <button class="lang-btn" data-lang="en">EN</button>
+    <button class="lang-btn" data-lang="el">EL</button>
   </div>
+</div>
 
-  <div class="host-nav">
-    <strong>Idmon</strong>
-    <div class="host-nav-right">
-      <a class="editor-link" id="switchModeLink" href="#" data-i18n="switchMode">Log out</a>
-      <a class="editor-link" href="/editor.html" data-i18n="manageContent">Manage content</a>
-      <div class="lang-toggle" id="langToggle">
-        <button type="button" class="lang-btn" data-lang="en">EN</button>
-        <button type="button" class="lang-btn" data-lang="el">GR</button>
-      </div>
-    </div>
+<div class="page-wrap">
+
+<div id="content-el" class="lang-block md-content">
+
+<h1>Idmon</h1>
+<p class="lead">Ένας συνομιλιακός βοηθός (chatbot) για το site σου: ανεβάζεις τα δικά σου έγγραφα και οι επισκέπτες σου παίρνουν απαντήσεις μόνο από αυτά, μέσα από ένα widget που ενσωματώνεις στον ιστότοπό σου.</p>
+<p><a class="cta cta-primary" href="/landing">Δοκίμασέ το δωρεάν</a></p>
+<p class="hero-note">Δεν χρειάζεται κάρτα. Στην επόμενη οθόνη διαλέγεις δοκιμαστικό χώρο χωρίς λογαριασμό (τα δεδομένα του διαγράφονται μετά από 7 ημέρες) ή δωρεάν λογαριασμό.</p>
+
+<h2>Τιμολόγηση</h2>
+<p class="lead">Ξεκίνα δωρεάν και αναβάθμισε όταν το χρειαστείς. Όλες οι τιμές <strong>περιλαμβάνουν ΦΠΑ</strong>.</p>
+
+<div class="billing-toggle" role="group" aria-label="Περίοδος χρέωσης">
+  <button type="button" data-billing="monthly" aria-pressed="true">Μηνιαία</button>
+  <button type="button" data-billing="annual" aria-pressed="false">Ετήσια</button>
+</div>
+
+<div class="plans">
+  <div class="plan">
+    <h2>Free</h2>
+    <div class="price">0 €<small> / μήνα</small></div>
+    <p class="vat">Χωρίς κάρτα</p>
+    <ul>
+      <li><strong>100</strong> μηνύματα / μήνα</li>
+      <li><strong>5</strong> έγγραφα</li>
+    </ul>
+    <a class="cta" href="/landing">Ξεκίνα δωρεάν</a>
   </div>
-  <div class="host-body">
-    <h1 data-i18n="recentDocs">Recent documents</h1>
-    <p class="host-intro" data-i18n="hostIntro">Company procedures and policies. Click a document to read it, or ask the assistant bottom-right.</p>
-    <div class="doc-grid" id="docGrid"><div class="host-empty" data-i18n="loading">Loading…</div></div>
+  <div class="plan featured">
+    <span class="badge">Προτεινόμενο</span>
+    <h2>Basic</h2>
+    <div class="price"><span data-monthly="29" data-annual="290">29</span> €<small data-period-label> / μήνα</small></div>
+    <p class="vat">με ΦΠΑ</p>
+    <p class="annual-savings" data-savings> </p>
+    <ul>
+      <li><strong>500</strong> μηνύματα / μήνα</li>
+      <li><strong>20</strong> έγγραφα</li>
+    </ul>
+    <button type="button" class="cta checkout-btn" data-plan="basic" data-monthly-price="pri_01m2ynemr2t4dnes8rz775p090" data-annual-price="pri_01m2ynemzv76wbb37zvr1q9fnb">Αναβάθμιση</button>
   </div>
-
-  <button class="launcher" id="launcherBtn">✦</button>
-
-  <div class="window" id="chatWindow">
-    <div class="window-head">
-      <img id="assistantLogo" alt="" style="display:none;width:20px;height:20px;border-radius:4px;object-fit:cover;">
-      <strong id="assistantNameText" data-i18n="assistantTitle">Assistant</strong>
-    </div>
-
-    <div class="chat-cell" id="userGrid">
-      <div class="label" data-i18n="conversation">Conversation</div>
-      <div class="thread" id="thread"></div>
-      <div class="composer">
-        <input type="text" id="questionInput" data-i18n-placeholder="askPlaceholder" placeholder="Ask something…">
-        <button id="askBtn" data-i18n="send">Send</button>
-      </div>
-    </div>
+  <div class="plan">
+    <h2>Pro</h2>
+    <div class="price"><span data-monthly="59" data-annual="590">59</span> €<small data-period-label> / μήνα</small></div>
+    <p class="vat">με ΦΠΑ</p>
+    <p class="annual-savings" data-savings> </p>
+    <ul>
+      <li><strong>2.500</strong> μηνύματα / μήνα</li>
+      <li><strong>Απεριόριστα</strong> έγγραφα</li>
+      <li>Χωρίς «Powered by Idmon» στο widget</li>
+    </ul>
+    <button type="button" class="cta checkout-btn" data-plan="pro" data-monthly-price="pri_01m2ynen6sh5949wn1pnsr1s51" data-annual-price="pri_01m2ynend8w7383t0nqzgd0f1z">Αναβάθμιση</button>
   </div>
+</div>
 
-<script src="/shared.js"></script>
+<p class="pricing-note">Ξεκινάς πάντα με δωρεάν λογαριασμό και αναβαθμίζεις μέσα στην εφαρμογή όποτε θέλεις. Δεν χρεώνεσαι κατά την εγγραφή.</p>
+
+<h2>Τι περιλαμβάνεται σε όλα τα πλάνα</h2>
+<div class="table-wrap">
+<table>
+<tr><th></th><th>Free</th><th>Basic</th><th>Pro</th></tr>
+<tr><td>Τιμή (με ΦΠΑ)</td><td>0 €</td><td>29 € / μήνα</td><td>59 € / μήνα</td></tr>
+<tr><td>Μηνύματα ανά μήνα</td><td>100</td><td>500</td><td>2.500</td></tr>
+<tr><td>Έγγραφα</td><td>5</td><td>20</td><td>Απεριόριστα</td></tr>
+<tr><td>Chat widget για το site σου</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>Απαντήσεις βασισμένες στα δικά σου έγγραφα</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>Στατιστικά χρήσης και ερωτήσεις χωρίς απάντηση</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>Χωρίς «Powered by Idmon» στο widget</td><td>—</td><td>—</td><td>✓</td></tr>
+</table>
+</div>
+
+<div class="faq">
+<h2>Συχνές ερωτήσεις</h2>
+
+<h3>Τι μετράει ως «μήνυμα»;</h3>
+<p>Κάθε ερώτηση επισκέπτη που απαντάται από το Idmon μετράει ως ένα μήνυμα. Το όριο ισχύει ανά χώρο εργασίας και ανά μήνα, και μπορείς να δεις πόσα έχεις χρησιμοποιήσει μέσα στην εφαρμογή.</p>
+
+<h3>Τι γίνεται αν φτάσω το όριο;</h3>
+<p>Οι επισκέπτες σου βλέπουν ένα γενικό μήνυμα προσωρινής μη διαθεσιμότητας και εσύ βλέπεις ειδοποίηση μέσα στην εφαρμογή. Το widget ξαναδουλεύει όταν ανανεωθεί το όριο τον επόμενο μήνα ή αν αναβαθμίσεις πλάνο.</p>
+
+<h3>Τι είναι το «Powered by Idmon»;</h3>
+<p>Στα πλάνα Free και Basic, το widget δείχνει μια διακριτική γραμμή «Powered by Idmon» κάτω από το πεδίο ερώτησης. Στο Pro δεν εμφανίζεται. Αλλάζει αυτόματα όταν αλλάζεις πλάνο, χωρίς να χρειάζεται να αλλάξεις τον κώδικα που έχεις βάλει στο site σου.</p>
+
+<h3>Μπορώ να αλλάξω ή να ακυρώσω οποτεδήποτε;</h3>
+<p>Ναι. Από το Basic στο Pro αλλάζεις μέσα στην εφαρμογή και πληρώνεις μόνο τη διαφορά για το υπόλοιπο της περιόδου. Την ακύρωση και τα τιμολόγιά σου τα βρίσκεις στη «Διαχείριση συνδρομής». Δες και την <a href="/refunds.html">Πολιτική Ακύρωσης &amp; Επιστροφών</a>.</p>
+
+<h3>Πώς γίνονται οι πληρωμές και ο ΦΠΑ;</h3>
+<p>Οι πληρωμές γίνονται μέσω της Paddle, που λειτουργεί ως Merchant of Record: εισπράττει την πληρωμή, υπολογίζει και αποδίδει τον ΦΠΑ και εκδίδει την απόδειξη. Οι τιμές που βλέπεις εδώ είναι οι τελικές τιμές με ΦΠΑ.</p>
+
+<h3>Πού πηγαίνουν τα έγγραφά μου;</h3>
+<p>Τα έγγραφα και οι ερωτήσεις χρησιμοποιούνται μόνο για να παραχθούν οι απαντήσεις. Δες την <a href="/privacy.html">Πολιτική Απορρήτου</a> για τους παρόχους που εμπλέκονται και για τα δικαιώματά σου.</p>
+</div>
+
+<div class="footer-links">
+  <a href="/terms.html">Όροι Χρήσης</a> ·
+  <a href="/privacy.html">Πολιτική Απορρήτου</a> ·
+  <a href="/refunds.html">Ακύρωση &amp; Επιστροφές</a> ·
+  <a href="mailto:info@idmon.app">info@idmon.app</a>
+</div>
+
+</div>
+
+<div id="content-en" class="lang-block md-content">
+
+<h1>Idmon</h1>
+<p class="lead">A conversational assistant (chatbot) for your website: you upload your own documents and your visitors get answers only from them, through a widget you embed on your site.</p>
+<p><a class="cta cta-primary" href="/landing">Try it for free</a></p>
+<p class="hero-note">No card needed. On the next screen you choose a trial space without an account (its data is deleted after 7 days) or a free account.</p>
+
+<h2>Pricing</h2>
+<p class="lead">Start for free and upgrade when you need to. All prices <strong>include VAT</strong>.</p>
+
+<div class="billing-toggle" role="group" aria-label="Billing period">
+  <button type="button" data-billing="monthly" aria-pressed="true">Monthly</button>
+  <button type="button" data-billing="annual" aria-pressed="false">Annual</button>
+</div>
+
+<div class="plans">
+  <div class="plan">
+    <h2>Free</h2>
+    <div class="price">€0<small> / month</small></div>
+    <p class="vat">No card needed</p>
+    <ul>
+      <li><strong>100</strong> messages / month</li>
+      <li><strong>5</strong> documents</li>
+    </ul>
+    <a class="cta" href="/landing">Start for free</a>
+  </div>
+  <div class="plan featured">
+    <span class="badge">Recommended</span>
+    <h2>Basic</h2>
+    <div class="price">€<span data-monthly="29" data-annual="290">29</span><small data-period-label> / month</small></div>
+    <p class="vat">VAT included</p>
+    <p class="annual-savings" data-savings> </p>
+    <ul>
+      <li><strong>500</strong> messages / month</li>
+      <li><strong>20</strong> documents</li>
+    </ul>
+    <button type="button" class="cta checkout-btn" data-plan="basic" data-monthly-price="pri_01m2ynemr2t4dnes8rz775p090" data-annual-price="pri_01m2ynemzv76wbb37zvr1q9fnb">Upgrade</button>
+  </div>
+  <div class="plan">
+    <h2>Pro</h2>
+    <div class="price">€<span data-monthly="59" data-annual="590">59</span><small data-period-label> / month</small></div>
+    <p class="vat">VAT included</p>
+    <p class="annual-savings" data-savings> </p>
+    <ul>
+      <li><strong>2,500</strong> messages / month</li>
+      <li><strong>Unlimited</strong> documents</li>
+      <li>No “Powered by Idmon” on the widget</li>
+    </ul>
+    <button type="button" class="cta checkout-btn" data-plan="pro" data-monthly-price="pri_01m2ynen6sh5949wn1pnsr1s51" data-annual-price="pri_01m2ynend8w7383t0nqzgd0f1z">Upgrade</button>
+  </div>
+</div>
+
+<p class="pricing-note">You always start with a free account and upgrade inside the app whenever you like, so you are never charged at signup.</p>
+
+<h2>What every plan includes</h2>
+<div class="table-wrap">
+<table>
+<tr><th></th><th>Free</th><th>Basic</th><th>Pro</th></tr>
+<tr><td>Price (VAT included)</td><td>€0</td><td>€29 / month</td><td>€59 / month</td></tr>
+<tr><td>Messages per month</td><td>100</td><td>500</td><td>2,500</td></tr>
+<tr><td>Documents</td><td>5</td><td>20</td><td>Unlimited</td></tr>
+<tr><td>Chat widget for your website</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>Answers based on your own documents</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>Usage statistics and unanswered questions</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>No “Powered by Idmon” on the widget</td><td>—</td><td>—</td><td>✓</td></tr>
+</table>
+</div>
+
+<div class="faq">
+<h2>Frequently asked questions</h2>
+
+<h3>What counts as a "message"?</h3>
+<p>Every visitor question that Idmon answers counts as one message. The limit applies per workspace and per month, and you can see how much you have used inside the app.</p>
+
+<h3>What happens if I reach the limit?</h3>
+<p>Your visitors see a generic temporary-unavailability message and you see a notice inside the app. The widget works again when the limit renews next month, or as soon as you upgrade.</p>
+
+<h3>What is “Powered by Idmon”?</h3>
+<p>On the Free and Basic plans, the widget shows a discreet “Powered by Idmon” line under the question field. On Pro it does not appear. It changes automatically when you change plan, without you having to change the code you put on your site.</p>
+
+<h3>Can I change or cancel at any time?</h3>
+<p>Yes. You switch from Basic to Pro inside the app and pay only the difference for the rest of the billing period. You will find cancellation and your invoices under "Manage subscription". See also our <a href="/refunds.html">Cancellation &amp; Refund Policy</a>.</p>
+
+<h3>How do payments and VAT work?</h3>
+<p>Payments are processed by Paddle, which acts as Merchant of Record: it collects the payment, calculates and remits VAT, and issues your receipt. The prices you see here are the final prices, VAT included.</p>
+
+<h3>Where do my documents go?</h3>
+<p>Your documents and questions are used only to generate answers. See the <a href="/privacy.html">Privacy Policy</a> for the providers involved and for your rights.</p>
+</div>
+
+<div class="footer-links">
+  <a href="/terms.html">Terms of Service</a> ·
+  <a href="/privacy.html">Privacy Policy</a> ·
+  <a href="/refunds.html">Cancellation &amp; Refunds</a> ·
+  <a href="mailto:info@idmon.app">info@idmon.app</a>
+</div>
+
+</div>
+
+</div>
+
 <script>
-  const el = (id) => document.getElementById(id);
-  const thread = el("thread");
-
-  applyTranslations();
-  initLangToggle("langToggle");
-
-  // Section Q: κρατάει τα στοιχεία επικοινωνίας του workspace (human handoff,
-  // Section J) ώστε το showLimitReachedMessage() παρακάτω να μπορεί να τα
-  // χρησιμοποιήσει -- ο επισκέπτης πρέπει να βλέπει τα ΔΙΚΑ ΤΟΥ στοιχεία
-  // επικοινωνίας του καταστήματος, όχι κάτι hardcoded του Idmon.
-  let currentContactSettings = { contactLabel: null, contactUrl: null, contactPhone: null };
-
-  // Section G: εφαρμόζει τις ρυθμίσεις widget (χρώμα, όνομα, λογότυπο) του
-  // συγκεκριμένου workspace -- best-effort, αν αποτύχει το fetch το widget
-  // απλά μένει στα defaults (δεν μπλοκάρει τίποτα άλλο στη σελίδα).
-  async function applyWidgetSettings() {
-    try {
-      const res = await fetch("/workspace/settings", { headers: HEADERS });
-      if (!res.ok) return;
-      const settings = await res.json();
-
-      currentContactSettings = {
-        contactLabel: settings.contactLabel || null,
-        contactUrl: settings.contactUrl || null,
-        contactPhone: settings.contactPhone || null,
-      };
-
-      if (settings.accentColor) {
-        document.documentElement.style.setProperty("--accent", settings.accentColor);
-        document.documentElement.style.setProperty("--accent-soft", settings.accentColor + "22");
-      }
-      if (settings.botName) {
-        el("assistantNameText").textContent = settings.botName;
-      }
-      if (settings.logoUrl) {
-        const logo = el("assistantLogo");
-        logo.src = settings.logoUrl;
-        logo.style.display = "inline-block";
-      }
-    } catch (err) {
-      // σιωπηλή αποτυχία -- δες σχόλιο πάνω
-    }
-  }
-
-  applyWidgetSettings();
-
-  // --- host page: δυναμική λίστα εγγράφων (πραγματικά δεδομένα, όχι στατικό demo κείμενο) ---
-  async function loadHostDocuments() {
-    const grid = el("docGrid");
-    try {
-      const res = await fetch("/documents", { headers: HEADERS });
-      const data = await res.json();
-      // Section D: ο απλός χρήστης βλέπει ΜΟΝΟ δημοσιευμένα έγγραφα -- τα
-      // πρόχειρα/διαγραμμένα υπάρχουν μόνο στο editor.
-      const documents = (data.documents || []).filter(d => d.status === "published");
-
-      if (!documents.length) {
-        grid.innerHTML = `<div class="host-empty">${t("noDocsInWorkspace")}</div>`;
-        return;
-      }
-
-      grid.innerHTML = documents.map(d => `
-        <a class="doc-card" href="/article.html?id=${encodeURIComponent(d.documentId)}">
-          <h3>${escapeHtml(d.title || d.documentId)}</h3>
-          <span class="doc-card-date">${t("updatedPrefix")} ${timeAgo(d.updatedAt)}</span>
-          <div class="doc-card-preview">${escapeHtml(d.preview || "")}</div>
-        </a>
-      `).join("");
-    } catch (err) {
-      grid.innerHTML = `<div class="host-empty">${t("docsLoadError")}</div>`;
-    }
-  }
-
-  loadHostDocuments();
-
-  el("switchModeLink").addEventListener("click", (e) => {
-    e.preventDefault();
-    logoutAndSwitchMode();
-  });
-
-  el("launcherBtn").addEventListener("click", () => {
-    el("chatWindow").classList.toggle("open");
-  });
-
-  function addMessage(text, role, fallback) {
-    const div = document.createElement("div");
-    div.className = "msg " + role + (fallback ? " fallback" : "");
-    if (role === "bot") {
-      div.innerHTML = formatAnswer(text);
-    } else {
-      div.textContent = text;
-    }
-    thread.appendChild(div);
-    thread.scrollTop = thread.scrollHeight;
-    return div;
-  }
-
-  function addSourceLink(botDiv, source) {
-    if (!source || !source.documentId) return;
-    const link = document.createElement("button");
-    link.className = "msg-source-link";
-    link.textContent = `📄 ${source.title || source.documentId} →`;
-    link.onclick = () => {
-      window.location.href = `/article.html?id=${encodeURIComponent(source.documentId)}`;
-    };
-    botDiv.appendChild(link);
-    thread.scrollTop = thread.scrollHeight;
-  }
-
-  // Section Q: μήνυμα προς τον ΤΕΛΙΚΟ επισκέπτη όταν ο πελάτης-ιδιοκτήτης
-  // έχει εξαντλήσει το μηνιαίο του όριο μηνυμάτων. Σκόπιμα γενικό (καμία
-  // αναφορά σε "όριο", "πλάνο", ή Idmon) -- μόνο τα στοιχεία επικοινωνίας
-  // που έχει ήδη δηλώσει ο ίδιος ο πελάτης (Section J, human handoff).
-  function showLimitReachedMessage(botDiv) {
-    let html = escapeHtml(t("limitReachedMessage"));
-    if (currentContactSettings.contactLabel && currentContactSettings.contactUrl) {
-      html += ` <a href="${escapeHtml(currentContactSettings.contactUrl)}" target="_blank" rel="noopener">${escapeHtml(currentContactSettings.contactLabel)}</a>`;
-    } else if (currentContactSettings.contactPhone) {
-      html += ` ${escapeHtml(currentContactSettings.contactPhone)}`;
-    }
-    botDiv.innerHTML = html;
-    botDiv.classList.add("fallback");
-  }
-
-  // Βήμα 1: ιστορικό συζήτησης -- ΙΔΙΑ συμπεριφορά με το widget των πελατών.
-  // Στέλνουμε μαζί με κάθε νέα ερώτηση τα τελευταία μηνύματα (ρόλοι
-  // "user"/"assistant", ίδιοι με το backend) ώστε τα follow-ups να έχουν
-  // νόημα. Μένει μόνο στη μνήμη της σελίδας (ανανέωση = νέα συζήτηση) και
-  // θυμόμαστε μόνο ολοκληρωμένες ανταλλαγές, όχι σφάλματα ή μήνυμα ορίου.
-  const MAX_HISTORY_MESSAGES = 6;
-  const MAX_HISTORY_MESSAGE_CHARS = 500;
-  let chatHistory = [];
-
-  function rememberExchange(question, answer) {
-    chatHistory.push({ role: "user", text: question.slice(0, MAX_HISTORY_MESSAGE_CHARS) });
-    chatHistory.push({ role: "assistant", text: answer.slice(0, MAX_HISTORY_MESSAGE_CHARS) });
-    if (chatHistory.length > MAX_HISTORY_MESSAGES) chatHistory = chatHistory.slice(-MAX_HISTORY_MESSAGES);
-  }
-
-  async function askQuestion() {
-    const input = el("questionInput");
-    const question = input.value.trim();
-    if (!question) return;
-
-    addMessage(question, "user");
-    input.value = "";
-    el("askBtn").disabled = true;
-
-    const botDiv = addMessage("…", "bot");
-    let accumulatedText = "";
-
-    try {
-      const res = await fetch("/query/stream", {
-        method: "POST",
-        headers: HEADERS,
-        // Χωρίς ιστορικό (πρώτη ερώτηση) το body μένει ακριβώς όπως πριν.
-        body: JSON.stringify(chatHistory.length ? { question, history: chatHistory } : { question }),
-      });
-
-      // Section Q: το backend επιστρέφει 429 + {limitReached:true} ΠΡΙΝ
-      // ξεκινήσει το SSE stream όταν εξαντληθεί το μηνιαίο όριο -- το
-      // ελέγχουμε εδώ, πριν καν προσπαθήσουμε streamSSE(), ώστε να δείξουμε
-      // το σωστό γενικό μήνυμα αντί για το γενικό "connectionErrorPrefix".
-      if (res.status === 429) {
-        let limitData = {};
-        try { limitData = await res.json(); } catch (parseErr) { /* αγνόησε */ }
-        if (limitData.limitReached) {
-          showLimitReachedMessage(botDiv);
-          return;
-        }
-      }
-
-      if (!res.ok || !res.body) {
-        throw new Error("bad response");
-      }
-
-      let finalEvent = null;
-      await streamSSE(res, (evt) => {
-        if (evt.type === "chunk") {
-          accumulatedText += evt.text;
-          botDiv.innerHTML = formatAnswer(accumulatedText);
-          thread.scrollTop = thread.scrollHeight;
-        } else if (evt.type === "done" || evt.type === "error") {
-          finalEvent = evt;
-        }
-      });
-
-      if (!finalEvent || finalEvent.type === "error") {
-        botDiv.classList.add("fallback");
-        renderSource(null);
-      } else {
-        if (finalEvent.isFallback) botDiv.classList.add("fallback");
-        if (!finalEvent.isFallback) addSourceLink(botDiv, finalEvent.primarySource);
-        renderSource(finalEvent.primarySource);
-      }
-
-      if (finalEvent && finalEvent.type === "done" && accumulatedText) {
-        rememberExchange(question, accumulatedText);
-      }
-    } catch (err) {
-      botDiv.innerHTML = formatAnswer(t("connectionErrorPrefix") + err.message);
-      botDiv.classList.add("fallback");
-    } finally {
-      el("askBtn").disabled = false;
-    }
-  }
-
-  el("askBtn").addEventListener("click", askQuestion);
-  el("questionInput").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") askQuestion();
-  });
-
-  function renderSource(source) {
-    const banner = el("sourceBanner");
-
-    if (!source) {
-      banner.classList.remove("show");
-      return;
-    }
-
-    el("sourceBannerText").innerHTML = `${t("answerFrom")}<strong>${escapeHtml(source.title || source.documentId)}</strong>`;
-    banner.classList.add("show");
-    el("sourceBannerBtn").onclick = () => {
-      window.location.href = `/article.html?id=${encodeURIComponent(source.documentId)}`;
-    };
-  }
+  // Καθαρά δημόσιο, στατικό περιεχόμενο: δεν χρειάζεται ποτέ workspace, οπότε το shared.js
+  // δεν πρέπει να ανακατευθύνει τον επισκέπτη στη landing page (ίδιο με το privacy.html).
+  window.__SKIP_WORKSPACE_REDIRECT__ = true;
 </script>
+<script src="shared.js"></script>
+<script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
+<script>
+  document.querySelectorAll('.lang-block').forEach(function(el){ el.style.display = 'none'; });
+  var activeLang = getLang();
+  var activeBlock = document.getElementById('content-' + activeLang);
+  if (activeBlock) activeBlock.style.display = 'block';
+  document.documentElement.lang = activeLang;
+  document.title = activeLang === 'el' ? 'Τιμολόγηση — Idmon' : 'Pricing — Idmon';
+  initLangToggle('langToggle');
+
+  var billingPeriod = 'monthly';
+  var paddleReady = false;
+  var paddleToken = 'live_d06ea77dbb7841c5652998a2c8e';
+  var billingText = {
+    el: { monthly: ' / μήνα', annual: ' / έτος', savings: '2 μήνες δωρεάν', checkout: 'Αναβάθμιση' },
+    en: { monthly: ' / month', annual: ' / year', savings: '2 months free', checkout: 'Upgrade' },
+  };
+
+  function updateBillingPeriod(period) {
+    billingPeriod = period === 'annual' ? 'annual' : 'monthly';
+    document.querySelectorAll('[data-billing]').forEach(function(button) {
+      button.setAttribute('aria-pressed', button.getAttribute('data-billing') === billingPeriod ? 'true' : 'false');
+    });
+    var text = billingText[activeLang] || billingText.en;
+    document.querySelectorAll('[data-monthly]').forEach(function(price) {
+      price.textContent = price.getAttribute('data-' + billingPeriod);
+    });
+    document.querySelectorAll('[data-period-label]').forEach(function(label) {
+      label.textContent = text[billingPeriod];
+    });
+    document.querySelectorAll('[data-savings]').forEach(function(savings) {
+      var price = savings.previousElementSibling && savings.previousElementSibling.previousElementSibling;
+      var monthly = price && Number(price.querySelector('[data-monthly]')?.getAttribute('data-monthly'));
+      var annual = price && Number(price.querySelector('[data-monthly]')?.getAttribute('data-annual'));
+      var monthsFree = monthly && annual ? Math.round((monthly * 12 - annual) / monthly) : 0;
+      savings.textContent = billingPeriod === 'annual' && monthsFree > 0 ? text.savings : '';
+    });
+  }
+
+  document.querySelectorAll('[data-billing]').forEach(function(button) {
+    button.addEventListener('click', function() { updateBillingPeriod(button.getAttribute('data-billing')); });
+  });
+
+  document.querySelectorAll('.checkout-btn').forEach(function(button) {
+    button.addEventListener('click', function() {
+      var priceId = button.getAttribute('data-' + billingPeriod + '-price');
+      if (!priceId || !window.Paddle) return;
+      if (!paddleReady) {
+        window.Paddle.Initialize({ token: paddleToken });
+        paddleReady = true;
+      }
+      window.Paddle.Checkout.open({
+        items: [{ priceId: priceId, quantity: 1 }],
+        settings: { displayMode: 'overlay', locale: activeLang === 'el' ? 'el' : 'en' },
+      });
+    });
+  });
+
+  updateBillingPeriod('monthly');
+</script>
+
 </body>
 </html>
