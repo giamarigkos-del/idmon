@@ -1,5 +1,5 @@
 # Μόνιμη σελίδα δοκιμών του widget, ΞΕΧΩΡΙΣΤΟ Worker από την εφαρμογή
-# (operations-portal-rag) και από το marketing site (idmon-site).
+# (operations-portal-rag, που από 23/09/2026 σερβίρει ΚΑΙ το marketing site στο idmon.app).
 # Μόνο στατικά αρχεία από τον φάκελο widget-test/, καμία λογική στον server.
 #
 # Deploy:  npx wrangler deploy -c wrangler.widget-test.toml

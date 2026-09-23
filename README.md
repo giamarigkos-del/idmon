@@ -4,7 +4,7 @@
 
 An AI-powered document Q&A system with a built-in CMS. Upload FAQs, SOPs, and internal policies (or pull them from a URL); get a searchable knowledge base with a conversational assistant that answers questions and cites the source document, plus an editor for non-technical staff to keep that knowledge current. The assistant can be embedded on any website as a chat widget.
 
-**Product:** https://app.idmon.app
+**Product:** https://idmon.app
 
 Built on Cloudflare Workers, Vectorize, D1, and Gemini. Designed to be genuinely usable by small teams and businesses, not just a tech demo.
 
@@ -117,7 +117,7 @@ The paid-access helper grants access when a subscription is `active` or `trialin
                  ┌────────────────────┐
   Browser  ───▶  │  Cloudflare Worker  │
  (landing /      │  (src/index.js)     │
-  index /        └─────────┬──────────┘
+  home /         └─────────┬──────────┘
   editor /                 │
   article /                ├──▶ KV (DOCUMENT_REGISTRY)      documents, fallback logs, contradictions, widget settings, analytics counters, usage counters, one-time tokens
   terms /                  ├──▶ D1 (rag-demo-tool-accounts) accounts, sessions, connections, billing mirror
@@ -127,7 +127,7 @@ The paid-access helper grants access when a subscription is `active` or `trialin
                           └──▶ Resend API                  transactional email: fallback alerts, verification, password reset
 ```
 
-The bare `idmon.app` domain is served by a second, assets-only Worker (`idmon-site`, `wrangler.site.toml`) that carries the public marketing and pricing pages (`pricing.html`, `terms.html`, `privacy.html`, `refunds.html`). Its content is generated from `public/` into a separate `site/` folder by `scripts/sync-site.mjs`, so both Workers stay in sync without duplicating the source files. `app.idmon.app` (the diagram above) remains the product itself.
+The whole product runs on this one Worker at `idmon.app`. The public marketing and pricing page is served at `/` (`public/index.html`), next to the legal pages (`terms.html`, `privacy.html`, `refunds.html`), and the app itself lives at `/landing.html`, `/home.html`, `/editor.html` and so on. A small script at the top of the marketing page sends returning visitors straight into the app (to `/home.html` if they still have a workspace, otherwise to `/landing.html`), while first-time visitors, search engines and Paddle's domain review see the marketing page. `public/_redirects` sends the old `/pricing.html` to `/`, and a Cloudflare Redirect Rule sends every URL on the product's former address, `app.idmon.app`, permanently (308, path and query string preserved) to the same path on `idmon.app`. Until September 2026 the marketing pages ran on a second Worker; it was merged into this one so the whole product, including checkout, lives on a single Paddle-approved domain.
 
 Design decisions worth calling out:
 
@@ -309,13 +309,11 @@ npx wrangler dev          # local development
 npx wrangler deploy       # deploy to Cloudflare
 ```
 
-The bare `idmon.app` marketing site (pricing, terms, privacy, refunds) is a separate deploy, with its own Worker and no bindings or secrets of its own:
+The marketing and legal pages are ordinary files in `public/`, so they go live with the same `npx wrangler deploy`. The permanent widget test page (`widget-test/`) is a separate, assets-only Worker with no bindings or secrets:
 
 ```bash
-npx wrangler deploy -c wrangler.site.toml
+npx wrangler deploy -c wrangler.widget-test.toml
 ```
-
-It serves the static pages generated into `site/` by `scripts/sync-site.mjs`; run that script after editing any of the public marketing pages in `public/`, before deploying `wrangler.site.toml`.
 
 Notes on local development:
 - Wrangler's KV, Vectorize, and D1 commands default to a local emulated store. Pass `--remote` to any command that should touch production data
@@ -338,26 +336,25 @@ idmon/
 │   └── crypto-helpers.js   # AES-GCM encrypt/decrypt for stored OAuth tokens
 ├── public/
 │   ├── landing.html        # Entry point: Guest / Account (signup and login)
-│   ├── index.html          # Public document portal + Q&A widget
+│   ├── index.html          # Public marketing and pricing page at / (Free/Basic/Pro, monthly/annual toggle); sends returning visitors into the app
+│   ├── home.html           # App home: published documents + Q&A widget
 │   ├── editor.html         # Content management dashboard (CMS), settings, analytics, embed, account
 │   ├── article.html        # Single published document, read-only view
 │   ├── terms.html          # Terms of Service (bilingual)
 │   ├── privacy.html        # Privacy Policy (bilingual)
-│   ├── pricing.html        # Public pricing page (Free/Basic/Pro, monthly/annual toggle)
 │   ├── refunds.html        # Public refund policy
 │   ├── widget.js           # Embeddable chat widget (Shadow DOM)
+│   ├── _redirects          # /pricing.html and /pricing -> / (301)
 │   ├── shared.css          # Design tokens, shared component styles, scrollbar styling, i18n toggle
 │   └── shared.js           # Shared frontend logic: workspace/session resolution, i18n, markdown rendering, slugs
-├── site/                   # Generated copy of the public marketing pages, served by the idmon-site Worker
-├── scripts/
-│   └── sync-site.mjs       # Copies the relevant public/ pages from public/ into site/
+├── widget-test/            # Permanent widget test page, served by the idmon-widget-test Worker
 ├── migrations/             # D1 migrations (0002 onward), for upgrading databases created earlier
 │   └── 0008_paddle_mirror.sql # Paddle customers/subscriptions mirror tables
 ├── tests/                  # Integration and headless tests, see Testing
 ├── .env.example            # Paddle variable names and non-secret Live price IDs
 ├── schema.sql              # Complete current D1 schema for fresh setups, including billing mirror tables
-├── wrangler.toml            # Main app Worker (operations-portal-rag) → app.idmon.app
-└── wrangler.site.toml        # Marketing site Worker (idmon-site) → idmon.app
+├── wrangler.toml            # The app Worker (operations-portal-rag) → idmon.app (app.idmon.app redirects here)
+└── wrangler.widget-test.toml # Widget test page Worker (idmon-widget-test) → workers.dev
 ```
 
 ## Known limitations
@@ -370,7 +367,6 @@ idmon/
 - Guest and Developer access still trust a client-supplied `X-Workspace-Id` header directly (no session backing them). This is acceptable for an anonymous-trial or demo workspace, but a logged-in account is always protected via server-side session lookup
 - The rate limiter uses per-IP buckets, so users behind a shared IP share a bucket; Cloudflare Turnstile (see [Accounts and sessions](#accounts-and-sessions)) supplements this against abuse spread across many IPs, but does not replace it
 - No version history: publishing overwrites the previous embedded version (the full text is always preserved in KV, but there is no diff-able revision log)
-- The public pricing page has a Live monthly/annual toggle and checkout buttons. `idmon.app` is approved by Paddle for checkout; `app.idmon.app`, where the in-app checkout actually runs, is still pending approval (resubmission in progress)
 - Internal resource names still use the old branding (Worker `operations-portal-rag`, Vectorize index `operations-portal-rag-index`, D1 database `rag-demo-tool-accounts`); they are not visible to end users
 - The Terms of Service and Privacy Policy are templates and do not yet include a legal entity identification
 

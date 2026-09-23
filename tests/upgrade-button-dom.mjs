@@ -70,7 +70,7 @@ async function boot({ usage, lang = "en", session = true, paddle = "mock", paddl
 
   const dom = new JSDOM(html, {
     runScripts: "dangerously",
-    url: "https://app.idmon.app/editor.html",
+    url: "https://idmon.app/editor.html",
     pretendToBeVisual: true,
     beforeParse(window) {
       window.localStorage.setItem("workspaceId", "ws-real");

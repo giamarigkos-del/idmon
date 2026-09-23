@@ -123,7 +123,7 @@ const realFetch = globalThis.fetch;
 async function call(env, mock, pathName, body, headers = { "X-Session-Token": TOKEN }, rawBody) {
   globalThis.fetch = mock.fetch;
   try {
-    const res = await worker.fetch(new Request("https://app.idmon.app" + pathName, {
+    const res = await worker.fetch(new Request("https://idmon.app" + pathName, {
       method: "POST", headers: { "Content-Type": "application/json", ...headers },
       body: rawBody !== undefined ? rawBody : JSON.stringify(body),
     }), env);

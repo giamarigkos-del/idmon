@@ -75,7 +75,7 @@ function makeEnv({ users = {}, sessions = {}, vars = {} } = {}) {
 }
 
 async function status(env, headers) {
-  const res = await worker.fetch(new Request("https://app.idmon.app/usage/status", { headers }), env);
+  const res = await worker.fetch(new Request("https://idmon.app/usage/status", { headers }), env);
   return { res, body: await res.json() };
 }
 

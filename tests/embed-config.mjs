@@ -82,7 +82,7 @@ function setSettings(workspaceId, settings) {
 
 async function getConfig(embedId, origin = ALLOWED_ORIGIN) {
   const headers = origin ? { Origin: origin } : {};
-  const res = await worker.fetch(new Request(`https://app.idmon.app/embed/${embedId}/config`, { headers }), env, { waitUntil() {} });
+  const res = await worker.fetch(new Request(`https://idmon.app/embed/${embedId}/config`, { headers }), env, { waitUntil() {} });
   let body = null;
   try { body = await res.json(); } catch (e) { /* όχι JSON */ }
   return { res, body };
@@ -90,7 +90,7 @@ async function getConfig(embedId, origin = ALLOWED_ORIGIN) {
 
 async function patchSettings(body) {
   const res = await worker.fetch(
-    new Request("https://app.idmon.app/workspace/settings", {
+    new Request("https://idmon.app/workspace/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json", "X-Workspace-Id": PROTECTED },
       body: JSON.stringify(body),
@@ -115,7 +115,7 @@ async function testAccessRules() {
   assert(!wrong.res.headers.get("Access-Control-Allow-Origin"), "μη επιτρεπόμενο domain: ΚΑΝΕΝΑ Access-Control-Allow-Origin");
   const ok = await getConfig("emb-basic1");
   assert(ok.res.status === 200, "επιτρεπόμενο domain -> 200");
-  const post = await worker.fetch(new Request("https://app.idmon.app/embed/emb-basic1/config", { method: "POST", headers: { Origin: ALLOWED_ORIGIN } }), env, { waitUntil() {} });
+  const post = await worker.fetch(new Request("https://idmon.app/embed/emb-basic1/config", { method: "POST", headers: { Origin: ALLOWED_ORIGIN } }), env, { waitUntil() {} });
   assert(post.status !== 200, "POST στο /config δεν εξυπηρετείται (μόνο GET)");
 }
 

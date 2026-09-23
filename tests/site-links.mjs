@@ -50,7 +50,7 @@ console.log("wrangler.toml and _redirects");
   const cfg = read(path.join(root, "wrangler.toml"));
   const active = cfg.replace(/#.*$/gm, "");
   check("the app Worker is bound to idmon.app", /pattern\s*=\s*"idmon\.app"/.test(active));
-  check("app.idmon.app stays bound (for the 301 redirect rule)", /pattern\s*=\s*"app\.idmon\.app"/.test(active));
+  check("app.idmon.app stays bound (for the 308 redirect rule)", /pattern\s*=\s*"app\.idmon\.app"/.test(active));
   check("assets come from ./public", /directory\s*=\s*"\.\/public"/.test(active));
   check("Google redirect URI is on idmon.app", active.includes('GOOGLE_REDIRECT_URI = "https://idmon.app/oauth/google/callback"'));
   const redirects = read(path.join(pub, "_redirects")).replace(/\r/g, "").trim().split("\n").map((l) => l.trim().split(/\s+/).join(" "));

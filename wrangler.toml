@@ -7,7 +7,7 @@ compatibility_date = "2026-08-01"
 # ΑΠΟΦΑΣΗ (23 Σεπτ. 2026): ολόκληρο το προϊόν ζει στο idmon.app (marketing
 # σελίδα στο /, εφαρμογή στο /home.html, /landing.html, /editor.html...).
 # Το app.idmon.app μένει ΜΟΝΟ ώστε να υπάρχει DNS record για το Cloudflare
-# Redirect Rule που στέλνει μόνιμα (301) κάθε app.idmon.app/... στο
+# Redirect Rule που στέλνει μόνιμα (308) κάθε app.idmon.app/... στο
 # idmon.app/... -- κανένα παλιό link δεν σπάει.
 #
 # workers_dev = false ΣΚΟΠΙΜΑ (απόφαση, όχι απλά το default του Wrangler).

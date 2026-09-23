@@ -4442,8 +4442,8 @@ export default {
 
     // Section R: μοναδικό μη-ευαίσθητο ρυθμιστικό στοιχείο που χρειάζεται
     // το frontend να μάθει από τον server -- το Turnstile SITE key διαφέρει
-    // ανάμεσα σε production (πραγματικό, δηλωμένο μόνο για idmon.app/
-    // app.idmon.app) και τοπική ανάπτυξη (δοκιμαστικό, δουλεύει από
+    // ανάμεσα σε production (πραγματικό, δηλωμένο για το idmon.app) και
+    // τοπική ανάπτυξη (δοκιμαστικό, δουλεύει από
     // οποιοδήποτε domain όπως το localhost). Το SECRET key ΔΕΝ περνάει ποτέ
     // από εδώ, μένει μόνο server-side στο verifyTurnstile().
     if (url.pathname === "/config/public" && request.method === "GET") {

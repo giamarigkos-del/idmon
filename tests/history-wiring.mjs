@@ -87,7 +87,7 @@ const HIST = [
 ];
 
 async function post(path, body, headers = {}) {
-  const req = new Request("https://app.idmon.app" + path, {
+  const req = new Request("https://idmon.app" + path, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body),

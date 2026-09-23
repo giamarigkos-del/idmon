@@ -56,7 +56,7 @@ async function loadPanel(queryFetch) {
 </body></html>`;
   const dom = new JSDOM(html, {
     runScripts: "dangerously",
-    url: "https://app.idmon.app/editor.html",
+    url: "https://idmon.app/editor.html",
     beforeParse(window) {
       window.localStorage.setItem("workspaceId", "ws-test");
       window.TextDecoder = TextDecoder;

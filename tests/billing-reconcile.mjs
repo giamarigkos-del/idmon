@@ -160,7 +160,7 @@ const subBody = (over = {}) => ({ data: {
 async function reconcile(env, mock, body, headers = { "X-Session-Token": TOKEN }, rawBody) {
   globalThis.fetch = mock.fetch;
   try {
-    const res = await worker.fetch(new Request("https://app.idmon.app/billing/reconcile", {
+    const res = await worker.fetch(new Request("https://idmon.app/billing/reconcile", {
       method: "POST", headers: { "Content-Type": "application/json", ...headers },
       body: rawBody !== undefined ? rawBody : JSON.stringify(body),
     }), env);
@@ -370,7 +370,7 @@ function sign(raw, secret = WEBHOOK_SECRET, ts = Math.floor(Date.now() / 1000)) 
 }
 async function webhook(env, event, { header, raw } = {}) {
   const body = raw !== undefined ? raw : JSON.stringify(event);
-  const res = await worker.fetch(new Request("https://app.idmon.app/paddle/webhook", {
+  const res = await worker.fetch(new Request("https://idmon.app/paddle/webhook", {
     method: "POST", headers: { "Content-Type": "application/json", "Paddle-Signature": header !== undefined ? header : sign(body) }, body,
   }), env);
   let json = null;

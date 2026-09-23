@@ -95,7 +95,7 @@ function buildHarness({ fetchImpl, sessionToken }) {
   </body></html>`;
 
   const dom = new JSDOM(html, {
-    url: "https://app.idmon.app/editor.html",
+    url: "https://idmon.app/editor.html",
     runScripts: "dangerously",
   });
   const { window } = dom;
