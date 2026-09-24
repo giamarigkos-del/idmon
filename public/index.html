@@ -76,7 +76,10 @@
   .billing-toggle{display:flex;justify-content:center;gap:2px;width:max-content;margin:0 auto 20px;padding:3px;background:var(--surface-2);border:1px solid var(--border);border-radius:7px;}
   .billing-toggle button{border:0;border-radius:5px;padding:8px 16px;background:transparent;color:var(--text-soft);font:inherit;font-size:.9rem;font-weight:700;cursor:pointer;}
   .billing-toggle button[aria-pressed="true"]{background:var(--accent);color:var(--bg);}
-  .annual-savings{min-height:1.2em;margin:0;color:var(--accent);font-size:.8rem;font-weight:700;}
+  /* Η γραμμή έκπτωσης κρατάει ΠΑΝΤΑ τον χώρο της, και στο Free όπου μένει πάντα κενή:
+     έτσι τα όρια ξεκινάνε στο ίδιο ύψος και στις τρεις κάρτες. Το line-height ίσο με το
+     min-height κάνει τη γραμμή ΙΔΙΑ σε ύψος είτε είναι κενή είτε γράφει "Κερδίζεις ...". */
+  .annual-savings{min-height:1.2em;line-height:1.2em;margin:0;color:var(--accent);font-size:.8rem;font-weight:700;}
   .plan .checkout-btn{width:100%;margin-top:auto;cursor:pointer;}
   .table-wrap{overflow-x:auto;margin:0 0 2.4em;}
   .faq h3{margin:1.4em 0 .3em;font-size:1.02rem;}
@@ -117,6 +120,7 @@
     <h2>Free</h2>
     <div class="price">0 €<small> / μήνα</small></div>
     <p class="vat">Χωρίς κάρτα</p>
+    <p class="annual-savings" aria-hidden="true"></p>
     <ul>
       <li><strong>100</strong> μηνύματα / μήνα</li>
       <li><strong>5</strong> έγγραφα</li>
@@ -216,6 +220,7 @@
     <h2>Free</h2>
     <div class="price">€0<small> / month</small></div>
     <p class="vat">No card needed</p>
+    <p class="annual-savings" aria-hidden="true"></p>
     <ul>
       <li><strong>100</strong> messages / month</li>
       <li><strong>5</strong> documents</li>
@@ -314,8 +319,10 @@
 
   var billingPeriod = 'monthly';
   var billingText = {
-    el: { monthly: ' / μήνα', annual: ' / έτος', savings: '2 μήνες δωρεάν', checkout: 'Αναβάθμιση' },
-    en: { monthly: ' / month', annual: ' / year', savings: '2 months free', checkout: 'Upgrade' },
+    // savings: ΠΟΣΟ που κερδίζει ο πελάτης με το ετήσιο (12 x μηνιαίο - ετήσιο), όχι
+    // "2 μήνες δωρεάν", που διαβαζόταν σαν δωρεάν δοκιμή ενώ η χρέωση γίνεται αμέσως.
+    el: { monthly: ' / μήνα', annual: ' / έτος', savings: function(n) { return 'Κερδίζεις ' + n + ' €'; }, checkout: 'Αναβάθμιση' },
+    en: { monthly: ' / month', annual: ' / year', savings: function(n) { return 'You save €' + n; }, checkout: 'Upgrade' },
   };
 
   function updateBillingPeriod(period) {
@@ -332,10 +339,11 @@
     });
     document.querySelectorAll('[data-savings]').forEach(function(savings) {
       var price = savings.previousElementSibling && savings.previousElementSibling.previousElementSibling;
-      var monthly = price && Number(price.querySelector('[data-monthly]')?.getAttribute('data-monthly'));
-      var annual = price && Number(price.querySelector('[data-monthly]')?.getAttribute('data-annual'));
-      var monthsFree = monthly && annual ? Math.round((monthly * 12 - annual) / monthly) : 0;
-      savings.textContent = billingPeriod === 'annual' && monthsFree > 0 ? text.savings : '';
+      var amounts = price && price.querySelector('[data-monthly]');
+      var monthly = amounts ? Number(amounts.getAttribute('data-monthly')) : 0;
+      var annual = amounts ? Number(amounts.getAttribute('data-annual')) : 0;
+      var saved = monthly > 0 && annual > 0 ? Math.round(monthly * 12 - annual) : 0;
+      savings.textContent = billingPeriod === 'annual' && saved > 0 ? text.savings(saved) : '';
     });
   }
 

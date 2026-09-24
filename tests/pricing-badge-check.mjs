@@ -96,6 +96,50 @@ function testUpgradeGoesToAccount() {
   assert(html.includes("'/landing.html?plan=' + plan + '&period=' + billingPeriod"), "το κουμπί πάει στο /landing.html?plan=...&period=...");
 }
 
+function testCardsAlign() {
+  // Το jsdom δεν μετράει ύψη, οπότε ελέγχουμε τη ΔΟΜΗ: κάθε κάρτα έχει την ίδια σειρά
+  // στοιχείων πριν τη λίστα με τα όρια (τιμή, ΦΠΑ/κάρτα, γραμμή έκπτωσης), άρα η λίστα
+  // ξεκινάει στο ίδιο ύψος και στις τρεις.
+  console.log("\n[Οι τρεις κάρτες έχουν την ίδια δομή πριν τα όρια]");
+  for (const lang of ["el", "en"]) {
+    const shapes = plansOf(blocks[lang]).map((plan) =>
+      [...plan.children].filter((c) => !c.classList.contains("badge")).map((c) => c.tagName.toLowerCase() + (c.className ? "." + c.className.split(" ")[0] : "")).slice(0, 5).join(" > ")
+    );
+    assert(shapes.length === 3 && shapes.every((sh) => sh === "h2 > div.price > p.vat > p.annual-savings > ul"), `${lang}: ίδια σειρά σε Free/Basic/Pro (${shapes.join(" | ")})`);
+    const freeSavings = plansOf(blocks[lang])[0].querySelector(".annual-savings");
+    if (lang === "el") {
+      const rule = (html.match(/\.annual-savings\{[^}]*\}/) || [""])[0];
+      assert(/min-height:1\.2em/.test(rule) && /line-height:1\.2em/.test(rule), "η γραμμή έκπτωσης έχει ίδιο ύψος κενή ή γεμάτη (min-height = line-height)");
+    }
+    assert(freeSavings && !freeSavings.hasAttribute("data-savings") && freeSavings.textContent === "", `${lang}: η γραμμή του Free είναι κενή και δεν γεμίζει ποτέ`);
+  }
+}
+
+async function testAnnualSavings() {
+  console.log("\n[Ετήσια: ποσό έκπτωσης, όχι «2 μήνες δωρεάν»]");
+  const shared = readFileSync(new URL("../public/shared.js", import.meta.url), "utf8");
+  for (const [lang, basic, pro] of [["el", "Κερδίζεις 58 €", "Κερδίζεις 118 €"], ["en", "You save €58", "You save €118"]]) {
+    const live = new JSDOM(html.replace('<script src="shared.js"></script>', () => "<script>" + shared + "</script>"), {
+      runScripts: "dangerously",
+      url: "https://idmon.app/",
+      beforeParse(w) { w.localStorage.setItem("uiLang", lang); },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    const d = live.window.document;
+    const plans = [...d.querySelectorAll(`#content-${lang} .plans .plan`)];
+    const savingsText = () => plans.map((p) => (p.querySelector(".annual-savings") || {}).textContent || "");
+    assert(savingsText().every((t) => t === ""), `${lang}: στο Μηνιαία όλες οι γραμμές έκπτωσης είναι κενές`);
+    d.querySelector(`#content-${lang} [data-billing="annual"]`).click();
+    const [free, b, p] = savingsText();
+    assert(b === basic && p === pro, `${lang}: Ετήσια -> "${b}" / "${p}"`);
+    assert(free === "", `${lang}: Ετήσια -> το Free μένει κενό (όχι NaN, όχι 0)`);
+    assert(!/2 μήνες δωρεάν|2 months free/.test(d.getElementById(`content-${lang}`).textContent), `${lang}: πουθενά "2 μήνες δωρεάν" / "2 months free"`);
+    d.querySelector(`#content-${lang} [data-billing="monthly"]`).click();
+    assert(savingsText().every((t) => t === ""), `${lang}: πίσω στο Μηνιαία, οι γραμμές αδειάζουν ξανά`);
+    live.window.close();
+  }
+}
+
 function testLimitsUnchanged() {
   console.log("\n[Τα όρια των πλάνων ΔΕΝ άλλαξαν]");
   for (const lang of ["el", "en"]) {
@@ -109,6 +153,8 @@ testBadgeMentions();
 testVatAndPricesUnchanged();
 testUpgradeGoesToAccount();
 testLimitsUnchanged();
+testCardsAlign();
+await testAnnualSavings();
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
