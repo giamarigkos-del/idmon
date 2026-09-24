@@ -1,0 +1,71 @@
+# Staging/sandbox Worker: ίδιος κώδικας με το production (operations-portal-rag),
+# τελείως δικοί του πόροι (βάση, index, KV) και Paddle SANDBOX. Σκοπός: να μπορείς
+# να δοκιμάσεις σενάρια πληρωμών (αποτυχημένη κάρτα, ακύρωση, ανανέωση) και αλλαγές
+# κώδικα σε πραγματικό deploy, χωρίς κανένα ρίσκο για το live προϊόν ή πραγματικούς
+# πελάτες. Ίδιο μοτίβο με το ήδη υπάρχον wrangler.widget-test.toml.
+#
+# Deploy:  npx wrangler deploy -c wrangler.staging.toml
+# Διεύθυνση: https://idmon-staging.<ο δικός σου υποτομέας>.workers.dev
+# (η ακριβής διεύθυνση φαίνεται στο τέλος του πρώτου deploy)
+
+name = "idmon-staging"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+# workers_dev = true ΣΚΟΠΙΜΑ (αντίθετα με το production): δεν χρειάζεται custom
+# domain εδώ, το προεπιλεγμένο *.workers.dev URL αρκεί για δοκιμές.
+workers_dev = true
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "idmon-staging-index"
+remote = true
+
+[[kv_namespaces]]
+binding = "DOCUMENT_REGISTRY"
+id = "bb6bab49eeb847e386b81ce444fa44db"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "idmon-staging-accounts"
+database_id = "61003d11-74c4-4cdb-af44-f402f046cf14"
+
+[ai]
+binding = "AI"
+
+[assets]
+directory = "./public"
+not_found_handling = "none"
+
+[vars]
+# Ίδιο "from" address· το Resend το δέχεται κανονικά και από δεύτερο Worker.
+NOTIFY_FROM_EMAIL = "notifications@idmon.app"
+
+# Google Drive connector: αφήνεται ΕΚΤΟΣ σκοπίμα στο staging (απόφαση 24 Σεπ 2026).
+# Αν χρειαστεί ποτέ, προστίθεται τότε ξεχωριστό OAuth redirect URI.
+
+# --- Paddle SANDBOX (όχι live!) ---
+# Αυτά είναι τα ΠΑΛΙΑ sandbox price IDs που είχαμε πριν το go-live, ακόμα έγκυρα
+# στο sandbox κατάλογο της Paddle. Το webhook secret και το API key του sandbox
+# ΔΕΝ μπαίνουν εδώ -- είναι secrets, βλ. Βήμα 4 παρακάτω.
+PADDLE_PRICE_BASIC = "pri_01m2x1f5kfbt7h0dxmm10knzxe"
+PADDLE_PRICE_PRO = "pri_01m2x1dep88bhsjw8qcstdtfhv"
+PADDLE_PRICE_BASIC_MONTHLY = "pri_01m2x1f5kfbt7h0dxmm10knzxe"
+PADDLE_PRICE_PRO_MONTHLY = "pri_01m2x1dep88bhsjw8qcstdtfhv"
+# Δεν υπήρχαν ετήσιες τιμές στο sandbox κατάλογο· αν τις χρειαστείς, φτιάξ' τες
+# στο sandbox dashboard (Test mode) και πρόσθεσε PADDLE_PRICE_BASIC_ANNUAL /
+# PADDLE_PRICE_PRO_ANNUAL εδώ, όπως στο production.
+
+PADDLE_CLIENT_TOKEN = "test_4883a067b5d39d9939b871bc7a4"
+PADDLE_ENV = "sandbox"
+
+# --- Turnstile: το επίσημο δοκιμαστικό site key της Cloudflare, "πάντα περνάει".
+# Ίδιο μοτίβο με το .dev.vars του production. Δεν χρειάζεται νέο widget.
+TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
+
+# --- AI Gateway: μπορείς να χρησιμοποιήσεις το ΙΔΙΟ gateway με το production
+# (δεν αφορά χρήματα πελατών, μόνο κόστος του λογαριασμού σου Google) -- ή να το
+# αφήσεις εντελώς έξω· τότε το askGemini() πάει απευθείας στο Gemini API χωρίς
+# gateway. Αν το θες, βάλε τα ίδια δύο vars με το production:
+# CF_ACCOUNT_ID = "12801f592f7e1b5fff2e7b2b4c661b90"
+# AI_GATEWAY_ID = "idmon-ai"
