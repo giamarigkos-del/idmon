@@ -168,6 +168,49 @@ function testNewFaqAndFooter() {
 }
 function window_origin_placeholder() { return "window.location.origin"; }
 
+
+function testStructuredData() {
+  console.log("\n[Δομημένα δεδομένα (JSON-LD): ταιριάζουν με ό,τι βλέπει πραγματικά ο επισκέπτης]");
+  const scripts = [...doc.querySelectorAll('script[type="application/ld+json"]')];
+  assert(scripts.length === 1, "υπάρχει ακριβώς ένα block JSON-LD", scripts.length);
+  if (!scripts.length) return;
+  let data;
+  try {
+    data = JSON.parse(scripts[0].textContent.replace(/<\\\//g, "</"));
+    assert(true, "το JSON-LD είναι έγκυρο JSON");
+  } catch (err) {
+    assert(false, "το JSON-LD είναι έγκυρο JSON", String(err));
+    return;
+  }
+  const graph = data["@graph"] || [];
+  const org = graph.find((n) => n["@type"] === "Organization");
+  const app = graph.find((n) => n["@type"] === "SoftwareApplication");
+  const faqLd = graph.find((n) => n["@type"] === "FAQPage");
+  assert(!!org && org.name === "Idmon" && org.url === "https://idmon.app/", "Organization: όνομα και url σωστά");
+  assert(!org.foundingDate && !org.address && !org.taxID, "Organization: καμία επινοημένη νομική λεπτομέρεια (επωνυμία/ΑΦΜ/έδρα δεν υπάρχουν ακόμα)");
+  assert(!!app && app.name === "Idmon", "SoftwareApplication: υπάρχει");
+  assert(!("aggregateRating" in app) && !("review" in app), "SoftwareApplication: ΚΑΝΕΝΑ ψεύτικο rating ή review (δεν υπάρχουν ακόμα πραγματικοί πελάτες)");
+
+  // Οι τιμές στο JSON-LD πρέπει να είναι ΑΚΡΙΒΩΣ οι τιμές που βλέπει ο επισκέπτης (μηνιαίες,
+  // η προεπιλεγμένη περίοδος), όχι κάτι που ξέφυγε όταν άλλαξε κάποια τιμή στη σελίδα.
+  const plans = plansOf(blocks.el);
+  const visiblePrices = { Free: "0", Basic: text(plans[1].querySelector("[data-monthly]")), Pro: text(plans[2].querySelector("[data-monthly]")) };
+  const ldPrices = Object.fromEntries((app.offers || []).map((o) => [o.name, String(o.price)]));
+  assert(JSON.stringify(ldPrices) === JSON.stringify(visiblePrices), "SoftwareApplication.offers: ίδιες τιμές με τις κάρτες (Free/Basic/Pro)", JSON.stringify(ldPrices));
+
+  // Οι ερωτήσεις/απαντήσεις του FAQPage πρέπει να ταιριάζουν ΑΚΡΙΒΩΣ με το ορατό ελληνικό FAQ:
+  // ένα σχόλιο Google είναι ότι τα δομημένα δεδομένα πρέπει πάντα να αντικατοπτρίζουν το
+  // περιεχόμενο της σελίδας.
+  const visibleFaq = [...blocks.el.querySelectorAll(".faq h3")].map((h3) => ({
+    q: text(h3),
+    a: text(h3.nextElementSibling).replace(/\s*Δες.*Επιστροφών\.?$/, "").trim(),
+  }));
+  const ldFaq = (faqLd.mainEntity || []).map((n) => ({ q: n.name, a: n.acceptedAnswer.text }));
+  assert(ldFaq.length === visibleFaq.length && ldFaq.length === 9, `FAQPage: εννέα ερωτήσεις, όσες και οι ορατές (${ldFaq.length})`);
+  const questionsMatch = ldFaq.every((item, i) => item.q === visibleFaq[i].q);
+  assert(questionsMatch, "FAQPage: οι ερωτήσεις ταιριάζουν, με την ίδια σειρά, με το ορατό FAQ", JSON.stringify(ldFaq.map((f) => f.q)));
+}
+
 function testLimitsUnchanged() {
   console.log("\n[Τα όρια των πλάνων ΔΕΝ άλλαξαν]");
   for (const lang of ["el", "en"]) {
@@ -181,6 +224,7 @@ testBadgeMentions();
 testVatAndPricesUnchanged();
 testUpgradeGoesToAccount();
 testNewFaqAndFooter();
+testStructuredData();
 testLimitsUnchanged();
 testCardsAlign();
 await testAnnualSavings();

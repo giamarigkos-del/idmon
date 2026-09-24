@@ -76,7 +76,10 @@ console.log("no broken links, and the legal pages are reachable from the navigat
         if (
         !/^https:\/\/cdn\.paddle\.com(\/|$)/.test(r) &&
         // Developer credit in the footer (Sep 24 2026): a known, deliberate external link, not a broken/stray one.
-        r !== "https://giamarigkos-del.github.io/portfolio/"
+        r !== "https://giamarigkos-del.github.io/portfolio/" &&
+        // Self-referencing absolute links (Sep 24 2026 SEO pass): canonical tags, the widget embed
+        // example. Not "external" -- they point back at idmon.app itself; checked properly above.
+        !/^https:\/\/idmon\.app\//.test(r)
       ) external.push(r);
         continue;
       }
@@ -100,6 +103,54 @@ console.log("the app never sends people back to / (now the marketing page)");
     const html = read(path.join(pub, page));
     const bad = (html.match(/href="\/"|location\.href\s*=\s*"\/"|location\.replace\("\/"\)/g) || []).length;
     check(`${page}: no link or redirect to "/"`, bad === 0, bad + " found");
+  }
+}
+
+console.log("robots.txt and sitemap.xml (Sep 24 2026 SEO pass)");
+{
+  const robots = read(path.join(pub, "robots.txt"));
+  check("robots.txt exists", robots.length > 0);
+  check("robots.txt allows crawling by default", /^Allow:\s*\/\s*$/m.test(robots), robots);
+  check("robots.txt keeps the app-only pages out (editor/home/article)", ["editor.html", "home.html", "article.html"].every((p) => new RegExp("Disallow:\\s*/" + p + "\\s*$", "m").test(robots)), robots);
+  check("robots.txt points to the sitemap", robots.includes("Sitemap: https://idmon.app/sitemap.xml"));
+
+  const sitemapPath = path.join(pub, "sitemap.xml");
+  check("sitemap.xml exists", fs.existsSync(sitemapPath));
+  const sitemap = read(sitemapPath);
+  let locs = [];
+  try {
+    locs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
+    check("sitemap.xml is well-formed XML", true);
+  } catch (err) {
+    check("sitemap.xml is well-formed XML", false, String(err));
+  }
+  const expected = ["https://idmon.app/", "https://idmon.app/terms.html", "https://idmon.app/privacy.html", "https://idmon.app/refunds.html"];
+  check("sitemap.xml lists exactly the public marketing/legal pages", locs.length === expected.length && expected.every((u) => locs.includes(u)), locs.join(", "));
+  check("sitemap.xml does NOT list /landing or any app page (thin/private content)", !locs.some((u) => /landing|editor|home\.html|article\.html/.test(u)), locs.join(", "));
+}
+
+console.log("canonical tags on every public page");
+{
+  const expectedCanonical = {
+    "index.html": "https://idmon.app/",
+    "landing.html": "https://idmon.app/landing",
+    "terms.html": "https://idmon.app/terms.html",
+    "privacy.html": "https://idmon.app/privacy.html",
+    "refunds.html": "https://idmon.app/refunds.html",
+  };
+  for (const [page, url] of Object.entries(expectedCanonical)) {
+    const html = read(path.join(pub, page));
+    const m = html.match(/<link rel="canonical" href="([^"]+)">/);
+    check(`${page}: has a canonical tag pointing to itself`, m && m[1] === url, m ? m[1] : "missing");
+  }
+}
+
+console.log("the Greek content is visible without running JavaScript (AI/read-mode crawlers)");
+{
+  for (const page of ["index.html", "privacy.html", "refunds.html", "terms.html"]) {
+    const html = read(path.join(pub, page));
+    check(`${page}: .lang-block still defaults to hidden (English)`, /\.lang-block\{display:none;\}/.test(html));
+    check(`${page}: #content-el (Greek) is shown by default, without needing JS`, /#content-el\{display:block;\}/.test(html));
   }
 }
 

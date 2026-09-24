@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Μόνο οι δημόσιες, ουσιαστικές σελίδες: όχι /landing (μεταβατική οθόνη εγγραφής,
+     καμία αξία περιεχομένου), ούτε οι σελίδες εφαρμογής (βλ. robots.txt).
+     Ενημέρωσε το lastmod όταν αλλάζει ουσιαστικά το περιεχόμενο μιας σελίδας. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://idmon.app/</loc>
+    <lastmod>2026-09-24</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://idmon.app/terms.html</loc>
+    <lastmod>2026-09-24</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://idmon.app/privacy.html</loc>
+    <lastmod>2026-09-24</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://idmon.app/refunds.html</loc>
+    <lastmod>2026-09-24</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.3</priority>
+  </url>
+</urlset>

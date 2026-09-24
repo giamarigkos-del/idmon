@@ -24,6 +24,8 @@
 <meta charset="UTF-8">
 <title>Πολιτική Απορρήτου — Idmon</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="canonical" href="https://idmon.app/privacy.html">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="shared.css">
 <style>
   /* Ίδια ζεστή παλέτα με το landing της εφαρμογής (override του --accent του shared.css, που είναι ουδέτερο γκρι). */
@@ -33,6 +35,13 @@
   .page-wrap{max-width:780px;margin:0 auto;padding:40px 20px 80px;}
   .meta{color:var(--text-soft);font-size:0.9rem;margin-bottom:2em;}
   .lang-block{display:none;}
+
+  /* SEO/AI (24 Σεπ 2026): μέχρι εδώ ΚΑΝΕΝΑ .lang-block δεν φαινόταν χωρίς JavaScript --
+     πολλά bots (AI εργαλεία ειδικά) διαβάζουν απλό HTML χωρίς να τρέχουν JS. Το ελληνικό
+     μπλοκ (η κύρια αγορά) είναι τώρα ορατό εξ ορισμού με σκέτο CSS (ID selector, πιο δυνατό
+     από το .lang-block, οπότε δεν χρειάζεται αλλαγή σειράς). Το JS παρακάτω συνεχίζει να
+     δουλεύει κανονικά: βάζει inline style, που νικάει πάντα το CSS. */
+  #content-el{display:block;}
   .footer-links{margin-top:3em;padding-top:1.2em;border-top:1px solid var(--border);font-size:.9rem;color:var(--text-soft);}
   .footer-links a{color:var(--text-soft);}
 </style>

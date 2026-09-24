@@ -46,6 +46,137 @@
 <title>Τιμολόγηση — Idmon</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Idmon: chatbot για το site σου που απαντά μόνο από τα δικά σου έγγραφα. Δοκίμασέ το δωρεάν. Basic 29 €/μήνα, Pro 59 €/μήνα, με ΦΠΑ.">
+<link rel="canonical" href="https://idmon.app/">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<!-- SEO/AI (24 Σεπ 2026): δομημένα δεδομένα βασισμένα στο ΕΛΛΗΝΙΚΟ περιεχόμενο
+     (προεπιλεγμένη γλώσσα, βλ. #content-el παραπάνω). Πρέπει να ταιριάζει ΠΑΝΤΑ με ό,τι
+     είναι ορατό στη σελίδα: το tests/pricing-badge-check.mjs το ελέγχει αυτόματα.
+     Αν η αγγλική γίνει ποτέ η προεπιλογή, χρειάζεται νέο JSON-LD στα αγγλικά εδώ. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://idmon.app/#organization",
+      "name": "Idmon",
+      "url": "https://idmon.app/",
+      "logo": "https://idmon.app/favicon.svg"
+    },
+    {
+      "@type": "SoftwareApplication",
+      "name": "Idmon",
+      "url": "https://idmon.app/",
+      "description": "Ένας συνομιλιακός βοηθός (chatbot) για το site σου: ανεβάζεις τα δικά σου έγγραφα και οι επισκέπτες σου παίρνουν απαντήσεις μόνο από αυτά, μέσα από ένα widget που ενσωματώνεις στον ιστότοπό σου.",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "publisher": {
+        "@id": "https://idmon.app/#organization"
+      },
+      "offers": [
+        {
+          "@type": "Offer",
+          "name": "Free",
+          "price": "0",
+          "priceCurrency": "EUR",
+          "url": "https://idmon.app/"
+        },
+        {
+          "@type": "Offer",
+          "name": "Basic",
+          "price": "29",
+          "priceCurrency": "EUR",
+          "url": "https://idmon.app/"
+        },
+        {
+          "@type": "Offer",
+          "name": "Pro",
+          "price": "59",
+          "priceCurrency": "EUR",
+          "url": "https://idmon.app/"
+        }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Τι μετράει ως «μήνυμα»;",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Κάθε ερώτηση επισκέπτη που απαντάται από το Idmon μετράει ως ένα μήνυμα. Το όριο ισχύει ανά χώρο εργασίας και ανά μήνα, και μπορείς να δεις πόσα έχεις χρησιμοποιήσει μέσα στην εφαρμογή."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Τι γίνεται αν φτάσω το όριο;",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Οι επισκέπτες σου βλέπουν ένα γενικό μήνυμα προσωρινής μη διαθεσιμότητας και εσύ βλέπεις ειδοποίηση μέσα στην εφαρμογή. Το widget ξαναδουλεύει όταν ανανεωθεί το όριο τον επόμενο μήνα ή αν αναβαθμίσεις πλάνο."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Τι είναι το «Powered by Idmon»;",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Στα πλάνα Free και Basic, το widget δείχνει μια διακριτική γραμμή «Powered by Idmon» κάτω από το πεδίο ερώτησης. Στο Pro δεν εμφανίζεται. Αλλάζει αυτόματα όταν αλλάζεις πλάνο, χωρίς να χρειάζεται να αλλάξεις τον κώδικα που έχεις βάλει στο site σου."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Μπορώ να αλλάξω ή να ακυρώσω οποτεδήποτε;",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Ναι. Από το Basic στο Pro αλλάζεις μέσα στην εφαρμογή και πληρώνεις μόνο τη διαφορά για το υπόλοιπο της περιόδου. Την ακύρωση και τα τιμολόγιά σου τα βρίσκεις στη «Διαχείριση συνδρομής». Δες και την Πολιτική Ακύρωσης & Επιστροφών."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Πώς γίνονται οι πληρωμές και ο ΦΠΑ;",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Οι πληρωμές γίνονται μέσω της Paddle, που λειτουργεί ως Merchant of Record: εισπράττει την πληρωμή, υπολογίζει και αποδίδει τον ΦΠΑ και εκδίδει την απόδειξη. Οι τιμές που βλέπεις εδώ είναι οι τελικές τιμές με ΦΠΑ."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Πού πηγαίνουν τα έγγραφά μου;",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Τα έγγραφα και οι ερωτήσεις χρησιμοποιούνται μόνο για να παραχθούν οι απαντήσεις, και αποστέλλονται στους παρόχους που χρειάζεται για αυτό (Cloudflare για τη φιλοξενία, Google Gemini API για τις απαντήσεις). Δες την Πολιτική Απορρήτου για την πλήρη λίστα παρόχων, πού βρίσκονται τα δεδομένα και τα δικαιώματά σου."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Πώς μπαίνει το widget στο site μου;",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Αντιγράφεις μία γραμμή κώδικα από το πάνελ ενσωμάτωσης μέσα στην εφαρμογή και την επικολλάς στο site σου. Καμία άλλη ρύθμιση δεν χρειάζεται στον κώδικά σου: χρώμα, όνομα, γλώσσα και τα υπόλοιπα αλλάζουν μέσα στην εφαρμογή και ενημερώνονται αυτόματα."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Ποιους τύπους εγγράφων υποστηρίζει;",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Ανέβασμα αρχείων (.txt, .md, .pdf) ή συγχρονισμός απευθείας από ένα URL, ώστε το περιεχόμενο να ανανεώνεται όταν αλλάζει η πηγή."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Μπορώ να αλλάξω την εμφάνιση του widget;",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Ναι: χρώμα, όνομα βοηθού, γλώσσα, θέση στην οθόνη και στοιχεία επικοινωνίας ρυθμίζονται μέσα στην εφαρμογή, χωρίς να χρειάζεται να ξαναβάλεις κώδικα στο site σου."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
 <link rel="stylesheet" href="shared.css">
 <style>
   /* Ίδια ζεστή παλέτα με το landing της εφαρμογής (override του --accent του shared.css, που είναι ουδέτερο γκρι). */
@@ -54,6 +185,13 @@
   .topbar a.brand{color:var(--text);font-weight:700;text-decoration:none;}
   .page-wrap{max-width:980px;margin:0 auto;padding:40px 20px 80px;}
   .lang-block{display:none;}
+
+  /* SEO/AI (24 Σεπ 2026): μέχρι εδώ ΚΑΝΕΝΑ .lang-block δεν φαινόταν χωρίς JavaScript --
+     πολλά bots (AI εργαλεία ειδικά) διαβάζουν απλό HTML χωρίς να τρέχουν JS. Το ελληνικό
+     μπλοκ (η κύρια αγορά) είναι τώρα ορατό εξ ορισμού με σκέτο CSS (ID selector, πιο δυνατό
+     από το .lang-block, οπότε δεν χρειάζεται αλλαγή σειράς). Το JS παρακάτω συνεχίζει να
+     δουλεύει κανονικά: βάζει inline style, που νικάει πάντα το CSS. */
+  #content-el{display:block;}
   .lead{color:var(--text-soft);font-size:1.05rem;margin:0 0 1.6em;max-width:640px;}
   .plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin:0 0 2.4em;}
   .plan{border:1px solid var(--border);border-radius:10px;padding:22px 20px;display:flex;flex-direction:column;gap:6px;position:relative;}

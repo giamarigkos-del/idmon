@@ -1,0 +1,9 @@
+# Δημόσιες σελίδες: επιτρέπονται. Σελίδες εφαρμογής (χρειάζονται λογαριασμό,
+# προσωπικό περιεχόμενο, καμία αξία για αναζήτηση): εκτός.
+User-agent: *
+Allow: /
+Disallow: /editor.html
+Disallow: /home.html
+Disallow: /article.html
+
+Sitemap: https://idmon.app/sitemap.xml
