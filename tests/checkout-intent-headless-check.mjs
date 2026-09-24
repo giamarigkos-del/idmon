@@ -272,6 +272,29 @@ console.log("editor: monthly / annual in the upgrade panel");
   check("and the monthly checkout works", e.calls.checkoutOpen.length === 1 && e.calls.checkoutOpen[0].items[0].priceId === "pri_bm");
 }
 
+console.log("editor: the account email is prefilled and locked in the checkout");
+{
+  const e = await bootEditor({ search: "?checkout=basic&period=monthly", status: usage(OFFER({ email: "owner@example.com" })) });
+  const o = e.calls.checkoutOpen[0];
+  check("the checkout gets the account email", o && o.customer && o.customer.email === "owner@example.com", JSON.stringify(o));
+  check("and the email cannot be changed (allowLogout false)", o && o.settings.allowLogout === false);
+  check("the workspace id is still sent", o && o.customData.workspace_id === "ws-real");
+}
+{
+  const e = await bootEditor({ status: usage(OFFER({ email: "owner@example.com" })) });
+  e.doc.getElementById("upgradeBtn").click();
+  await sleep(40);
+  e.doc.querySelector('.upgrade-choose-btn[data-plan="pro"]').click();
+  await sleep(20);
+  const o = e.calls.checkoutOpen[0];
+  check("also when choosing from the upgrade panel", o && o.customer && o.customer.email === "owner@example.com" && o.settings.allowLogout === false);
+}
+{
+  const e = await bootEditor({ search: "?checkout=basic&period=monthly", status: usage(OFFER()) });
+  const o = e.calls.checkoutOpen[0];
+  check("no email from the server: no customer field, email stays editable (as before)", o && !o.customer && o.settings.allowLogout === undefined, JSON.stringify(o));
+}
+
 console.log("editor: Switch to Pro keeps the billing period in the text");
 for (const [period, word] of [["annual", "year"], ["monthly", "month"], [undefined, "month"]]) {
   const preview = { toPlan: "pro", period, currency: "EUR", chargeToday: "2990", recurring: period === "annual" ? "59000" : "5900", nextBilledAt: "2026-10-19T19:00:00Z" };

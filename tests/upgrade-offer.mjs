@@ -32,9 +32,9 @@ function makeEnv({ users = {}, sessions = {}, vars = {} } = {}) {
                 const u = users[args[0]];
                 return u ? { plan: u.plan, paddle_customer_id: u.paddle_customer_id ?? null, paddle_subscription_id: u.paddle_subscription_id ?? null, paddle_status: u.paddle_status ?? null } : null;
               }
-              if (sql.includes("SELECT paddle_status FROM users")) {
+              if (sql.includes("SELECT paddle_status, email FROM users")) {
                 const u = users[args[0]];
-                return u ? { paddle_status: u.paddle_status ?? null } : null;
+                return u ? { paddle_status: u.paddle_status ?? null, email: u.email ?? null } : null;
               }
               throw new Error("Unexpected SQL in test: " + sql);
             },
@@ -208,6 +208,29 @@ console.log("monthly and annual prices in the offer");
   } });
   const { body } = await status(env, { "X-Workspace-Id": "ws-free" });
   check("the _MONTHLY names alone are enough", body.upgrade && body.upgrade.offers.map((o) => o.priceId).join() === "pri_bm,pri_pm", JSON.stringify(body.upgrade));
+}
+
+console.log("account email for the checkout (only with a real session)");
+{
+  const future = new Date(Date.now() + 86400000).toISOString();
+  const users = { "ws-real": { plan: "free", email: "owner@example.com" } };
+  const sessions = { tok123: { workspace_id: "ws-real", expires_at: future } };
+  {
+    const { body } = await status(makeEnv({ users, sessions }), { "X-Session-Token": "tok123" });
+    check("with a session: the offer carries the account email", body.upgrade && body.upgrade.email === "owner@example.com", JSON.stringify(body.upgrade));
+  }
+  {
+    const { body } = await status(makeEnv({ users, sessions }), { "X-Workspace-Id": "ws-real" });
+    check("without a session (only X-Workspace-Id): NO email, the offer is otherwise the same", body.upgrade && body.upgrade.email === null && body.upgrade.offers.length === 2, JSON.stringify(body.upgrade));
+  }
+  {
+    const { res } = await status(makeEnv({ users, sessions }), { "X-Session-Token": "wrong-token", "X-Workspace-Id": "ws-real" });
+    check("a wrong session token does not fall back to X-Workspace-Id (no offer, no email)", res.status === 400, String(res.status));
+  }
+  {
+    const { body } = await status(makeEnv({ users: { "ws-real": { plan: "free" } }, sessions }), { "X-Session-Token": "tok123" });
+    check("account without an email on file: email is null", body.upgrade && body.upgrade.email === null);
+  }
 }
 
 console.log("\n" + passed + " passed, " + failed + " failed");

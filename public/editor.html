@@ -2501,11 +2501,20 @@
     setUpgradeStatus("");
     try {
       const paddle = await loadPaddle(upgradeOffer);
-      paddle.Checkout.open({
+      // Το email του λογαριασμού μπαίνει ήδη συμπληρωμένο και ΚΛΕΙΔΩΜΕΝΟ
+      // (allowLogout: false), όπως στο παράδειγμα της Paddle για συνδεδεμένους
+      // πελάτες: αποδείξεις και μηνύματα της Paddle πάνε στο ίδιο email με το
+      // οποίο ο πελάτης μπαίνει στο Idmon. Χωρίς email από τον server, όπως πριν.
+      const options = {
         items: [{ priceId, quantity: 1 }],
         customData: { workspace_id: upgradeOffer.workspaceId },
         settings: { displayMode: "overlay", locale: getLang() === "el" ? "el" : "en" },
-      });
+      };
+      if (upgradeOffer.email) {
+        options.customer = { email: upgradeOffer.email };
+        options.settings.allowLogout = false;
+      }
+      paddle.Checkout.open(options);
     } catch (err) {
       setUpgradeStatus(t("upgradeLoadError"));
     }

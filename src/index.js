@@ -1806,12 +1806,17 @@ function paddlePriceIds(env) {
   };
 }
 
-async function buildUpgradeOffer(env, workspaceId, plan) {
+// withEmail: true ΜΟΝΟ όταν το αίτημα έχει έγκυρο session (X-Session-Token). Τότε η
+// προσφορά περιέχει και το email του λογαριασμού, ώστε το checkout να το έχει ήδη
+// συμπληρωμένο και κλειδωμένο (Paddle email = email λογαριασμού). Χωρίς session
+// (παλιό flow με σκέτο X-Workspace-Id) ΔΕΝ επιστρέφουμε email: ένα workspace id δεν
+// αποδεικνύει ότι ο αιτών είναι ο κάτοχος του λογαριασμού.
+async function buildUpgradeOffer(env, workspaceId, plan, withEmail = false) {
   if (workspaceId === PROTECTED_WORKSPACE_ID) return null;
   if (plan !== "free" && plan !== "basic") return null;
   if (!env.PADDLE_CLIENT_TOKEN || !env.PADDLE_ENV) return null;
 
-  const row = await env.DB.prepare("SELECT paddle_status FROM users WHERE workspace_id = ?").bind(workspaceId).first();
+  const row = await env.DB.prepare("SELECT paddle_status, email FROM users WHERE workspace_id = ?").bind(workspaceId).first();
   if (!row) return null;
   if (row.paddle_status && PADDLE_LIVE_SUBSCRIPTION_STATUSES.has(row.paddle_status)) return null;
 
@@ -1833,6 +1838,7 @@ async function buildUpgradeOffer(env, workspaceId, plan) {
     clientToken: env.PADDLE_CLIENT_TOKEN,
     workspaceId,
     currentPlan: plan,
+    email: withEmail && row.email ? row.email : null,
     offers: candidates.map((c) => ({
       plan: c.plan,
       priceId: c.priceId,
@@ -1881,7 +1887,10 @@ async function handleGetUsageStatus(request, env) {
   if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
 
   const plan = await getPlanForWorkspace(env, workspaceId);
-  const upgrade = await buildUpgradeOffer(env, workspaceId, plan);
+  // Αν υπάρχει X-Session-Token, το resolveWorkspaceId το έχει ήδη ελέγξει (αλλιώς θα
+  // είχε επιστρέψει null και θα είχαμε σταματήσει πιο πάνω).
+  const hasSession = !!request.headers.get("X-Session-Token");
+  const upgrade = await buildUpgradeOffer(env, workspaceId, plan, hasSession);
   const manage = await buildManageInfo(env, workspaceId);
   const limits = PLAN_LIMITS[plan] || PLAN_LIMITS[DEFAULT_PLAN];
   // Σεβόμαστε το ίδιο MONTHLY_MESSAGE_LIMIT_OVERRIDE με το checkAndIncrementUsage()
