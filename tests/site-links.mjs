@@ -73,7 +73,11 @@ console.log("no broken links, and the legal pages are reachable from the navigat
     for (const r of refs) {
       if (r.startsWith("mailto:") || r.startsWith("#")) continue;
       if (/^https?:\/\//.test(r)) {
-        if (!/^https:\/\/cdn\.paddle\.com(\/|$)/.test(r)) external.push(r);
+        if (
+        !/^https:\/\/cdn\.paddle\.com(\/|$)/.test(r) &&
+        // Developer credit in the footer (Sep 24 2026): a known, deliberate external link, not a broken/stray one.
+        r !== "https://giamarigkos-del.github.io/portfolio/"
+      ) external.push(r);
         continue;
       }
       const p = "/" + r.replace(/^\//, "").split(/[?#]/)[0];

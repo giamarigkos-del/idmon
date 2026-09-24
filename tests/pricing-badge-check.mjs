@@ -140,6 +140,34 @@ async function testAnnualSavings() {
   }
 }
 
+
+function testNewFaqAndFooter() {
+  console.log("\n[Νέες ερωτήσεις FAQ: embed κώδικας, τύποι εγγράφων, προσαρμογή· footer με developer credit]");
+  for (const lang of ["el", "en"]) {
+    const block = blocks[lang];
+    const h3s = [...block.querySelectorAll(".faq h3")].map(text);
+    if (lang === "el") {
+      assert(h3s.includes("Πώς μπαίνει το widget στο site μου;"), "el: υπάρχει η ερώτηση για το embed");
+      assert(h3s.includes("Ποιους τύπους εγγράφων υποστηρίζει;"), "el: υπάρχει η ερώτηση για τους τύπους εγγράφων");
+      assert(h3s.includes("Μπορώ να αλλάξω την εμφάνιση του widget;"), "el: υπάρχει η ερώτηση για προσαρμογή εμφάνισης");
+    } else {
+      assert(h3s.includes("How does the widget go on my site?"), "en: embed question present");
+      assert(h3s.includes("What document types are supported?"), "en: document types question present");
+      assert(h3s.includes("Can I customize how the widget looks?"), "en: customization question present");
+    }
+    const faqText = text(block.querySelector(".faq"));
+    assert(faqText.includes('data-embed-id="emb-...') && faqText.includes("widget.js"), `${lang}: το παράδειγμα κώδικα δείχνει widget.js και data-embed-id`);
+    assert(!faqText.includes(window_origin_placeholder(block)), `${lang}: το παράδειγμα χρησιμοποιεί το πραγματικό domain, όχι placeholder`);
+    const docsFaqText = faqText;
+    assert(/\.txt/.test(docsFaqText) && /\.pdf/.test(docsFaqText), `${lang}: αναφέρονται .txt και .pdf`);
+    const footer = text(block.querySelector(".footer-links"));
+    assert(footer.includes("Developer:") && footer.includes("Ioannis Marigkos"), `${lang}: το footer έχει "Developer: Ioannis Marigkos"`);
+    const devLink = [...block.querySelectorAll(".footer-links a")].find((a) => text(a) === "Ioannis Marigkos");
+    assert(devLink && devLink.getAttribute("href") === "https://giamarigkos-del.github.io/portfolio/", `${lang}: το link πάει στο portfolio, όχι στο idmon.app ή allού`);
+  }
+}
+function window_origin_placeholder() { return "window.location.origin"; }
+
 function testLimitsUnchanged() {
   console.log("\n[Τα όρια των πλάνων ΔΕΝ άλλαξαν]");
   for (const lang of ["el", "en"]) {
@@ -152,6 +180,7 @@ testBothLanguagesPresent();
 testBadgeMentions();
 testVatAndPricesUnchanged();
 testUpgradeGoesToAccount();
+testNewFaqAndFooter();
 testLimitsUnchanged();
 testCardsAlign();
 await testAnnualSavings();
