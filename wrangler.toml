@@ -38,6 +38,12 @@ binding = "DB"
 database_name = "rag-demo-tool-accounts"
 database_id = "240959e8-e3b3-48e5-937e-846f109454ca"
 
+# Section R, Στάδιο Β: Workers AI για την ΕΦΕΔΡΕΙΑ της σύνταξης απάντησης όταν το
+# Gemini αποτύχει (βλ. askGemini στο src/index.js). Στο wrangler dev καλεί πάντα το
+# πραγματικό Workers AI (δεν υπάρχει τοπική προσομοίωση) -- μετράει στη χρήση.
+[ai]
+binding = "AI"
+
 [assets]
 directory = "./public"
 not_found_handling = "none"

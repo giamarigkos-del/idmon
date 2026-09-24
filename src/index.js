@@ -1468,9 +1468,22 @@ function geminiGatewayUrl(env, modelAndAction) {
   return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${env.AI_GATEWAY_ID}/google-ai-studio/v1beta/models/${modelAndAction}`;
 }
 
-async function askGemini(context, question, env, history = []) {
-  const prompt = buildRagPrompt(context, question, history);
+// Section R, Στάδιο Β: εφεδρεία για τη ΣΥΝΤΑΞΗ της απάντησης (ποτέ για τα
+// embeddings: άλλο μοντέλο embeddings δίνει ασύμβατα διανύσματα με όσα είναι ήδη
+// στο Vectorize, άρα σιωπηλά λάθος αναζήτηση). Αν το Gemini αποτύχει (σφάλμα HTTP,
+// κενή απάντηση, ή δεν απαντήσει μέσα σε GEMINI_TIMEOUT_MS), την ίδια ερώτηση με το
+// ΙΔΙΟ prompt την απαντάει ένα μοντέλο του Workers AI. Μια πλήρης πτώση του Gemini
+// (και embeddings) εξακολουθεί να δίνει καθαρό μήνυμα σφάλματος, όπως πριν.
+const GEMINI_TIMEOUT_MS = 20000;
+const FALLBACK_LLM_MODEL = "@cf/google/gemma-4-26b-a4b-it";
 
+// true μόνο αν το έχεις βάλει στο .dev.vars για ΤΟΠΙΚΗ δοκιμή της εφεδρείας
+// (FORCE_LLM_FALLBACK=1). Στο wrangler.toml / στην παραγωγή δεν υπάρχει.
+function forceLlmFallback(env) {
+  return env.FORCE_LLM_FALLBACK === "1";
+}
+
+async function askGeminiOnly(prompt, env) {
   const response = await fetch(
     `${geminiGatewayUrl(env, "gemini-3.6-flash:generateContent")}?key=${env.GEMINI_API_KEY}`,
     {
@@ -1482,17 +1495,80 @@ async function askGemini(context, question, env, history = []) {
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
       }),
+      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     }
   );
 
-  const data = await response.json();
-
+  const data = await response.json().catch(() => null);
   const answer = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!response.ok || !answer) {
+    throw new Error(`Gemini generation failed (HTTP ${response.status}): ` + JSON.stringify(data).slice(0, 300));
+  }
+  return answer;
+}
+
+// Workers AI (binding "AI" στο wrangler.toml). Το rejectIfBusy κάνει την κλήση να
+// αποτύχει αμέσως αν δεν υπάρχει διαθέσιμη χωρητικότητα, αντί να περιμένει σε ουρά:
+// ο επισκέπτης έχει ήδη περιμένει μία φορά για το Gemini.
+//
+// ΣΗΜΑΝΤΙΚΟ (βρέθηκε στην πρώτη πραγματική δοκιμή, 24 Σεπ 2026): το Gemma 4 είναι
+// μοντέλο "σκέψης". Αν δεν κλείσει η σκέψη (enable_thinking: false), μπορεί να
+// ξοδέψει όλο το όριο tokens σε εσωτερικό συλλογισμό και να επιστρέψει ΚΕΝΗ τελική
+// απάντηση. Για μια απάντηση RAG από δοσμένα έγγραφα δεν χρειάζεται σκέψη.
+async function askWorkersAiFallback(prompt, env) {
+  if (!env.AI || typeof env.AI.run !== "function") {
+    throw new Error("Workers AI binding (AI) is not configured");
+  }
+  const result = await env.AI.run(
+    FALLBACK_LLM_MODEL,
+    {
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 2048,
+      chat_template_kwargs: { enable_thinking: false },
+    },
+    { rejectIfBusy: true }
+  );
+  const raw =
+    (typeof result?.response === "string" && result.response) ||
+    result?.choices?.[0]?.message?.content ||
+    "";
+  // Το Gemma 4, ακόμα και χωρίς σκέψη, μπορεί να βάλει ένα άδειο μπλοκ σκέψης πριν την
+  // απάντηση (<|channel>thought ... <channel|>). Δεν πρέπει να το δει ο επισκέπτης.
+  const answer = String(raw).replace(/<\|channel>thought[\s\S]*?<channel\|>/g, "").trim();
   if (!answer) {
-    throw new Error("Gemini generation failed: " + JSON.stringify(data));
+    // Στο μήνυμα μπαίνει το ΣΧΗΜΑ της απάντησης (κλειδιά, λόγος τερματισμού), για να
+    // φαίνεται στο log τι επέστρεψε το μοντέλο -- όχι κείμενο του επισκέπτη.
+    const choice = result?.choices?.[0];
+    const shape = {
+      keys: result && typeof result === "object" ? Object.keys(result) : typeof result,
+      finish_reason: choice?.finish_reason ?? null,
+      has_reasoning: !!(choice?.message?.reasoning || choice?.message?.reasoning_content),
+    };
+    throw new Error("Workers AI fallback returned an empty answer " + JSON.stringify(shape));
+  }
+  return answer;
+}
+
+async function askGemini(context, question, env, history = []) {
+  const prompt = buildRagPrompt(context, question, history);
+
+  if (forceLlmFallback(env)) {
+    console.log("LLM fallback: FORCE_LLM_FALLBACK=1, answering with " + FALLBACK_LLM_MODEL);
+    return askWorkersAiFallback(prompt, env);
   }
 
-  return answer;
+  try {
+    return await askGeminiOnly(prompt, env);
+  } catch (geminiErr) {
+    // Γράφεται στο log (wrangler tail), για να φαίνεται πόσο συχνά χρειάζεται η εφεδρεία.
+    console.error("LLM fallback: Gemini failed, answering with " + FALLBACK_LLM_MODEL + ". Reason: " + String(geminiErr && geminiErr.message).slice(0, 300));
+    try {
+      return await askWorkersAiFallback(prompt, env);
+    } catch (fallbackErr) {
+      console.error("LLM fallback: Workers AI also failed: " + String(fallbackErr && fallbackErr.message).slice(0, 300));
+      throw geminiErr;
+    }
+  }
 }
 
 // Section L: streaming.
@@ -1502,7 +1578,17 @@ async function askGemini(context, question, env, history = []) {
 // όλα μαζί στο τέλος. async generator -- ο καλών κάνει "for await (const
 // piece of ...)" για να τα διαβάσει ένα-ένα.
 async function* streamGeminiChunks(context, question, env, history = []) {
+  // Τοπική δοκιμή εφεδρείας: ούτε streaming από το Gemini. Ο καλών πέφτει στο
+  // askGemini(), που απαντάει με το Workers AI.
+  if (forceLlmFallback(env)) throw new Error("FORCE_LLM_FALLBACK=1");
+
   const prompt = buildRagPrompt(context, question, history);
+
+  // Χρονικό όριο ΜΟΝΟ μέχρι το πρώτο κομμάτι: αν το Gemini "κολλήσει" πριν απαντήσει,
+  // κόβουμε και ο καλών πέφτει στο askGemini() (με την εφεδρεία του). Μόλις αρχίσει να
+  // έρχεται κείμενο, το όριο σβήνει, ώστε μια μεγάλη απάντηση να μην κόβεται στη μέση.
+  const firstChunkAbort = new AbortController();
+  const firstChunkTimer = setTimeout(() => firstChunkAbort.abort(), GEMINI_TIMEOUT_MS);
 
   const response = await fetch(
     `${geminiGatewayUrl(env, "gemini-3.6-flash:streamGenerateContent")}?alt=sse&key=${env.GEMINI_API_KEY}`,
@@ -1514,10 +1600,15 @@ async function* streamGeminiChunks(context, question, env, history = []) {
         "cf-aig-authorization": `Bearer ${env.AI_GATEWAY_TOKEN}`,
       },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      signal: firstChunkAbort.signal,
     }
-  );
+  ).catch((err) => {
+    clearTimeout(firstChunkTimer);
+    throw err;
+  });
 
   if (!response.ok || !response.body) {
+    clearTimeout(firstChunkTimer);
     const errText = await response.text().catch(() => "");
     throw new Error("Gemini streaming failed: " + errText);
   }
@@ -1536,6 +1627,7 @@ async function* streamGeminiChunks(context, question, env, history = []) {
 
   while (true) {
     const { done, value } = await reader.read();
+    clearTimeout(firstChunkTimer);
     if (done) break;
     buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
 
@@ -2801,9 +2893,12 @@ function buildStreamingQueryResponse(env, workspaceId, question, history) {
         // Δοκιμάζουμε πρώτα το πραγματικό streaming. Αν για οποιονδήποτε
         // λόγο δεν αποδώσει ΚΑΝΕΝΑ κομμάτι κειμένου (π.χ. προσωρινό
         // πρόβλημα δικτύου στο ενδιάμεσο fetch προς το Gemini), κάνουμε
-        // fallback στο ήδη δοκιμασμένο, μη-streaming askGemini() -- ο
-        // επισκέπτης παίρνει ΟΠΩΣΔΗΠΟΤΕ απάντηση, έστω μονομιάς αντί για
-        // σταδιακά.
+        // fallback στο ήδη δοκιμασμένο, μη-streaming askGemini() (που έχει
+        // και την εφεδρεία του Workers AI) -- ο επισκέπτης παίρνει ΟΠΩΣΔΗΠΟΤΕ
+        // απάντηση, έστω μονομιάς αντί για σταδιακά.
+        // Αν το streaming ΕΧΕΙ ήδη στείλει κομμάτια και μετά σπάσει, ΔΕΝ ξαναζητάμε
+        // όλη την απάντηση: ο επισκέπτης θα έβλεπε το ίδιο κείμενο δύο φορές
+        // (τη μισή από πάνω και ολόκληρη από κάτω). Κρατάμε ό,τι έφτασε.
         let fullAnswer = "";
         try {
           for await (const piece of streamGeminiChunks(context, question, env, safeHistory)) {
@@ -2812,7 +2907,7 @@ function buildStreamingQueryResponse(env, workspaceId, question, history) {
             controller.enqueue(encodeSSE({ type: "chunk", text: piece }));
           }
         } catch (streamErr) {
-          fullAnswer = "";
+          // fullAnswer κρατάει ό,τι στάλθηκε ήδη (ή "" αν δεν στάλθηκε τίποτα)
         }
 
         if (!fullAnswer) {
