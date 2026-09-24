@@ -154,5 +154,24 @@ console.log("the Greek content is visible without running JavaScript (AI/read-mo
   }
 }
 
+console.log("favicon: visible background (Sep 24 2026 fix), PNG + SVG on every page");
+{
+  for (const png of ["favicon-48.png", "favicon-192.png"]) {
+    const p = path.join(pub, png);
+    check(`${png}: exists`, fs.existsSync(p));
+    const buf = fs.readFileSync(p);
+    check(`${png}: is a real PNG file`, buf.slice(0, 8).toString("hex") === "89504e470d0a1a0a", "bad header");
+    const size = buf.length;
+    check(`${png}: not a tiny/broken placeholder`, size > 300, size + " bytes");
+  }
+  const svg = read(path.join(pub, "favicon.svg"));
+  check("favicon.svg: has an opaque background fill (not just white-on-nothing)", /<rect[^>]*fill="#D97757"/.test(svg), svg);
+  for (const page of ["index.html", "landing.html", "privacy.html", "refunds.html", "terms.html"]) {
+    const html = read(path.join(pub, page));
+    check(`${page}: PNG favicon linked before the SVG one`, html.indexOf('href="/favicon-48.png"') !== -1 && html.indexOf('href="/favicon-48.png"') < html.indexOf('href="/favicon.svg"'), page);
+    check(`${page}: 192x192 PNG also linked (crisp on high-DPI, Google recommends >48x48)`, html.includes('sizes="192x192" href="/favicon-192.png"'));
+  }
+}
+
 console.log("\n" + passed + " passed, " + failed + " failed");
 process.exit(failed ? 1 : 0);

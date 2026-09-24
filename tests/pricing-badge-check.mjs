@@ -211,6 +211,35 @@ function testStructuredData() {
   assert(questionsMatch, "FAQPage: οι ερωτήσεις ταιριάζουν, με την ίδια σειρά, με το ορατό FAQ", JSON.stringify(ldFaq.map((f) => f.q)));
 }
 
+
+async function testTitleAndDescription() {
+  console.log("\n[Τίτλος/περιγραφή: χωρίς «Τιμολόγηση/Pricing», αλλάζουν με τη γλώσσα]");
+  assert(!doc.title.includes("Τιμολόγηση") && !doc.title.includes("Pricing"), "ο στατικός τίτλος δεν λέει πια Τιμολόγηση/Pricing", doc.title);
+  const descTag = doc.getElementById("pageDescription");
+  assert(descTag && descTag.getAttribute("content").startsWith("Ένα chatbot που"), "η περιγραφή ξεκινάει με «Ένα chatbot που»", descTag && descTag.getAttribute("content"));
+
+  const shared = readFileSync(new URL("../public/shared.js", import.meta.url), "utf8");
+  for (const lang of ["el", "en"]) {
+    const live = new JSDOM(html.replace('<script src="shared.js"></script>', () => "<script>" + shared + "</script>"), {
+      runScripts: "dangerously",
+      url: "https://idmon.app/",
+      beforeParse(w) { w.localStorage.setItem("uiLang", lang); },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    const d = live.window.document;
+    const desc = d.getElementById("pageDescription").getAttribute("content");
+    if (lang === "el") {
+      assert(d.title === "Idmon: chatbot που απαντά μόνο από τα έγγραφά σου", `el: τίτλος σωστός`, d.title);
+      assert(desc.startsWith("Ένα chatbot που"), "el: περιγραφή σωστή", desc);
+    } else {
+      assert(d.title === "Idmon: AI chatbot that only answers from your documents", `en: τίτλος σωστός`, d.title);
+      assert(desc.startsWith("A chatbot that answers"), "en: περιγραφή σωστή", desc);
+    }
+    assert(!d.title.includes("Pricing") && !d.title.includes("Τιμολόγηση"), `${lang}: ο τίτλος δεν λέει Pricing/Τιμολόγηση σε καμία γλώσσα`);
+    live.window.close();
+  }
+}
+
 function testLimitsUnchanged() {
   console.log("\n[Τα όρια των πλάνων ΔΕΝ άλλαξαν]");
   for (const lang of ["el", "en"]) {
@@ -225,6 +254,7 @@ testVatAndPricesUnchanged();
 testUpgradeGoesToAccount();
 testNewFaqAndFooter();
 testStructuredData();
+await testTitleAndDescription();
 testLimitsUnchanged();
 testCardsAlign();
 await testAnnualSavings();

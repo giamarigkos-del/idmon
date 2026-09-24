@@ -43,10 +43,12 @@
   })();
 </script>
 <meta charset="UTF-8">
-<title>Τιμολόγηση — Idmon</title>
+<title id="pageTitle">Idmon: chatbot που απαντά μόνο από τα έγγραφά σου</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Idmon: chatbot για το site σου που απαντά μόνο από τα δικά σου έγγραφα. Δοκίμασέ το δωρεάν. Basic 29 €/μήνα, Pro 59 €/μήνα, με ΦΠΑ.">
+<meta id="pageDescription" name="description" content="Ένα chatbot που απαντά στους επισκέπτες του site σου μόνο από τα δικά σου έγγραφα, χωρίς να επινοεί απαντήσεις. Δοκίμασέ το δωρεάν, χωρίς κάρτα.">
 <link rel="canonical" href="https://idmon.app/">
+<link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <!-- SEO/AI (24 Σεπ 2026): δομημένα δεδομένα βασισμένα στο ΕΛΛΗΝΙΚΟ περιεχόμενο
      (προεπιλεγμένη γλώσσα, βλ. #content-el παραπάνω). Πρέπει να ταιριάζει ΠΑΝΤΑ με ό,τι
@@ -476,7 +478,14 @@
   var activeBlock = document.getElementById('content-' + activeLang);
   if (activeBlock) activeBlock.style.display = 'block';
   document.documentElement.lang = activeLang;
-  document.title = activeLang === 'el' ? 'Τιμολόγηση — Idmon' : 'Pricing — Idmon';
+  var pageMeta = {
+    el: { title: 'Idmon: chatbot που απαντά μόνο από τα έγγραφά σου',
+          description: 'Ένα chatbot που απαντά στους επισκέπτες του site σου μόνο από τα δικά σου έγγραφα, χωρίς να επινοεί απαντήσεις. Δοκίμασέ το δωρεάν, χωρίς κάρτα.' },
+    en: { title: 'Idmon: AI chatbot that only answers from your documents',
+          description: 'A chatbot that answers your site visitors only from your own documents, never making things up. Try it free, no card needed.' },
+  };
+  document.title = pageMeta[activeLang].title;
+  document.getElementById('pageDescription').setAttribute('content', pageMeta[activeLang].description);
   initLangToggle('langToggle');
 
   var billingPeriod = 'monthly';
