@@ -39,19 +39,45 @@ const bodyHtml = bodyMatch[1];
 
 // Φτιάχνει ένα φρέσκο, απομονωμένο DOM για κάθε test -- με fetch mock και
 // δικό του URL (ώστε να ελέγξουμε και το ?resetToken=... σενάριο).
+//
+// Από 22 Σεπ 2026 (Turnstile) η σελίδα, μόλις ανοίξει, ζητάει το site key από το
+// GET /config/public. Αυτό το απαντάμε ΕΔΩ, ξεχωριστά, ώστε να μη μετράει στις κλήσεις
+// που ελέγχει κάθε test (ούτε να "τρώει" την απάντηση που προορίζεται γι' αυτές).
+// Και ένα ψεύτικο Turnstile: το window.solveTurnstile("forgot") "λύνει" το captcha
+// μιας φόρμας, όπως θα έκανε ο επισκέπτης.
 function loadLandingPage({ url = "http://localhost/landing.html", fetchImpl } = {}) {
   const dom = new JSDOM(`<!DOCTYPE html><html><body>${bodyHtml}</body></html>`, {
     url,
     runScripts: "outside-only",
   });
   const { window } = dom;
-  window.fetch = fetchImpl || (async () => { throw new Error("fetch not mocked"); });
+  const apiFetch = fetchImpl || (async () => { throw new Error("fetch not mocked"); });
+  window.fetch = async (reqUrl, opts) => {
+    if (String(reqUrl) === "/config/public") {
+      return { ok: true, status: 200, json: async () => ({ turnstileSiteKey: "test-site-key" }) };
+    }
+    return apiFetch(reqUrl, opts);
+  };
+  const turnstileCallbacks = {};
+  window.turnstile = {
+    render(selector, options) { turnstileCallbacks[selector] = options.callback; return selector; },
+    reset() {},
+  };
+  window.solveTurnstile = (form) => {
+    const callback = turnstileCallbacks["#" + form + "Turnstile"];
+    if (!callback) throw new Error("το Turnstile της φόρμας " + form + " δεν έγινε render");
+    callback("turnstile-test-token");
+  };
 
   window.eval("window.__IS_LANDING_PAGE__ = true;");
   window.eval(sharedJsSource);
   window.eval(inlineScript);
+  window.onTurnstileLoad(); // σαν να φόρτωσε το api.js της Cloudflare
   return window;
 }
+
+// Το /config/public απαντάει ασύγχρονα: περιμένουμε να γίνουν render τα widgets.
+const settle = () => new Promise((r) => setTimeout(r, 10));
 
 function fetchQueue(responses) {
   let i = 0;
@@ -93,6 +119,15 @@ async function test2_forgotPasswordSubmit() {
   assert(!doc.getElementById("accountForm").classList.contains("show"), "κρύβεται η φόρμα account");
 
   doc.getElementById("forgotEmail").value = "someone@example.com";
+  await settle();
+
+  // Χωρίς λυμένο captcha: τίποτα δεν φεύγει προς τον server.
+  doc.getElementById("forgotSubmitBtn").click();
+  await new Promise((r) => setTimeout(r, 20));
+  assert(fetchImpl.calls.length === 0, "χωρίς λυμένο captcha: ΚΑΝΕΝΑ αίτημα στον server");
+  assert(doc.getElementById("forgotError").textContent.length > 0, "χωρίς λυμένο captcha: εμφανίζεται μήνυμα");
+
+  window.solveTurnstile("forgot");
   doc.getElementById("forgotSubmitBtn").click();
   await new Promise((r) => setTimeout(r, 20));
 
@@ -100,6 +135,7 @@ async function test2_forgotPasswordSubmit() {
   assert(fetchImpl.calls[0].url === "/account/forgot-password", "σωστό endpoint");
   assert(fetchImpl.calls[0].body.email === "someone@example.com", "στέλνει το σωστό email");
   assert(fetchImpl.calls[0].body.lang === "en", "στέλνει και την τρέχουσα γλώσσα UI (default en)");
+  assert(fetchImpl.calls[0].body.turnstileToken === "turnstile-test-token", "στέλνει και το token του captcha");
   assert(doc.getElementById("forgotSuccess").classList.contains("show"), "εμφανίζεται το γενικό μήνυμα επιτυχίας");
 }
 
@@ -174,10 +210,12 @@ async function test2b_forgotPasswordSendsGreekLang() {
   doc.getElementById("loginTabBtn").click();
   doc.getElementById("forgotLink").click();
   doc.getElementById("forgotEmail").value = "someone@example.com";
+  await settle();
+  window.solveTurnstile("forgot");
   doc.getElementById("forgotSubmitBtn").click();
   await new Promise((r) => setTimeout(r, 20));
 
-  assert(fetchImpl.calls[0].body.lang === "el", "στέλνει lang: \"el\" όταν έχει επιλεγεί ελληνικά");
+  assert(fetchImpl.calls.length === 1 && fetchImpl.calls[0].body.lang === "el", "στέλνει lang: \"el\" όταν έχει επιλεγεί ελληνικά");
 }
 
 async function test7_verifyEmailSuccess() {
