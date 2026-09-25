@@ -455,6 +455,111 @@ async function handleLogin(request, env) {
   );
 }
 
+// Section U: "Sign in with Google" -- ΞΕΧΩΡΙΣΤΟ από τον ήδη υπάρχοντα Google
+// Drive connector (Section I). Εκείνος ζητάει scope drive.readonly
+// (restricted, χρειάζεται πληρωμένο CASA audit). Αυτό εδώ ζητάει μόνο
+// openid/email/profile (non-sensitive, καμία πιστοποίηση δεν χρειάζεται
+// ποτέ). Δύο εντελώς άσχετα OAuth flows που απλά μοιράζονται το ίδιο
+// GOOGLE_CLIENT_ID -- επιτρέπεται, ένα Google Cloud OAuth client μπορεί να
+// εξυπηρετεί πολλαπλά scopes/χρήσεις.
+//
+// Το frontend χρησιμοποιεί Google Identity Services (το σημερινό, ΟΧΙ το
+// deprecated gapi.auth2) και μας στέλνει ένα ID token (JWT), όχι
+// authorization code -- δεν χρειάζεται refresh token, δεν χρειάζεται να
+// ξαναμιλήσουμε στο Google API αργότερα, το login είναι one-shot.
+//
+// Auto-link με βάση email, χωρίς να ρωτάμε τον χρήστη: αν το email υπάρχει
+// ήδη (όποιος κι αν ήταν ο αρχικός τρόπος εγγραφής), απλά τον συνδέουμε.
+// Είναι ασφαλές γιατί η Google έχει ήδη επιβεβαιώσει ότι κατέχει αυτό το
+// email (ελέγχουμε ρητά email_verified παρακάτω) -- ίδιο μοτίβο με ό,τι
+// κάνουν production προϊόντα (π.χ. THE ICONIC, Practice Better).
+async function verifyGoogleIdToken(idToken, env) {
+  // Google's tokeninfo endpoint κάνει ΟΛΟΚΛΗΡΗ την κρυπτογραφική επαλήθευση
+  // (υπογραφή, λήξη) από τη δική της πλευρά -- απλούστερο και πολύ
+  // λιγότερος κώδικας από το να κατεβάζουμε/cache-άρουμε τα δημόσια κλειδιά
+  // της Google και να επαληθεύουμε το JWT εμείς. Αποδεκτό tradeoff σε αυτή
+  // την κλίμακα: μία επιπλέον εξωτερική κλήση ανά login, όχι ανά request.
+  const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+  if (!res.ok) return null;
+  const claims = await res.json();
+  // ΚΡΙΣΙΜΟΣ έλεγχος: το aud πρέπει να είναι το ΔΙΚΟ μας client_id, αλλιώς
+  // κάποιος θα μπορούσε να ξαναχρησιμοποιήσει ένα έγκυρο ID token που
+  // εκδόθηκε για ΑΛΛΗ Google εφαρμογή για να συνδεθεί εδώ.
+  if (claims.aud !== env.GOOGLE_CLIENT_ID) return null;
+  if (claims.email_verified !== "true" && claims.email_verified !== true) return null;
+  if (!claims.email) return null;
+  return { email: claims.email.toLowerCase() };
+}
+
+async function handleGoogleAuth(request, env) {
+  const ip = clientIp(request);
+  if (await isRateLimited(env, "google-auth", ip)) {
+    return jsonError(429, "Too many attempts. Please try again in a few minutes.");
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonError(400, "Invalid JSON body");
+  }
+  if (!body.credential) return jsonError(400, "Missing Google credential");
+
+  const verified = await verifyGoogleIdToken(body.credential, env);
+  if (!verified) {
+    await recordRateLimitAttempt(env, "google-auth", ip);
+    return jsonError(401, "Could not verify Google sign-in. Please try again.");
+  }
+
+  const existing = await env.DB.prepare(
+    "SELECT id, workspace_id, embed_id, email_verified FROM users WHERE email = ?"
+  ).bind(verified.email).first();
+
+  if (existing) {
+    await clearRateLimit(env, "google-auth", ip);
+    const session = await createSession(env, existing.id, existing.workspace_id);
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        sessionToken: session.token,
+        workspaceId: existing.workspace_id,
+        embedId: existing.embed_id,
+        emailVerified: !!existing.email_verified,
+      }),
+      { headers: JSON_HEADERS }
+    );
+  }
+
+  // Νέος λογαριασμός. Section R: το password_hash/password_salt παραμένουν
+  // NOT NULL στο schema -- ίδιο ζήτημα, ίδια λύση με το legacySalt λίγο πιο
+  // πάνω σε αυτό το αρχείο (handleSignup). Εδώ πάμε ένα βήμα παραπέρα: αφού
+  // ΔΕΝ υπάρχει κανένας πραγματικός κωδικός, περνάμε ένα κρυπτογραφικά
+  // τυχαίο 256-bit string από το ΙΔΙΟ Argon2id pipeline που ήδη υπάρχει. Ο
+  // λογαριασμός παραμένει τεχνικά ανοιχτός σε password-login, απλά κανείς
+  // δεν μπορεί ποτέ να μαντέψει τον κωδικό -- ισοδύναμο με να μην υπάρχει.
+  const inertPassword = randomHex(32);
+  const passwordHash = await hashPassword(inertPassword);
+  const legacySalt = randomHex(16);
+  const workspaceId = `ws-${randomHex(12)}`;
+  const embedId = `emb-${randomHex(12)}`;
+  const createdAt = new Date().toISOString();
+
+  // email_verified=1 ρητά -- η ίδια η Google το έχει ήδη επιβεβαιώσει
+  // (ελέγχθηκε στο verifyGoogleIdToken), δεν χρειάζεται δικό μας email
+  // verification flow για αυτούς τους λογαριασμούς.
+  const result = await env.DB.prepare(
+    "INSERT INTO users (email, password_hash, password_salt, workspace_id, embed_id, plan, email_verified, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)"
+  ).bind(verified.email, passwordHash, legacySalt, workspaceId, embedId, "free", createdAt).run();
+
+  await clearRateLimit(env, "google-auth", ip);
+  const session = await createSession(env, result.meta.last_row_id, workspaceId);
+
+  return new Response(
+    JSON.stringify({ ok: true, sessionToken: session.token, workspaceId, embedId, emailVerified: true }),
+    { headers: JSON_HEADERS }
+  );
+}
+
 async function handleLogout(request, env) {
   const sessionToken = request.headers.get("X-Session-Token");
   if (!sessionToken) return jsonError(400, "Missing X-Session-Token header");
@@ -4872,6 +4977,10 @@ export default {
 
     if (url.pathname === "/account/login" && request.method === "POST") {
       return handleLogin(request, env);
+    }
+
+    if (url.pathname === "/account/google-auth" && request.method === "POST") {
+      return handleGoogleAuth(request, env);
     }
 
     if (url.pathname === "/account/logout" && request.method === "POST") {

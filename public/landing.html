@@ -10,6 +10,7 @@
 <link rel="canonical" href="https://idmon.app/landing">
 <link rel="stylesheet" href="/shared.css">
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad&render=explicit" async defer></script>
+<script src="https://accounts.google.com/gsi/client" async defer onload="onGoogleLibraryLoad()"></script>
 <style>
   /* Section: ζεστή παλέτα μόνο για το landing -- override του --accent
      ΜΟΝΟ μέσα σε αυτό το :root block, που φορτώνει μόνο σε αυτή τη σελίδα
@@ -55,6 +56,10 @@
     display:flex;align-items:center;justify-content:center;color:var(--text-soft);}
   .password-toggle-btn:hover{color:var(--text);}
   .password-toggle-btn svg{width:26px;height:26px;stroke-width:2;}
+  .google-signin-btn{margin-top:14px;display:flex;justify-content:center;min-height:40px;}
+  .or-divider{display:flex;align-items:center;gap:10px;margin:14px 0;
+    font-size:11.5px;color:var(--text-soft);}
+  .or-divider::before,.or-divider::after{content:"";flex:1;height:1px;background:var(--border);}
   .dev-form-actions{display:flex;gap:8px;margin-top:10px;}
   .dev-form button{border:none;border-radius:6px;padding:9px 16px;font-size:13px;
     cursor:pointer;font-weight:600;font-family:inherit;}
@@ -148,6 +153,8 @@
         <button type="button" class="active" id="signupTabBtn" data-i18n="signupTab">Sign up</button>
         <button type="button" id="loginTabBtn" data-i18n="loginTab">Log in</button>
       </div>
+      <div id="googleSignInBtn" class="google-signin-btn"></div>
+      <div class="or-divider" data-i18n="orDivider">or</div>
       <label for="accountEmail" data-i18n="emailLabel">Email</label>
       <input type="email" id="accountEmail" placeholder="you@example.com" autocomplete="email">
       <label for="accountPassword" style="margin-top:10px;" data-i18n="passwordLabel">Password</label>
@@ -399,6 +406,59 @@
   }
   wirePasswordToggle("accountPassword", "accountPasswordToggle");
   wirePasswordToggle("accountConfirmPassword", "accountConfirmPasswordToggle");
+
+  // Section U: "Sign in with Google" -- public, ΜΗ-μυστικό client_id (το
+  // ίδιο σαν αυτό που ήδη υπάρχει στο wrangler.toml, GOOGLE_CLIENT_ID).
+  // Client IDs είναι σχεδιασμένα να είναι δημόσια, ήδη ορατά στον καθένα
+  // μέσα στο URL κάθε φορά που τρέχει το υπάρχον Drive OAuth flow -- δεν
+  // χρειάζεται server round-trip μόνο για να το πάρουμε εδώ. Αν ποτέ
+  // αλλάξει το client_id στο wrangler.toml, χρειάζεται να ενημερωθεί ΚΑΙ
+  // εδώ, χειροκίνητα -- δεν υπάρχει αυτόματο sync.
+  const GOOGLE_CLIENT_ID_PUBLIC = "532047777604-98qlf4jfdp3kic0i7ko7pniteo89gaau.apps.googleusercontent.com";
+
+  async function handleGoogleCredential(response) {
+    const errorEl = el("accountError");
+    errorEl.classList.remove("show");
+    try {
+      const res = await fetch("/account/google-auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credential: response.credential }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        errorEl.textContent = data.error || t("connectionErrorPrefix");
+        errorEl.classList.add("show");
+        return;
+      }
+      localStorage.setItem("workspaceId", data.workspaceId);
+      localStorage.setItem("sessionToken", data.sessionToken);
+      localStorage.setItem("emailVerified", data.emailVerified ? "1" : "0");
+      navigateTo(afterAuthUrl());
+    } catch (err) {
+      errorEl.textContent = t("connectionErrorPrefix") + err.message;
+      errorEl.classList.add("show");
+    }
+  }
+
+  // Καλείται από το ίδιο το script tag (onload=), ίδιο μοτίβο με το
+  // onTurnstileLoad -- δεν υποθέτουμε ότι το google.accounts είναι ήδη
+  // έτοιμο απλά επειδή το δικό μας inline script έτρεξε (async/defer).
+  // window.* ρητά, ίδιο σκεπτικό με το window.onTurnstileLoad παρακάτω --
+  // το inline onload="" attribute χρειάζεται πραγματικά global function.
+  window.onGoogleLibraryLoad = function () {
+    google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID_PUBLIC,
+      callback: handleGoogleCredential,
+    });
+    google.accounts.id.renderButton(el("googleSignInBtn"), {
+      theme: "filled_black",
+      size: "large",
+      width: 320,
+      text: "continue_with",
+      locale: getLang() === "el" ? "el" : "en",
+    });
+  };
 
   function setAccountMode(mode) {
     accountMode = mode;
