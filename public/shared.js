@@ -533,6 +533,8 @@ const TRANSLATIONS = {
     analyticsLoadError: "Could not load analytics.",
     analyticsNoData: "No questions yet in this period.",
     analyticsChartCaption: "Daily questions (red = unanswered)",
+    topQuestionsTitle: "Most common questions",
+    topQuestionsEmpty: "Not enough data yet to show common questions.",
 
     // URL sync (Section M)
     addFromUrlBtn: "🔗 Add from URL",
@@ -598,6 +600,9 @@ const TRANSLATIONS = {
     versionHistoryRestoredBanner: "✓ Restored as version {version}.",
     versionHistorySavedAtPrefix: "Replaced",
     versionHistoryVersionLabel: "Version {version}",
+    versionHistoryShowDiffBtn: "Show differences",
+    versionHistoryHideDiffBtn: "Hide differences",
+    versionHistoryDiffVsCurrentLabel: "Compared to the current version",
   },
   el: {
     loading: "Φόρτωση…",
@@ -844,6 +849,8 @@ const TRANSLATIONS = {
     analyticsLoadError: "Δεν ήταν δυνατή η φόρτωση στατιστικών.",
     analyticsNoData: "Καμία ερώτηση ακόμα σε αυτή την περίοδο.",
     analyticsChartCaption: "Ερωτήσεις ανά ημέρα (κόκκινο = χωρίς απάντηση)",
+    topQuestionsTitle: "Πιο συχνές ερωτήσεις",
+    topQuestionsEmpty: "Δεν υπάρχουν ακόμα αρκετά δεδομένα για συχνές ερωτήσεις.",
 
     // URL sync (Section M)
     addFromUrlBtn: "🔗 Πρόσθεσε από URL",
@@ -909,6 +916,9 @@ const TRANSLATIONS = {
     versionHistoryRestoredBanner: "✓ Έγινε επαναφορά ως έκδοση {version}.",
     versionHistorySavedAtPrefix: "Αντικαταστάθηκε",
     versionHistoryVersionLabel: "Έκδοση {version}",
+    versionHistoryShowDiffBtn: "Εμφάνιση διαφορών",
+    versionHistoryHideDiffBtn: "Απόκρυψη διαφορών",
+    versionHistoryDiffVsCurrentLabel: "Σε σύγκριση με την τρέχουσα έκδοση",
   },
 };
 

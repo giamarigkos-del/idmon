@@ -348,6 +348,15 @@
     cursor:pointer;font-family:inherit;}
   .analytics-range-btn.active{background:var(--accent);color:var(--on-accent);border-color:var(--accent);}
 
+  /* Section T: λίστα "πιο συχνές ερωτήσεις" -- ίδιο οπτικό μοτίβο με τις
+     άλλες λίστες (fallback/version), αριθμός εμφανίσεων + κείμενο ερώτησης. */
+  .top-questions-list{margin-top:6px;}
+  .top-questions-row{display:flex;align-items:baseline;gap:8px;font-size:13px;
+    padding:7px 0;border-bottom:1px solid var(--border);}
+  .top-questions-row:last-child{border-bottom:none;}
+  .tq-count{flex-shrink:0;font-weight:700;color:var(--accent);min-width:28px;}
+  .tq-text{color:var(--text);word-break:break-word;}
+
   /* Σε στενές οθόνες, το sidebar (σταθερό πλάτος) σπρώχνει το main panel
      εκτός οθόνης -- εδώ το κύριο panel πάει ΚΑΤΩ από το sidebar αντί
      να εξαφανίζεται.
@@ -1943,6 +1952,21 @@
     return `<div class="analytics-chart">${bars}</div>`;
   }
 
+  function renderTopQuestionsList(topQuestions) {
+    if (!topQuestions || !topQuestions.length) {
+      return `<p style="font-size:12.5px;color:var(--text-soft);">${escapeHtml(t("topQuestionsEmpty"))}</p>`;
+    }
+    return `<div class="top-questions-list">${topQuestions
+      .map(
+        (q) => `
+        <div class="top-questions-row">
+          <span class="tq-count">${q.count}×</span>
+          <span class="tq-text">${escapeHtml(q.text)}</span>
+        </div>`
+      )
+      .join("")}</div>`;
+  }
+
   function renderAnalyticsContent(data) {
     const rangeBtn = (days, label) => `
       <button type="button" class="analytics-range-btn${days === currentAnalyticsDays ? " active" : ""}" data-days="${days}">
@@ -1977,9 +2001,13 @@
 
         ${renderAnalyticsChart(data.daily)}
         <p style="font-size:11.5px;color:var(--text-soft);margin-top:6px;">${escapeHtml(t("analyticsChartCaption"))}</p>
+
+        <h3 style="margin:22px 0 4px;font-size:14px;">${escapeHtml(t("topQuestionsTitle"))}</h3>
+        ${renderTopQuestionsList(data.topQuestions)}
       </div>
     `;
   }
+
 
   function wireAnalyticsEvents() {
     const main = el("mainPanel");

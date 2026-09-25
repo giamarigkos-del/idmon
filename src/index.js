@@ -26,11 +26,23 @@ const DEFAULT_ANALYTICS_DAYS = 30;
 const MAX_ANALYTICS_DAYS = 90;
 
 // Section S: ιστορικότητα εκδόσεων εγγράφων -- πόσες παλιές εκδόσεις
-// κρατάμε ανά έγγραφο πριν αρχίσουμε να πετάμε τις πιο παλιές (FIFO). Το
-// κείμενο ενός εγγράφου είναι λίγα KB, οπότε ακόμα και 20 εκδόσεις είναι
-// αμελητέο μέγεθος σε ένα ΚΑΙ ΜΟΝΟ KV value -- δεν χρειάζεται ξεχωριστό
-// key ανά έκδοση.
-const MAX_VERSION_HISTORY = 20;
+// κρατάμε ανά έγγραφο πριν αρχίσουμε να πετάμε τις πιο παλιές (FIFO). Μαζί
+// με την τρέχουσα, ζωντανή έκδοση (που δεν μετράει εδώ, ζει στο ίδιο το
+// doc.fullText) αυτό δίνει 3 εκδόσεις συνολικά ορατές στον χρήστη. Το
+// κείμενο ενός εγγράφου είναι λίγα KB, οπότε ακόμα και παραπάνω εκδόσεις
+// θα ήταν αμελητέο μέγεθος -- το όριο εδώ είναι για απλότητα του UI
+// (λίγες, πραγματικά χρήσιμες εκδόσεις), όχι για εξοικονόμηση χώρου.
+const MAX_VERSION_HISTORY = 2;
+
+// Section T: "τι ρωτάνε οι επισκέπτες" -- πόσες ΔΙΑΦΟΡΕΤΙΚΕΣ (κανονικοποιημένες)
+// ερωτήσεις κρατάμε ανά ημέρα ανά workspace, πριν σταματήσουμε να προσθέτουμε
+// νέες. ΔΕΝ περιορίζει το συνολικό πλήθος ερωτήσεων (total/fallback παραμένουν
+// ακριβή) -- μόνο πόσες ΜΟΝΑΔΙΚΕΣ διατυπώσεις μπαίνουν στη λίστα συχνότητας.
+// Ήδη υπάρχουσες διατυπώσεις συνεχίζουν να μετράνε κανονικά και μετά το όριο,
+// μπλοκάρεται μόνο η προσθήκη ΝΕΑΣ, άγνωστης διατύπωσης. Σε 150 μοναδικές
+// ερωτήσεις/ημέρα το μέγεθος του KV value παραμένει λίγα KB ακόμα και στο
+// ανώτατο πλάνο (Pro, 2.500 μηνύματα/μέρα) -- βλ. σχετική συζήτηση κόστους.
+const MAX_UNIQUE_QUESTIONS_PER_DAY = 150;
 
 // Το πραγματικό workspace του διαχειριστή -- ΠΟΤΕ καμία λήξη σε τίποτα εδώ
 // (draft, deleted, ή δημοσιευμένο). Κάθε άλλο workspace (τυχαίοι επισκέπτες
@@ -1818,20 +1830,52 @@ async function checkDocumentLimit(env, workspaceId) {
   return { allowed: count < limit, count, limit, plan };
 }
 
+// Section T: κανονικοποίηση ερώτησης για ομαδοποίηση "top questions" --
+// σκόπιμα απλή (πεζά, ενιαία κενά, χωρίς τελικά σημεία στίξης), ΟΧΙ
+// σημασιολογική. Δύο ερωτήσεις με το ίδιο νόημα αλλά διαφορετική
+// διατύπωση ΔΕΝ ενώνονται (θα χρειαζόταν embeddings/clustering για αυτό,
+// ξεχωριστό και πιο ακριβό βήμα, βλ. σχετική συζήτηση). Πιάνει όμως το πιο
+// συνηθισμένο σενάριο: πολλοί επισκέπτες γράφουν σχεδόν την ίδια ερώτηση.
+function normalizeQuestionForAnalytics(text) {
+  return (text || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[?!.,;:·"'»«]+$/g, "")
+    .trim();
+}
+
 // Best-effort, ΠΟΤΕ δεν πρέπει να μπλοκάρει ή να σπάσει την απάντηση προς
-// τον χρήστη -- ίδια φιλοσοφία με το logFallbackQuestion. ΔΕΝ αποθηκεύεται
-// το ίδιο το κείμενο της ερώτησης εδώ, μόνο μετρητές ανά ημέρα.
+// τον χρήστη -- ίδια φιλοσοφία με το logFallbackQuestion. Section T: πλέον
+// αποθηκεύεται ΚΑΙ μια λίστα συχνότητας ερωτήσεων (κανονικοποιημένο
+// κείμενο -> {count, sample}), με ανώτατο όριο ΜΟΝΑΔΙΚΩΝ διατυπώσεων
+// (MAX_UNIQUE_QUESTIONS_PER_DAY) ώστε το μέγεθος να μένει προβλέψιμο.
 //
 // KV δεν έχει atomic increment -- get+put με πιθανό race condition σε πολύ
 // σπάνια ταυτόχρονα requests. Αποδεκτό ρίσκο για αυτή την κλίμακα (demo/
 // μικρή επιχείρηση), ίδιο επίπεδο συνέπειας με άλλα σημεία του κώδικα.
-async function recordAnalytics(env, workspaceId, isFallback) {
+async function recordAnalytics(env, workspaceId, isFallback, question) {
   try {
     const key = `analytics:${workspaceId}:${dateKeyFor(0)}`;
     const raw = await env.DOCUMENT_REGISTRY.get(key);
-    const current = raw ? JSON.parse(raw) : { total: 0, fallback: 0 };
+    const current = raw ? JSON.parse(raw) : { total: 0, fallback: 0, questions: {} };
+    if (!current.questions) current.questions = {};
     current.total += 1;
     if (isFallback) current.fallback += 1;
+
+    const normalized = normalizeQuestionForAnalytics(question);
+    if (normalized) {
+      const existing = current.questions[normalized];
+      if (existing) {
+        existing.count += 1;
+      } else if (Object.keys(current.questions).length < MAX_UNIQUE_QUESTIONS_PER_DAY) {
+        current.questions[normalized] = { count: 1, sample: (question || "").trim().slice(0, 300) };
+      }
+      // Αν χτυπήθηκε το όριο ΜΟΝΑΔΙΚΩΝ διατυπώσεων και αυτή είναι άγνωστη,
+      // απλά δεν προστίθεται -- το total/fallback παραπάνω παραμένουν πάντα
+      // ακριβή, μόνο η λίστα συχνότητας "κόβεται" εκεί.
+    }
+
     await env.DOCUMENT_REGISTRY.put(key, JSON.stringify(current), { expirationTtl: ANALYTICS_TTL_SECONDS });
   } catch (err) {
     // Σκόπιμα καταπίνουμε το error -- τα analytics ΠΟΤΕ δεν πρέπει να
@@ -1841,22 +1885,40 @@ async function recordAnalytics(env, workspaceId, isFallback) {
 
 // Διαβάζει τις τελευταίες `days` ημέρες (πιο παλιά→πιο πρόσφατη, βολικό για
 // γράφημα), γεμίζει με {total:0, fallback:0} τις ημέρες χωρίς καμία
-// ερώτηση, και υπολογίζει τα συνολικά νούμερα.
+// ερώτηση, και υπολογίζει τα συνολικά νούμερα. Section T: συγχωνεύει επίσης
+// τις ημερήσιες λίστες συχνότητας ερωτήσεων σε ένα ενιαίο top-N για όλο το
+// διάστημα -- ίδιες ΜΟΝΑΔΙΚΕΣ (κανονικοποιημένες) διατυπώσεις σε
+// διαφορετικές ημέρες αθροίζονται.
 async function readAnalyticsSummary(env, workspaceId, days) {
   const daily = [];
+  const questionTotals = {};
+
   for (let offset = days - 1; offset >= 0; offset--) {
     const date = dateKeyFor(offset);
     const raw = await env.DOCUMENT_REGISTRY.get(`analytics:${workspaceId}:${date}`);
-    const entry = raw ? JSON.parse(raw) : { total: 0, fallback: 0 };
+    const entry = raw ? JSON.parse(raw) : { total: 0, fallback: 0, questions: {} };
     daily.push({ date, total: entry.total, fallback: entry.fallback });
+
+    for (const [normalized, info] of Object.entries(entry.questions || {})) {
+      if (!questionTotals[normalized]) {
+        questionTotals[normalized] = { count: 0, sample: info.sample || normalized };
+      }
+      questionTotals[normalized].count += info.count || 0;
+    }
   }
 
   const totalQuestions = daily.reduce((sum, d) => sum + d.total, 0);
   const totalFallback = daily.reduce((sum, d) => sum + d.fallback, 0);
   const fallbackRate = totalQuestions > 0 ? Math.round((totalFallback / totalQuestions) * 100) : 0;
 
-  return { totalQuestions, totalFallback, fallbackRate, daily };
+  const topQuestions = Object.values(questionTotals)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10)
+    .map((q) => ({ text: q.sample, count: q.count }));
+
+  return { totalQuestions, totalFallback, fallbackRate, daily, topQuestions };
 }
+
 
 async function handleGetAnalyticsSummary(request, env) {
   const workspaceId = await resolveWorkspaceId(request, env);
@@ -2955,7 +3017,7 @@ async function runQuery(env, workspaceId, question, history) {
 
   if (!matches.matches || matches.matches.length === 0) {
     await logFallbackQuestion(env, workspaceId, question);
-    await recordAnalytics(env, workspaceId, true);
+    await recordAnalytics(env, workspaceId, true, question);
     return {
       status: 200,
       body: {
@@ -2988,7 +3050,7 @@ async function runQuery(env, workspaceId, question, history) {
   if (isFallback) {
     await logFallbackQuestion(env, workspaceId, question);
   }
-  await recordAnalytics(env, workspaceId, isFallback);
+  await recordAnalytics(env, workspaceId, isFallback, question);
 
   // Βήμα 6: ταξινόμηση κατά score (το Vectorize συνήθως το κάνει ήδη, αλλά το εξασφαλίζουμε)
   const sortedMatches = [...matches.matches].sort((a, b) => b.score - a.score);
@@ -3049,7 +3111,7 @@ function buildStreamingQueryResponse(env, workspaceId, question, history) {
           const fallbackAnswer = "Δεν βρέθηκαν σχετικά έγγραφα σε αυτόν τον χώρο εργασίας.";
           controller.enqueue(encodeSSE({ type: "chunk", text: fallbackAnswer }));
           await logFallbackQuestion(env, workspaceId, question);
-          await recordAnalytics(env, workspaceId, true);
+          await recordAnalytics(env, workspaceId, true, question);
           controller.enqueue(encodeSSE({ type: "done", isFallback: true, primarySource: null, relatedSections: [] }));
           controller.close();
           return;
@@ -3107,7 +3169,7 @@ function buildStreamingQueryResponse(env, workspaceId, question, history) {
         }
 
         if (isFallback) await logFallbackQuestion(env, workspaceId, question);
-        await recordAnalytics(env, workspaceId, isFallback);
+        await recordAnalytics(env, workspaceId, isFallback, question);
 
         controller.enqueue(encodeSSE({ type: "done", isFallback, primarySource, relatedSections: [] }));
         controller.close();
