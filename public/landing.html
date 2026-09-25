@@ -48,6 +48,13 @@
   .dev-form label{font-size:12px;color:var(--text-soft);display:block;margin-bottom:6px;}
   .dev-form input{width:100%;border:1px solid var(--border);border-radius:6px;
     padding:9px 10px;font-size:13.5px;background:var(--bg);color:var(--text);}
+  .password-field{position:relative;}
+  .password-field input{padding-right:38px;}
+  .password-toggle-btn{position:absolute;right:0;top:0;bottom:0;width:36px;
+    background:none;border:none;padding:0;margin:0;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;color:var(--text-soft);}
+  .password-toggle-btn:hover{color:var(--text);}
+  .password-toggle-btn svg{width:18px;height:18px;}
   .dev-form-actions{display:flex;gap:8px;margin-top:10px;}
   .dev-form button{border:none;border-radius:6px;padding:9px 16px;font-size:13px;
     cursor:pointer;font-weight:600;font-family:inherit;}
@@ -144,7 +151,15 @@
       <label for="accountEmail" data-i18n="emailLabel">Email</label>
       <input type="email" id="accountEmail" placeholder="you@example.com" autocomplete="email">
       <label for="accountPassword" style="margin-top:10px;" data-i18n="passwordLabel">Password</label>
-      <input type="password" id="accountPassword" placeholder="••••••••" autocomplete="current-password">
+      <div class="password-field">
+        <input type="password" id="accountPassword" placeholder="••••••••" autocomplete="current-password">
+        <button type="button" class="password-toggle-btn" id="accountPasswordToggle" aria-label="Show password"></button>
+      </div>
+      <label for="accountConfirmPassword" style="margin-top:10px;" id="accountConfirmPasswordLabel" data-i18n="confirmPasswordSignupLabel">Confirm password</label>
+      <div class="password-field" id="accountConfirmPasswordWrap">
+        <input type="password" id="accountConfirmPassword" placeholder="••••••••" autocomplete="new-password">
+        <button type="button" class="password-toggle-btn" id="accountConfirmPasswordToggle" aria-label="Show password"></button>
+      </div>
       <a href="#" class="forgot-link" id="forgotLink" data-i18n="forgotLink" style="display:none;">Forgot password?</a>
       <div class="cf-turnstile" id="accountTurnstile" style="margin-top:10px;"></div>
       <div class="dev-form-actions">
@@ -365,12 +380,37 @@
   // απλά με δύο tabs (sign up / log in) που καλούν διαφορετικό endpoint.
   let accountMode = "signup";
 
+  // Δύο SVG καταστάσεις (μάτι ανοιχτό / μάτι με γραμμή), swap στο innerHTML
+  // αντί για δύο ξεχωριστά elements -- ένα λιγότερο πράγμα να συγχρονίζεται.
+  const EYE_OPEN_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+  const EYE_CLOSED_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a20.3 20.3 0 0 1 4.22-5.37M9.9 4.24A10.4 10.4 0 0 1 12 4c7 0 11 8 11 8a20.5 20.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
+
+  // Ένα-πράξη toggle: αλλάζει type="password"↔"text" ΚΑΙ το εικονίδιο μαζί,
+  // ώστε να μη μπορούν ποτέ να ξεσυγχρονιστούν μεταξύ τους.
+  function wirePasswordToggle(inputId, btnId) {
+    const input = el(inputId);
+    const btn = el(btnId);
+    btn.innerHTML = EYE_CLOSED_ICON;
+    btn.addEventListener("click", () => {
+      const showing = input.type === "text";
+      input.type = showing ? "password" : "text";
+      btn.innerHTML = showing ? EYE_CLOSED_ICON : EYE_OPEN_ICON;
+    });
+  }
+  wirePasswordToggle("accountPassword", "accountPasswordToggle");
+  wirePasswordToggle("accountConfirmPassword", "accountConfirmPasswordToggle");
+
   function setAccountMode(mode) {
     accountMode = mode;
     el("signupTabBtn").classList.toggle("active", mode === "signup");
     el("loginTabBtn").classList.toggle("active", mode === "login");
     el("accountSubmitBtn").textContent = mode === "signup" ? t("signupBtn") : t("login");
     el("forgotLink").style.display = mode === "login" ? "block" : "none";
+    // Section H: το "Επιβεβαίωση κωδικού" έχει νόημα μόνο στην εγγραφή --
+    // στο login υπάρχει ήδη ο λογαριασμός, δεν διαλέγει κανείς κωδικό τώρα.
+    el("accountConfirmPasswordLabel").style.display = mode === "signup" ? "block" : "none";
+    el("accountConfirmPasswordWrap").style.display = mode === "signup" ? "block" : "none";
+    if (mode === "login") el("accountConfirmPassword").value = "";
     el("accountError").classList.remove("show");
   }
 
@@ -389,6 +429,7 @@
     el("accountError").classList.remove("show");
     el("accountEmail").value = "";
     el("accountPassword").value = "";
+    el("accountConfirmPassword").value = "";
   });
 
   el("signupTabBtn").addEventListener("click", () => setAccountMode("signup"));
@@ -400,6 +441,22 @@
     const btn = el("accountSubmitBtn");
     const errorEl = el("accountError");
     errorEl.classList.remove("show");
+
+    // Section H: η επιβεβαίωση κωδικού έχει νόημα μόνο στην εγγραφή, όχι
+    // στο login (εκεί ο κωδικός είτε είναι σωστός είτε όχι, δεν "διαλέγεται").
+    if (accountMode === "signup") {
+      const confirmPassword = el("accountConfirmPassword").value;
+      if (password.length < 8) {
+        errorEl.textContent = t("passwordTooShort");
+        errorEl.classList.add("show");
+        return;
+      }
+      if (password !== confirmPassword) {
+        errorEl.textContent = t("passwordsDontMatch");
+        errorEl.classList.add("show");
+        return;
+      }
+    }
 
     if (!turnstileTokens.account) {
       errorEl.textContent = t("turnstileRequired");
@@ -444,6 +501,9 @@
 
   el("accountSubmitBtn").addEventListener("click", submitAccountForm);
   el("accountPassword").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submitAccountForm();
+  });
+  el("accountConfirmPassword").addEventListener("keydown", (e) => {
     if (e.key === "Enter") submitAccountForm();
   });
 
