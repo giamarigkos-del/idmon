@@ -49,12 +49,12 @@
   .dev-form input{width:100%;border:1px solid var(--border);border-radius:6px;
     padding:9px 10px;font-size:13.5px;background:var(--bg);color:var(--text);}
   .password-field{position:relative;}
-  .password-field input{padding-right:38px;}
-  .password-toggle-btn{position:absolute;right:0;top:0;bottom:0;width:36px;
+  .password-field input{padding-right:48px;}
+  .password-toggle-btn{position:absolute;right:0;top:0;bottom:0;width:48px;
     background:none;border:none;padding:0;margin:0;cursor:pointer;
     display:flex;align-items:center;justify-content:center;color:var(--text-soft);}
   .password-toggle-btn:hover{color:var(--text);}
-  .password-toggle-btn svg{width:18px;height:18px;}
+  .password-toggle-btn svg{width:26px;height:26px;stroke-width:2;}
   .dev-form-actions{display:flex;gap:8px;margin-top:10px;}
   .dev-form button{border:none;border-radius:6px;padding:9px 16px;font-size:13px;
     cursor:pointer;font-weight:600;font-family:inherit;}
@@ -382,8 +382,8 @@
 
   // Δύο SVG καταστάσεις (μάτι ανοιχτό / μάτι με γραμμή), swap στο innerHTML
   // αντί για δύο ξεχωριστά elements -- ένα λιγότερο πράγμα να συγχρονίζεται.
-  const EYE_OPEN_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
-  const EYE_CLOSED_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a20.3 20.3 0 0 1 4.22-5.37M9.9 4.24A10.4 10.4 0 0 1 12 4c7 0 11 8 11 8a20.5 20.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
+  const EYE_OPEN_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+  const EYE_CLOSED_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a20.3 20.3 0 0 1 4.22-5.37M9.9 4.24A10.4 10.4 0 0 1 12 4c7 0 11 8 11 8a20.5 20.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
 
   // Ένα-πράξη toggle: αλλάζει type="password"↔"text" ΚΑΙ το εικονίδιο μαζί,
   // ώστε να μη μπορούν ποτέ να ξεσυγχρονιστούν μεταξύ τους.
