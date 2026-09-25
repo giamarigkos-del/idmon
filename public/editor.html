@@ -152,6 +152,22 @@
   .fallback-dismiss:disabled{opacity:.5;cursor:default;}
   .fallback-list{max-height:220px;overflow-y:auto;}
 
+  /* Section S: ιστορικότητα εκδόσεων -- ίδιο οπτικό μοτίβο με .fallback-row,
+     απλά με ένα κανονικό κουμπί (restore) αντί για το μικρό κυκλικό ✕. */
+  .version-row{font-size:12.5px;padding:10px 4px;border-bottom:1px solid var(--border);
+    color:var(--text);line-height:1.5;}
+  .version-row:last-child{border-bottom:none;}
+  .version-row-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+  .version-row-title{font-weight:600;}
+  .version-row-time{font-size:11px;color:var(--text-soft);}
+  .version-row-snippet{color:var(--text-soft);margin:4px 0 8px;
+    overflow:hidden;text-overflow:ellipsis;display:-webkit-box;
+    -webkit-line-clamp:2;-webkit-box-orient:vertical;}
+  .version-current-badge{font-size:10.5px;font-weight:600;color:var(--accent);
+    background:var(--accent-soft);border-radius:4px;padding:2px 6px;margin-left:6px;}
+  .version-restore-btn{font-size:11.5px;padding:5px 10px;}
+  .version-restore-btn:disabled{opacity:.5;cursor:default;}
+
   .test-q{padding:14px 16px;flex-shrink:0;}
   .test-q input{width:100%;border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:12px;margin-top:8px;}
   /* Βήμα 1β: το πάνελ είναι νήμα συζήτησης (ίδια συμπεριφορά με το widget). */
@@ -972,6 +988,7 @@
       <div class="preview-actions">
         <button type="button" id="editFromPreviewBtn">${t("edit")}</button>
         ${isDraft ? `<button type="button" id="publishBtn">${t("publish")}</button>` : ""}
+        ${!isDraft ? `<button type="button" id="versionHistoryBtn">${t("versionHistoryBtn")}</button>` : ""}
         ${data.sourceUrl ? `<button type="button" id="refreshFromUrlBtn">${t("refreshFromUrl")}</button>` : ""}
         <button type="button" class="btn-danger" id="deleteBtn">${t("delete")}</button>
       </div>
@@ -992,6 +1009,10 @@
     }
 
     el("editFromPreviewBtn").addEventListener("click", () => enterEditMode(data));
+
+    if (!isDraft) {
+      el("versionHistoryBtn").addEventListener("click", () => openVersionHistory(data.documentId));
+    }
 
     if (data.sourceUrl) {
       el("refreshFromUrlBtn").addEventListener("click", async () => {
@@ -1055,6 +1076,90 @@
         alert(t("deleteErrorPrefix") + err.message);
         btn.disabled = false;
       }
+    });
+  }
+
+  // --- Section S: ιστορικότητα εκδόσεων -- ίδιο pattern με openPreview,
+  // αντικαθιστά το mainPanel αντί για ξεχωριστό modal/overlay. Το "← Πίσω"
+  // ξαναφέρνει το κανονικό preview, ίδια λογική με το cancel του edit mode. ---
+  async function openVersionHistory(documentId) {
+    const main = el("mainPanel");
+    main.innerHTML = `<div class="empty-note">${t("loading")}</div>`;
+    try {
+      const res = await fetch(`/document/${encodeURIComponent(documentId)}/versions`, { headers: HEADERS });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || t("notFoundDefault"));
+      renderVersionHistoryPanel(documentId, data);
+    } catch (err) {
+      main.innerHTML = `<div class="empty-note">❌ ${escapeHtml(t("versionHistoryLoadError"))}</div>`;
+    }
+  }
+
+  function versionSnippet(text) {
+    const plain = (text || "").replace(/\s+/g, " ").trim();
+    return plain.length > 160 ? plain.slice(0, 160) + "…" : plain;
+  }
+
+  function renderVersionHistoryPanel(documentId, data) {
+    const main = el("mainPanel");
+    const versions = data.versions || [];
+
+    main.innerHTML = `
+      <div class="preview-head">
+        <h2>${escapeHtml(t("versionHistoryTitle"))}</h2>
+        <div class="preview-meta">
+          <span>${escapeHtml(t("versionHistoryVersionLabel", { version: data.currentVersion }))}
+            <span class="version-current-badge">${escapeHtml(t("versionHistoryCurrentLabel"))}</span>
+          </span>
+        </div>
+      </div>
+      <div class="preview-actions">
+        <button type="button" id="versionHistoryBackBtn">${t("versionHistoryBackBtn")}</button>
+      </div>
+      <div class="version-list fallback-list" id="versionList"></div>
+    `;
+
+    el("versionHistoryBackBtn").addEventListener("click", () => openPreview(documentId));
+
+    const list = el("versionList");
+    if (!versions.length) {
+      list.innerHTML = `<div class="empty-note">${t("versionHistoryEmpty")}</div>`;
+      return;
+    }
+
+    list.innerHTML = versions.map((v) => `
+      <div class="version-row" data-version="${v.version}">
+        <div class="version-row-head">
+          <span class="version-row-title">${escapeHtml(t("versionHistoryVersionLabel", { version: v.version }))}</span>
+          <span class="version-row-time">${escapeHtml(t("versionHistorySavedAtPrefix"))} ${timeAgo(v.savedAt)}</span>
+        </div>
+        <div class="version-row-snippet">${escapeHtml(versionSnippet(v.content))}</div>
+        <button type="button" class="version-restore-btn">${t("versionHistoryRestoreBtn")}</button>
+      </div>
+    `).join("");
+
+    list.querySelectorAll(".version-restore-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const row = btn.closest(".version-row");
+        const versionNumber = row.dataset.version;
+        if (!confirm(t("versionHistoryRestoreConfirm"))) return;
+        btn.disabled = true;
+        btn.textContent = t("versionHistoryRestoring");
+        try {
+          const res = await fetch(
+            `/document/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(versionNumber)}/restore`,
+            { method: "POST", headers: HEADERS }
+          );
+          const result = await res.json();
+          if (!res.ok) throw new Error(result.error || t("notFoundDefault"));
+          await loadDocuments();
+          openPreview(documentId);
+        } catch (err) {
+          alert(t("versionHistoryRestoreErrorPrefix") + err.message);
+          btn.disabled = false;
+          btn.textContent = t("versionHistoryRestoreBtn");
+        }
+      });
     });
   }
 

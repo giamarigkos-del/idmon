@@ -25,6 +25,13 @@ const ANALYTICS_TTL_SECONDS = 60 * 60 * 24 * 90; // 90 ημέρες
 const DEFAULT_ANALYTICS_DAYS = 30;
 const MAX_ANALYTICS_DAYS = 90;
 
+// Section S: ιστορικότητα εκδόσεων εγγράφων -- πόσες παλιές εκδόσεις
+// κρατάμε ανά έγγραφο πριν αρχίσουμε να πετάμε τις πιο παλιές (FIFO). Το
+// κείμενο ενός εγγράφου είναι λίγα KB, οπότε ακόμα και 20 εκδόσεις είναι
+// αμελητέο μέγεθος σε ένα ΚΑΙ ΜΟΝΟ KV value -- δεν χρειάζεται ξεχωριστό
+// key ανά έκδοση.
+const MAX_VERSION_HISTORY = 20;
+
 // Το πραγματικό workspace του διαχειριστή -- ΠΟΤΕ καμία λήξη σε τίποτα εδώ
 // (draft, deleted, ή δημοσιευμένο). Κάθε άλλο workspace (τυχαίοι επισκέπτες
 // με το δικό τους αυτόματο, τοπικά-αποθηκευμένο ID) παίρνει ενιαία λήξη
@@ -655,7 +662,8 @@ async function deleteAllByPrefix(env, prefix) {
 
 // Πλήρης καθαρισμός ΟΛΩΝ των δεδομένων ενός workspace -- αγγίζει ΚΑΘΕ
 // σύστημα που κρατάει κάτι scoped σε αυτό το workspace: KV (έγγραφα,
-// ρυθμίσεις, analytics, usage, fallback ερωτήσεις, contradictions),
+// ιστορικό εκδόσεων εγγράφων, ρυθμίσεις, analytics, usage, fallback
+// ερωτήσεις, contradictions),
 // Vectorize (embeddings των εγγράφων), D1 (embed_domains, connections --
 // με best-effort revoke στον εξωτερικό provider πρώτα, ίδια λογική με το
 // disconnect endpoint). ΔΕΝ αγγίζει users/sessions -- αυτό είναι ευθύνη
@@ -689,6 +697,7 @@ async function deleteAllWorkspaceData(env, workspaceId) {
   // -- Υπόλοιπα KV δεδομένα scoped στο workspace --
   await deleteAllByPrefix(env, `session:${workspaceId}:contradiction:`);
   await deleteAllByPrefix(env, `session:${workspaceId}:fallback:`);
+  await deleteAllByPrefix(env, `session:${workspaceId}:docversions:`);
   await deleteAllByPrefix(env, `analytics:${workspaceId}:`);
   await deleteAllByPrefix(env, `usage:${workspaceId}:`);
   await env.DOCUMENT_REGISTRY.delete(`workspace:${workspaceId}:settings`);
@@ -1863,6 +1872,143 @@ async function handleGetAnalyticsSummary(request, env) {
   return new Response(JSON.stringify(summary), { headers: JSON_HEADERS });
 }
 
+// Section S: ιστορικότητα εκδόσεων εγγράφων.
+//
+// Ένα ΚΑΙ ΜΟΝΟ KV key ανά έγγραφο, JSON array, πιο πρόσφατη
+// αντικατεστημένη έκδοση πρώτη (unshift). ΔΕΝ αγγίζει καθόλου το
+// Vectorize -- οι παλιές εκδόσεις κρατάνε μόνο το κείμενο, ποτέ embeddings.
+// Το restore ξαναπερνάει από το ΙΔΙΟ chunk+embed+upsert μονοπάτι που ήδη
+// υπάρχει (βλ. handleUpload/handleRefreshFromUrl), οπότε τα vectors της
+// επαναφερμένης έκδοσης είναι πάντα φρέσκα, όχι παλιά/stale.
+function versionsKvKey(workspaceId, documentId) {
+  return `session:${workspaceId}:docversions:${documentId}`;
+}
+
+async function readVersions(env, workspaceId, documentId) {
+  const raw = await env.DOCUMENT_REGISTRY.get(versionsKvKey(workspaceId, documentId));
+  return raw ? JSON.parse(raw) : [];
+}
+
+// Καλείται ΑΚΡΙΒΩΣ πριν αντικατασταθεί το ζωντανό, ήδη-δημοσιευμένο κείμενο
+// ενός εγγράφου (μέσα σε handleUpload και handleRefreshFromUrl). Παίρνει
+// σαν όρισμα το ΠΑΛΙΟ doc (πριν το overwrite) και του δίνει έναν αριθμό
+// έκδοσης, μετά τον σπρώχνει στην αρχή της λίστας.
+//
+// Best-effort, ΙΔΙΑ φιλοσοφία με recordAnalytics: ένα πρόβλημα στο
+// versioning ΠΟΤΕ δεν πρέπει να μπλοκάρει το πραγματικό save/publish
+// του χρήστη -- σκόπιμα καταπίνουμε το error.
+async function saveVersionSnapshot(env, workspaceId, documentId, oldDoc) {
+  try {
+    const versions = await readVersions(env, workspaceId, documentId);
+    versions.unshift({
+      version: oldDoc.version || 1,
+      content: oldDoc.fullText || "",
+      chunkCount: oldDoc.chunkCount || 0,
+      publishedAt: oldDoc.publishedAt || null,
+      savedAt: new Date().toISOString(),
+    });
+    const trimmed = versions.slice(0, MAX_VERSION_HISTORY);
+    await env.DOCUMENT_REGISTRY.put(versionsKvKey(workspaceId, documentId), JSON.stringify(trimmed));
+  } catch (err) {
+    // Σκόπιμα καταπίνουμε το error -- βλ. σχόλιο πάνω από τη συνάρτηση.
+  }
+}
+
+async function handleListDocumentVersions(request, env, documentId) {
+  const workspaceId = await resolveWorkspaceId(request, env);
+  if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
+
+  const kvKey = `session:${workspaceId}:doc:${documentId}`;
+  const raw = await env.DOCUMENT_REGISTRY.get(kvKey);
+  if (!raw) return jsonError(404, "Document not found");
+  const doc = JSON.parse(raw);
+
+  const versions = await readVersions(env, workspaceId, documentId);
+  return new Response(
+    JSON.stringify({
+      documentId,
+      currentVersion: doc.version || 1,
+      currentPublishedAt: doc.publishedAt || null,
+      versions,
+    }),
+    { headers: JSON_HEADERS }
+  );
+}
+
+// Επαναφορά: ξαναχρησιμοποιεί ΑΚΡΙΒΩΣ το ίδιο chunk+embed+upsert μοτίβο με
+// το handlePublishDocument -- δεν "επιστρέφει" κυριολεκτικά στα παλιά
+// vectors (αυτά ποτέ δεν κρατήθηκαν), απλά δημοσιεύει το παλιό κείμενο σαν
+// ΝΕΑ έκδοση. Καθαρότερο λογιστικά: το "τρέχον" είναι πάντα ένα μόνο πράγμα,
+// χωρίς ειδικές περιπτώσεις.
+async function handleRestoreDocumentVersion(request, env, documentId, versionNumber) {
+  const workspaceId = await resolveWorkspaceId(request, env);
+  if (!workspaceId) return jsonError(400, "Missing X-Workspace-Id header");
+
+  const kvKey = `session:${workspaceId}:doc:${documentId}`;
+  const raw = await env.DOCUMENT_REGISTRY.get(kvKey);
+  if (!raw) return jsonError(404, "Document not found");
+  const doc = JSON.parse(raw);
+
+  const versions = await readVersions(env, workspaceId, documentId);
+  const target = versions.find((v) => v.version === versionNumber);
+  if (!target) return jsonError(404, "Version not found");
+
+  // Η τρέχουσα (ζωντανή) έκδοση σώζεται κι αυτή πριν αντικατασταθεί, ώστε
+  // η επαναφορά να μην είναι μονόδρομος -- μπορείς να κάνεις restore προς
+  // τα εμπρός ξανά αν αλλάξεις γνώμη.
+  if (doc.status === "published") {
+    await saveVersionSnapshot(env, workspaceId, documentId, doc);
+  }
+
+  if (doc.chunkCount) {
+    const idsToDelete = [];
+    for (let i = 0; i < doc.chunkCount; i++) idsToDelete.push(`${documentId}-chunk-${i}`);
+    await env.VECTORIZE.deleteByIds(idsToDelete);
+  }
+
+  const chunks = chunkText(target.content || "");
+  const vectors = [];
+  try {
+    for (let i = 0; i < chunks.length; i++) {
+      const embedding = await getEmbedding(chunks[i], env.GEMINI_API_KEY);
+      vectors.push({
+        id: `${documentId}-chunk-${i}`,
+        values: embedding,
+        namespace: workspaceId,
+        metadata: { documentId, chunkIndex: i, text: chunks[i] },
+      });
+    }
+  } catch (err) {
+    // Section R: ίδιο σχόλιο με handleUpload/handlePublishDocument -- καθαρή
+    // αποτυχία, όχι crash. Η προηγούμενη snapshot ΔΕΝ χάνεται, απλά η
+    // επαναφορά δεν ολοκληρώθηκε -- ο χρήστης μπορεί να ξαναδοκιμάσει.
+    return jsonError(503, "The AI provider is temporarily unavailable. Please try again in a few minutes.");
+  }
+  await env.VECTORIZE.upsert(vectors);
+
+  doc.fullText = target.content || "";
+  doc.status = "published";
+  doc.chunkCount = chunks.length;
+  doc.publishedAt = new Date().toISOString();
+  doc.version = (doc.version || 1) + 1;
+  doc.updatedAt = new Date().toISOString();
+
+  const { putOptions, expiresAt } = await docTtlFor(env, workspaceId);
+  doc.expiresAt = expiresAt;
+  await env.DOCUMENT_REGISTRY.put(kvKey, JSON.stringify(doc), putOptions);
+
+  return new Response(
+    JSON.stringify({
+      documentId,
+      status: "published",
+      restoredFromVersion: versionNumber,
+      newVersion: doc.version,
+      chunksCreated: chunks.length,
+    }),
+    { headers: JSON_HEADERS }
+  );
+}
+
 // Section R: προσφορά αναβάθμισης -- ο server αποφασίζει ΠΟΙΟΣ βλέπει το κουμπί
 // "Αναβάθμιση" στο editor.html και ΤΙ πλάνα μπορεί να αγοράσει, ώστε ο browser
 // να μην κρίνει ποτέ μόνος του (ό,τι υπάρχει στον browser μπορεί να το αλλάξει
@@ -2503,6 +2649,15 @@ async function handleUpload(request, env) {
   // δημοσιευμένα, για συμβατότητα προς τα πίσω).
   const status = existing ? (existing.status || "published") : "draft";
 
+  // Section S: το κείμενο που είχε ΜΕΧΡΙ ΤΩΡΑ ένα ήδη-δημοσιευμένο έγγραφο
+  // πρόκειται να αντικατασταθεί αμέσως παρακάτω (χωρίς ξεχωριστό βήμα
+  // "publish" -- η επεξεργασία ενός ήδη ζωντανού εγγράφου δημοσιεύεται
+  // κατευθείαν). Σώζουμε ΠΡΙΝ χαθεί, μόνο αν το κείμενο πραγματικά άλλαξε
+  // (όχι σε επανάληψη save χωρίς αλλαγές).
+  if (existing && status === "published" && existing.fullText !== text) {
+    await saveVersionSnapshot(env, workspaceId, documentId, existing);
+  }
+
   if (existing) {
     const idsToDelete = [];
     for (let i = 0; i < (existing.chunkCount || 0); i++) {
@@ -2546,6 +2701,16 @@ async function handleUpload(request, env) {
   // Το chunking παραπάνω παραμένει ξεχωριστό και χρησιμεύει ΜΟΝΟ για
   // embeddings/αναζήτηση -- ποτέ πια δεν το χρησιμοποιούμε για να δείξουμε
   // κείμενο σε άνθρωπο.
+  // Section S: αν μόλις σώθηκε νέο κείμενο πάνω σε ήδη-δημοσιευμένο έγγραφο
+  // (η συνηθισμένη περίπτωση επεξεργασίας), αυτό είναι μια νέα έκδοση --
+  // προχωράμε τον μετρητή. Draft ή αμετάβλητο κείμενο: κρατάει ό,τι είχε.
+  const newVersion =
+    existing && status === "published" && existing.fullText !== text
+      ? (existing.version || 1) + 1
+      : existing
+        ? existing.version || null
+        : null;
+
   const { putOptions, expiresAt } = await docTtlFor(env, workspaceId);
   await env.DOCUMENT_REGISTRY.put(
     kvKey,
@@ -2557,13 +2722,15 @@ async function handleUpload(request, env) {
       sourceUrl: sourceUrl || null,
       fullText: text,
       status,
+      version: newVersion,
+      publishedAt: existing ? existing.publishedAt || null : null,
       expiresAt,
     }),
     putOptions
   );
 
   return new Response(
-    JSON.stringify({ documentId, status, chunksCreated: chunkCount }),
+    JSON.stringify({ documentId, status, chunksCreated: chunkCount, version: newVersion }),
     { headers: JSON_HEADERS }
   );
 }
@@ -3201,8 +3368,19 @@ async function handleRefreshFromUrl(request, env, documentId) {
     return jsonError(400, "Could not extract enough readable text from this page");
   }
 
+  // Section S: πιάνουμε το ΠΑΛΙΟ κείμενο πριν το overwrite παρακάτω -- ίδιο
+  // σκεπτικό με το handleUpload, εδώ όμως το doc.fullText αλλάζει πιο κάτω
+  // στην ίδια συνάρτηση, οπότε χρειάζεται ρητό snapshot ΠΡΙΝ, όχι μετά.
+  const wasPublished = doc.status === "published";
+  const textActuallyChanged = doc.fullText !== text;
+  const oldDocForSnapshot = { ...doc };
+
   doc.fullText = text;
   doc.updatedAt = new Date().toISOString();
+
+  if (wasPublished && textActuallyChanged) {
+    await saveVersionSnapshot(env, workspaceId, documentId, oldDocForSnapshot);
+  }
 
   if (doc.status === "published") {
     if (doc.chunkCount) {
@@ -3228,6 +3406,7 @@ async function handleRefreshFromUrl(request, env, documentId) {
     }
     await env.VECTORIZE.upsert(vectors);
     doc.chunkCount = chunks.length;
+    if (textActuallyChanged) doc.version = (doc.version || 1) + 1;
   }
 
   const { putOptions, expiresAt } = await docTtlFor(env, workspaceId);
@@ -3289,13 +3468,16 @@ async function handlePublishDocument(request, env, documentId) {
   doc.status = "published";
   doc.chunkCount = chunks.length;
   doc.publishedAt = new Date().toISOString();
+  // Section S: πρώτη ζωντανή έκδοση. Αν το έγγραφο ξαναδημοσιεύεται μετά
+  // από delete/restore έχοντας ήδη version, το κρατάμε -- δεν ξαναμηδενίζει.
+  if (!doc.version) doc.version = 1;
 
   const { putOptions, expiresAt } = await docTtlFor(env, workspaceId);
   doc.expiresAt = expiresAt;
   await env.DOCUMENT_REGISTRY.put(kvKey, JSON.stringify(doc), putOptions);
 
   return new Response(
-    JSON.stringify({ documentId, status: "published", chunksCreated: chunks.length }),
+    JSON.stringify({ documentId, status: "published", chunksCreated: chunks.length, version: doc.version }),
     { headers: JSON_HEADERS }
   );
 }
@@ -4786,15 +4968,43 @@ export default {
         if (action === "restore") return handleRestoreDocument(request, env, documentId);
         if (action === "refresh-from-url") return handleRefreshFromUrl(request, env, documentId);
       }
+      // Section S: /document/{id}/versions/{version}/restore -- ξεχωριστό
+      // μονοπάτι από το action==="restore" παραπάνω (εκείνο είναι για
+      // επαναφορά από "deleted", αυτό για επαναφορά παλιάς ΕΚΔΟΣΗΣ κειμένου).
+      if (segments.length === 4 && segments[1] === "versions" && segments[3] === "restore") {
+        let documentId = segments[0];
+        try {
+          documentId = decodeURIComponent(documentId);
+        } catch (err) {
+          // κρατάμε το raw αν το decode αποτύχει
+        }
+        const versionNumber = parseInt(segments[2], 10);
+        if (!Number.isFinite(versionNumber)) return jsonError(400, "Invalid version number");
+        return handleRestoreDocumentVersion(request, env, documentId, versionNumber);
+      }
     }
 
     if (url.pathname.startsWith("/document/") && request.method === "GET") {
+      const rawTail = url.pathname.split("/document/")[1] || "";
+      const segments = rawTail.split("/");
+
+      // Section S: /document/{id}/versions -- λίστα παλιών εκδόσεων.
+      if (segments.length === 2 && segments[1] === "versions") {
+        let documentId = segments[0];
+        try {
+          documentId = decodeURIComponent(documentId);
+        } catch (err) {
+          // κρατάμε το raw αν το decode αποτύχει
+        }
+        return handleListDocumentVersions(request, env, documentId);
+      }
+
       // Safety net: αν το documentId περιέχει κενά ή ειδικούς χαρακτήρες
       // (π.χ. "Verification process" -> "Verification%20process" στο URL),
       // αποκωδικοποιούμε πριν το χρησιμοποιήσουμε ως KV key. Χωρίς αυτό,
       // το lookup αποτυγχάνει σιωπηλά με "Document not found" ακόμα κι όταν
       // το έγγραφο υπάρχει.
-      const rawId = url.pathname.split("/document/")[1];
+      const rawId = rawTail;
       let documentId = rawId;
       try {
         documentId = decodeURIComponent(rawId);

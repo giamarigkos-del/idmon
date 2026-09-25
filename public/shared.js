@@ -583,6 +583,21 @@ const TRANSLATIONS = {
     googleDriveErrorGeneric: "Something went wrong connecting to Google Drive.",
     refreshingFromUrl: "Refreshing…",
     refreshFromUrlErrorPrefix: "Refresh error: ",
+
+    // Section S: version history
+    versionHistoryBtn: "Version history",
+    versionHistoryTitle: "Version history",
+    versionHistoryBackBtn: "← Back",
+    versionHistoryEmpty: "No previous versions yet -- this document hasn't been edited since it was published.",
+    versionHistoryCurrentLabel: "Current version",
+    versionHistoryLoadError: "Could not load version history.",
+    versionHistoryRestoreBtn: "Restore this version",
+    versionHistoryRestoring: "Restoring…",
+    versionHistoryRestoreConfirm: "Restore this version? This publishes it as the new current version -- nothing is lost, the current text is saved as a version too.",
+    versionHistoryRestoreErrorPrefix: "Could not restore: ",
+    versionHistoryRestoredBanner: "✓ Restored as version {version}.",
+    versionHistorySavedAtPrefix: "Replaced",
+    versionHistoryVersionLabel: "Version {version}",
   },
   el: {
     loading: "Φόρτωση…",
@@ -879,6 +894,21 @@ const TRANSLATIONS = {
     googleDriveErrorMissingScope: "Δεν εγκρίθηκε η πρόσβαση στο Google Drive. Δοκίμασε να συνδεθείς ξανά και βεβαιώσου ότι το checkbox του Google Drive είναι τσεκαρισμένο πριν συνεχίσεις.",
     googleDriveErrorGeneric: "Κάτι πήγε στραβά κατά τη σύνδεση με το Google Drive.",
     refreshFromUrlErrorPrefix: "Σφάλμα ανανέωσης: ",
+
+    // Section S: ιστορικότητα εκδόσεων
+    versionHistoryBtn: "Ιστορικό εκδόσεων",
+    versionHistoryTitle: "Ιστορικό εκδόσεων",
+    versionHistoryBackBtn: "← Πίσω",
+    versionHistoryEmpty: "Δεν υπάρχουν ακόμα προηγούμενες εκδόσεις -- το έγγραφο δεν έχει επεξεργαστεί από τότε που δημοσιεύτηκε.",
+    versionHistoryCurrentLabel: "Τρέχουσα έκδοση",
+    versionHistoryLoadError: "Δεν ήταν δυνατή η φόρτωση του ιστορικού εκδόσεων.",
+    versionHistoryRestoreBtn: "Επαναφορά αυτής της έκδοσης",
+    versionHistoryRestoring: "Γίνεται επαναφορά…",
+    versionHistoryRestoreConfirm: "Επαναφορά αυτής της έκδοσης; Θα δημοσιευτεί σαν νέα τρέχουσα έκδοση -- τίποτα δεν χάνεται, το τρέχον κείμενο αποθηκεύεται κι αυτό σαν έκδοση.",
+    versionHistoryRestoreErrorPrefix: "Δεν ήταν δυνατή η επαναφορά: ",
+    versionHistoryRestoredBanner: "✓ Έγινε επαναφορά ως έκδοση {version}.",
+    versionHistorySavedAtPrefix: "Αντικαταστάθηκε",
+    versionHistoryVersionLabel: "Έκδοση {version}",
   },
 };
 
