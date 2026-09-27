@@ -29,7 +29,7 @@ import { pathToFileURL } from "url";
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const tmp = mkdtempSync(join(projectRoot, ".tmp-wiring-"));
 const indexSrc = readFileSync(new URL("../src/index.js", import.meta.url), "utf8").replace(
-  'import argon2WASM from "argon2-wasm-edge/wasm/argon2.wasm";\nimport blake2bWASM from "argon2-wasm-edge/wasm/blake2b.wasm";\nsetWASMModules({ argon2WASM, blake2bWASM });',
+  /import argon2WASM from "argon2-wasm-edge\/wasm\/argon2\.wasm";\r?\nimport blake2bWASM from "argon2-wasm-edge\/wasm\/blake2b\.wasm";\r?\nsetWASMModules\(\{ argon2WASM, blake2bWASM \}\);/,
   '// [headless test] WASM imports παραλείπονται, δεν χρειάζονται εδώ.'
 );
 writeFileSync(join(tmp, "index.mjs"), indexSrc);
