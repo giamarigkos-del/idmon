@@ -12,7 +12,14 @@
 // γενικό φάκελο temp του συστήματος) -- έτσι όταν το Node ψάχνει το πακέτο
 // "argon2-wasm-edge" που εισάγει το src/index.js, ανεβαίνει φάκελο-φάκελο
 // και βρίσκει το node_modules/ του ίδιου του project. Σε τυχαίο φάκελο του
-// συστήματος δεν θα το έβρισκε ποτέ. Ο φάκελος καθαρίζεται στο τέλος.)
+// συστήματος δεν θα το έβρισκε ποτέ. Ο φάκελος καθαρίζεται στο τέλος.
+//
+// Τα δύο import "*.wasm" (argon2.wasm, blake2b.wasm) είναι σύμβαση ειδική
+// για bundlers (το Wrangler/esbuild του Cloudflare τα καταλαβαίνει, το
+// απλό Node ΟΧΙ, ανεξάρτητα από flags -- διαφορετικό πρόβλημα από το
+// node_modules παραπάνω). Το test αυτό δεν κάνει καθόλου login/signup, άρα
+// δεν χρειάζεται καθόλου πραγματικό Argon2, τα αντικαθιστούμε με κάτι
+// αδρανές ΜΟΝΟ στο προσωρινό αντίγραφο -- το src/index.js παραμένει άθικτο.)
 
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "fs";
 import { fileURLToPath } from "url";
@@ -21,7 +28,10 @@ import { pathToFileURL } from "url";
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const tmp = mkdtempSync(join(projectRoot, ".tmp-wiring-"));
-const indexSrc = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
+const indexSrc = readFileSync(new URL("../src/index.js", import.meta.url), "utf8").replace(
+  'import argon2WASM from "argon2-wasm-edge/wasm/argon2.wasm";\nimport blake2bWASM from "argon2-wasm-edge/wasm/blake2b.wasm";\nsetWASMModules({ argon2WASM, blake2bWASM });',
+  '// [headless test] WASM imports παραλείπονται, δεν χρειάζονται εδώ.'
+);
 writeFileSync(join(tmp, "index.mjs"), indexSrc);
 const worker = (await import(pathToFileURL(join(tmp, "index.mjs")).href)).default;
 

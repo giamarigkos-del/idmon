@@ -30,11 +30,19 @@ function assert(condition, message) {
 // ΜΕΣΑ στο project (όχι στον γενικό φάκελο temp του συστήματος), ώστε το
 // "argon2-wasm-edge" που εισάγει το src/index.js να βρίσκεται μέσω του
 // node_modules/ του ίδιου του project. Καθαρίζεται στο τέλος.
+//
+// Τα δύο import "*.wasm" είναι σύμβαση ειδική για bundlers (Wrangler/esbuild
+// το καταλαβαίνουν, το απλό Node όχι, ανεξάρτητα από flags). Αυτό το test
+// δεν κάνει login/signup, άρα δεν χρειάζεται πραγματικό Argon2 -- τα
+// αντικαθιστούμε με κάτι αδρανές ΜΟΝΟ στο προσωρινό αντίγραφο.
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const tmp = mkdtempSync(join(projectRoot, ".tmp-config-"));
 writeFileSync(
   join(tmp, "index.mjs"),
-  readFileSync(new URL("../src/index.js", import.meta.url), "utf8")
+  readFileSync(new URL("../src/index.js", import.meta.url), "utf8").replace(
+    'import argon2WASM from "argon2-wasm-edge/wasm/argon2.wasm";\nimport blake2bWASM from "argon2-wasm-edge/wasm/blake2b.wasm";\nsetWASMModules({ argon2WASM, blake2bWASM });',
+    '// [headless test] WASM imports παραλείπονται, δεν χρειάζονται εδώ.'
+  )
 );
 const worker = (await import(pathToFileURL(join(tmp, "index.mjs")).href)).default;
 
