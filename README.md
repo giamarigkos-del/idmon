@@ -22,6 +22,7 @@ Documentation (verification steps, exception handling, FAQs, compliance notes) u
 - Streaming responses (SSE): text appears progressively instead of after a long wait
 - Full bilingual UI (English / Greek) with a persistent language toggle
 - Optional email alert (via [Resend](https://resend.com)) whenever the assistant can't answer a question, rate-limited to at most one email per workspace per hour
+- Automatic answer-generation fallback: if Gemini fails or stalls, the request is routed to Cloudflare Workers AI (Gemma 4) instead, so a Gemini outage degrades gracefully rather than failing the request outright (see [Architecture](#architecture))
 
 **Embeddable widget**
 - One script tag puts the assistant on any website; the widget is rendered in a Shadow DOM (not an iframe), so the request `Origin` reflects the customer's real domain
@@ -122,8 +123,9 @@ The paid-access helper grants access when a subscription is `active` or `trialin
   article /                ├──▶ KV (DOCUMENT_REGISTRY)      documents, fallback logs, contradictions, widget settings, analytics counters, usage counters, one-time tokens
   terms /                  ├──▶ D1 (idmon-accounts) accounts, sessions, connections, billing mirror
   privacy)                 ├──▶ Vectorize (idmon-index)   embeddings for semantic search, per workspace
-  Customer sites  ───▶     ├──▶ Gemini API                  gemini-embedding-001 for embeddings, gemini-3.6-flash for answers, PDF extraction, and contradiction detection
-  (widget.js)              ├──▶ Paddle API                  checkout, subscriptions, customer portal, and webhooks
+  Customer sites  ───▶     ├──▶ Gemini API (via Cloudflare AI Gateway)   gemini-embedding-001 for embeddings, gemini-3.6-flash for answers, PDF extraction, and contradiction detection
+  (widget.js)              ├──▶ Workers AI (Gemma 4), via the same AI Gateway   fallback for answer generation only, used when Gemini fails or stalls
+                           ├──▶ Paddle API                  checkout, subscriptions, customer portal, and webhooks
                           └──▶ Resend API                  transactional email: fallback alerts, verification, password reset
 ```
 
@@ -132,6 +134,7 @@ The whole product runs on this one Worker at `idmon.app`. The public marketing a
 Design decisions worth calling out:
 
 - **Chunking is only ever used to build embeddings.** The full, original document text is stored as-is in KV and is what gets rendered back to a human; chunk boundaries never touch the reconstructed text. Reconstructing prose from chunks destroys paragraph and heading structure, so keeping a single unchunked source of truth avoids that entirely.
+- **Embeddings never get a cross-provider fallback.** A different embedding model would produce an incompatible vector space against what's already stored in Vectorize, giving silently wrong search results with no visible error. The Workers AI fallback above applies only to answer generation; a full Gemini outage still degrades embeddings/search to a clean error, not continued service on a mismatched model.
 - **No background jobs.** Fallback-question logs, guest-workspace documents, and one-time tokens all expire via native KV TTL (`expirationTtl`), not a cron job or scheduled worker. Anything that needs cleanup expires itself.
 - **Sessions are server-side, not stateless JWTs.** A session token is meaningless on its own; every request re-checks it against D1. This costs one extra read per authenticated request but means logout and revocation actually work.
 - **Streaming with a safety net.** `/query/stream` wraps Gemini's `streamGenerateContent` in a small custom SSE protocol (`chunk`, `done`, `error` events). If a stream yields zero chunks, the non-streaming path is used automatically.
@@ -149,9 +152,10 @@ Design decisions worth calling out:
 | Billing | Paddle Checkout, subscriptions, customer portal, and webhooks |
 | Password hashing | Argon2id (`argon2-wasm-edge`, WASM, statically imported) |
 | Bot protection | Cloudflare Turnstile (signup, login, forgot-password) |
+| LLM routing | Cloudflare AI Gateway (Gemini pass-through + Workers AI fallback) |
 | Token encryption | AES-GCM (native Web Crypto) |
 | Embeddings | Gemini `gemini-embedding-001` |
-| Answer generation | Gemini `gemini-3.6-flash` |
+| Answer generation | Gemini `gemini-3.6-flash`, fallback Workers AI (Gemma 4) |
 | Email | Resend |
 | Editor | TOAST UI Editor (WYSIWYG, markdown output) |
 | Markdown rendering | marked.js + DOMPurify (fails closed: escaped text if DOMPurify cannot load) |
@@ -166,7 +170,7 @@ Unless noted otherwise, endpoints resolve the workspace from `X-Session-Token` i
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Liveness check |
-| `GET` | `/config/public` | Public, non-secret runtime config for the frontend — currently just the Turnstile site key for this environment |
+| `GET` | `/config/public` | Public, non-secret runtime config for the frontend — Turnstile site key and Paddle client token for this environment |
 | `POST` | `/developer-login` | Exchange a password for the protected demo workspace ID (rate limited) |
 | `POST` | `/account/signup` | Create an account: `{email, password, turnstileToken}` to `{sessionToken, workspaceId}` (Turnstile + rate limited) |
 | `POST` | `/account/login` | `{email, password, turnstileToken}` to a new `{sessionToken, workspaceId}` (Turnstile + rate limited) |
@@ -275,18 +279,21 @@ Set the required secrets:
 npx wrangler secret put GEMINI_API_KEY
 npx wrangler secret put DEVELOPER_PASSWORD
 npx wrangler secret put RESEND_API_KEY          # needed for fallback alerts, verification, and password reset emails
+npx wrangler secret put TURNSTILE_SECRET_KEY     # Cloudflare Turnstile bot-protection secret
 npx wrangler secret put PADDLE_API_KEY           # Paddle Live API key for server-side calls
 npx wrangler secret put PADDLE_WEBHOOK_SECRET    # Paddle notification signing secret
+npx wrangler secret put AI_GATEWAY_TOKEN         # Cloudflare AI Gateway auth token (Gemini + Workers AI fallback routing)
 ```
 
 Configure `[vars]` in `wrangler.toml`:
 - `NOTIFY_FROM_EMAIL`: the sender address for transactional email. It must belong to a domain you have verified on Resend (or use `onboarding@resend.dev`, Resend's shared test sender, which can only deliver to your own Resend account email)
 - `GOOGLE_CLIENT_ID`: public OAuth client ID, used by Sign in with Google (Section U)
+- `CF_ACCOUNT_ID` and `AI_GATEWAY_ID`: identify the Cloudflare AI Gateway that both Gemini calls and the Workers AI fallback are routed through
 - `PADDLE_ENV`, `PADDLE_PRICE_BASIC_MONTHLY`, `PADDLE_PRICE_BASIC_ANNUAL`, `PADDLE_PRICE_PRO_MONTHLY`, and `PADDLE_PRICE_PRO_ANNUAL`: plain Paddle environment and price-ID vars. Keep the Live values for production.
 - `PADDLE_CLIENT_TOKEN`: the public Paddle.js client token, also a plain var; it is safe to send to the browser, but must match `PADDLE_ENV`.
 - `PADDLE_PRICE_BASIC` and `PADDLE_PRICE_PRO`: the monthly price IDs used by the current in-app upgrade flow and webhook plan mapping.
 
-The values for `PADDLE_API_KEY` and `PADDLE_WEBHOOK_SECRET` must be Wrangler secrets, never committed to `wrangler.toml` or `.env.example`. The variable names and non-secret Live price IDs are listed in `.env.example` for local setup.
+The values for `PADDLE_API_KEY`, `PADDLE_WEBHOOK_SECRET`, `TURNSTILE_SECRET_KEY`, and `AI_GATEWAY_TOKEN` must be Wrangler secrets, never committed to `wrangler.toml` or `.env.example`. The variable names and non-secret Live price IDs are listed in `.env.example` for local setup.
 
 For local runs, put overrides such as `MONTHLY_MESSAGE_LIMIT_OVERRIDE` in `.dev.vars`.
 
@@ -347,12 +354,12 @@ idmon/
 ## Known limitations
 
 - Follow-up questions in the same conversation run two parallel retrieval searches (the new question alone, and combined with the previous question) to keep results relevant when the visitor changes topic — roughly doubling retrieval cost per follow-up turn
+- Embeddings have no cross-provider fallback: only answer generation degrades to Workers AI (Gemma 4) if Gemini fails; a Gemini outage still returns a clean error for embeddings and search rather than continuing on a different, incompatible model
 - URL sync does not execute JavaScript: Cloudflare-obfuscated email addresses cannot be read, and pages that require login return the sign-in page as if it were the real content (no login-redirect detection yet)
 - File upload supports `.txt`, `.md`, and `.pdf`; `.docx` is not supported yet
 - Guest and Developer access still trust a client-supplied `X-Workspace-Id` header directly (no session backing them). This is acceptable for an anonymous-trial or demo workspace, but a logged-in account is always protected via server-side session lookup
 - The rate limiter uses per-IP buckets, so users behind a shared IP share a bucket; Cloudflare Turnstile (see [Accounts and sessions](#accounts-and-sessions)) supplements this against abuse spread across many IPs, but does not replace it
 - The Worker (`idmon`), D1 database (`idmon-accounts`), and Vectorize index (`idmon-index`) were all renamed from the old `operations-portal-rag`/`rag-demo-tool-accounts` branding on 26–27 Sep 2026. The D1/Vectorize rename used fresh, empty resources rather than a data migration (no real customers yet at the time); the old resources are kept for a few days as a rollback safety net before deletion
-- The Terms of Service and Privacy Policy are templates and do not yet include a legal entity identification
 
 ## License
 
