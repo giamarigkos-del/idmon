@@ -340,7 +340,7 @@ idmon/
 ├── tests/                  # Integration and headless tests, see Testing
 ├── .env.example            # Paddle variable names and non-secret Live price IDs
 ├── schema.sql              # Complete current D1 schema for fresh setups, including billing mirror tables
-├── wrangler.toml            # The app Worker (operations-portal-rag) → idmon.app (app.idmon.app redirects here)
+├── wrangler.toml            # The app Worker (idmon) → idmon.app (app.idmon.app redirects here)
 └── wrangler.widget-test.toml # Widget test page Worker (idmon-widget-test) → workers.dev
 ```
 
@@ -351,8 +351,7 @@ idmon/
 - File upload supports `.txt`, `.md`, and `.pdf`; `.docx` is not supported yet
 - Guest and Developer access still trust a client-supplied `X-Workspace-Id` header directly (no session backing them). This is acceptable for an anonymous-trial or demo workspace, but a logged-in account is always protected via server-side session lookup
 - The rate limiter uses per-IP buckets, so users behind a shared IP share a bucket; Cloudflare Turnstile (see [Accounts and sessions](#accounts-and-sessions)) supplements this against abuse spread across many IPs, but does not replace it
-- No version history: publishing overwrites the previous embedded version (the full text is always preserved in KV, but there is no diff-able revision log)
-- Internal resource names still use the old branding (Worker `operations-portal-rag`, Vectorize index `operations-portal-rag-index`, D1 database `rag-demo-tool-accounts`); they are not visible to end users
+- The Worker itself was renamed from the old `operations-portal-rag` branding to `idmon` on 26 Sep 2026. The Vectorize index (`operations-portal-rag-index`) and D1 database (`rag-demo-tool-accounts`) still use the old branding — renaming those requires a real data migration (Cloudflare has no in-place rename for either), planned as a separate, careful piece of work
 - The Terms of Service and Privacy Policy are templates and do not yet include a legal entity identification
 
 ## License

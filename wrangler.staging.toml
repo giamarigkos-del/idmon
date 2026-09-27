@@ -1,4 +1,4 @@
-# Staging/sandbox Worker: ίδιος κώδικας με το production (operations-portal-rag),
+# Staging/sandbox Worker: ίδιος κώδικας με το production (idmon),
 # τελείως δικοί του πόροι (βάση, index, KV) και Paddle SANDBOX. Σκοπός: να μπορείς
 # να δοκιμάσεις σενάρια πληρωμών (αποτυχημένη κάρτα, ακύρωση, ανανέωση) και αλλαγές
 # κώδικα σε πραγματικό deploy, χωρίς κανένα ρίσκο για το live προϊόν ή πραγματικούς

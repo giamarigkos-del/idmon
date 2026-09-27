@@ -1,4 +1,4 @@
-name = "operations-portal-rag"
+name = "idmon"
 main = "src/index.js"
 compatibility_date = "2026-08-01"
 
@@ -13,10 +13,20 @@ compatibility_date = "2026-08-01"
 # workers_dev = false ΣΚΟΠΙΜΑ (απόφαση, όχι απλά το default του Wrangler).
 # Το παλιό *.workers.dev URL έχει ήδη απενεργοποιηθεί.
 workers_dev = false
-routes = [
-  { pattern = "idmon.app", custom_domain = true },
-  { pattern = "app.idmon.app", custom_domain = true }
-]
+
+# Section: μετονομασία Worker (26 Σεπ 2026) -- operations-portal-rag -> idmon,
+# παλιό branding. ΠΡΟΣΩΡΙΝΑ σχολιασμένο το routes block: το idmon.app και το
+# app.idmon.app είναι ακόμα δεσμευμένα στον ΠΑΛΙΟ Worker
+# (operations-portal-rag). Αν το αφήναμε εδώ, το πρώτο deploy του νέου
+# ονόματος θα απέτυχε με "already assigned to routes" (η Cloudflare δεν
+# επιτρέπει το ίδιο domain σε δύο Workers ταυτόχρονα). Ξαναμπαίνει μόλις
+# μεταφερθούν χειροκίνητα τα δύο domains στο νέο Worker (dashboard, βλ.
+# συζήτηση) -- βλ. TODO παρακάτω, ΝΑ ΑΦΑΙΡΕΘΕΙ αυτό το σχόλιο τότε.
+#
+# routes = [
+#   { pattern = "idmon.app", custom_domain = true },
+#   { pattern = "app.idmon.app", custom_domain = true }
+# ]
 
 [[vectorize]]
 binding = "VECTORIZE"

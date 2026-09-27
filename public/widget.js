@@ -1,7 +1,7 @@
 // widget.js -- embeddable chat widget (Section I: embed layer).
 //
 // Χρήση σε ξένο site:
-//   <script src="https://operations-portal-rag.giamarigkos.workers.dev/widget.js"
+//   <script src="https://idmon.app/widget.js"
 //           data-embed-id="emb-xxxxxxxxxxxx"></script>
 //
 // Προαιρετικά data-* attributes: data-accent-color (hex, π.χ. #111111 -- το
