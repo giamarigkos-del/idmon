@@ -7,15 +7,20 @@
 // Τρέξιμο: node tests/history-wiring.mjs
 //
 // (Το src/index.js είναι ES module με κατάληξη .js· για να το φορτώσει το Node
-// χωρίς "type":"module" στο package.json, φτιάχνουμε προσωρινά αντίγραφα με
-// κατάληξη .mjs σε φάκελο του συστήματος. Δεν αγγίζεται κανένα αρχείο του project.)
+// χωρίς "type":"module" στο package.json, φτιάχνουμε προσωρινό αντίγραφο με
+// κατάληξη .mjs. Ο προσωρινός φάκελος είναι ΜΕΣΑ στο project (όχι στον
+// γενικό φάκελο temp του συστήματος) -- έτσι όταν το Node ψάχνει το πακέτο
+// "argon2-wasm-edge" που εισάγει το src/index.js, ανεβαίνει φάκελο-φάκελο
+// και βρίσκει το node_modules/ του ίδιου του project. Σε τυχαίο φάκελο του
+// συστήματος δεν θα το έβρισκε ποτέ. Ο φάκελος καθαρίζεται στο τέλος.)
 
-import { readFileSync, writeFileSync, mkdtempSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "fs";
+import { fileURLToPath } from "url";
+import { join, dirname } from "path";
 import { pathToFileURL } from "url";
 
-const tmp = mkdtempSync(join(tmpdir(), "idmon-wiring-"));
+const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const tmp = mkdtempSync(join(projectRoot, ".tmp-wiring-"));
 const indexSrc = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
 writeFileSync(join(tmp, "index.mjs"), indexSrc);
 const worker = (await import(pathToFileURL(join(tmp, "index.mjs")).href)).default;
@@ -158,5 +163,6 @@ const EMB = { Origin: "https://customer.gr" };
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);
+  rmSync(tmp, { recursive: true, force: true });
   process.exit(failed ? 1 : 0);
 })();

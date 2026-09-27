@@ -9,9 +9,9 @@
 //
 // Τρέξιμο: node tests/embed-config.mjs
 
-import { readFileSync, writeFileSync, mkdtempSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "fs";
+import { fileURLToPath } from "url";
+import { join, dirname } from "path";
 import { pathToFileURL } from "url";
 
 let passed = 0;
@@ -26,9 +26,12 @@ function assert(condition, message) {
   }
 }
 
-// Το src/index.js είναι ES module με κατάληξη .js: προσωρινά αντίγραφα .mjs
-// σε φάκελο του συστήματος (δεν αγγίζεται κανένα αρχείο του project).
-const tmp = mkdtempSync(join(tmpdir(), "idmon-config-"));
+// Το src/index.js είναι ES module με κατάληξη .js: προσωρινό αντίγραφο .mjs
+// ΜΕΣΑ στο project (όχι στον γενικό φάκελο temp του συστήματος), ώστε το
+// "argon2-wasm-edge" που εισάγει το src/index.js να βρίσκεται μέσω του
+// node_modules/ του ίδιου του project. Καθαρίζεται στο τέλος.
+const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const tmp = mkdtempSync(join(projectRoot, ".tmp-config-"));
 writeFileSync(
   join(tmp, "index.mjs"),
   readFileSync(new URL("../src/index.js", import.meta.url), "utf8")
@@ -237,4 +240,5 @@ await testOutputSanitization();
 await testLogoSaveValidation();
 
 console.log(`\n${passed} passed, ${failed} failed`);
+rmSync(tmp, { recursive: true, force: true });
 if (failed > 0) process.exit(1);

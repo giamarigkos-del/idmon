@@ -3,3 +3,5 @@ node_modules/
 .env
 .dev.vars
 node-v22.19.0-win-x64/
+.tmp-wiring-*/
+.tmp-config-*/
