@@ -14,19 +14,16 @@ compatibility_date = "2026-08-01"
 # Το παλιό *.workers.dev URL έχει ήδη απενεργοποιηθεί.
 workers_dev = false
 
-# Section: μετονομασία Worker (26 Σεπ 2026) -- operations-portal-rag -> idmon,
-# παλιό branding. ΠΡΟΣΩΡΙΝΑ σχολιασμένο το routes block: το idmon.app και το
-# app.idmon.app είναι ακόμα δεσμευμένα στον ΠΑΛΙΟ Worker
-# (operations-portal-rag). Αν το αφήναμε εδώ, το πρώτο deploy του νέου
-# ονόματος θα απέτυχε με "already assigned to routes" (η Cloudflare δεν
-# επιτρέπει το ίδιο domain σε δύο Workers ταυτόχρονα). Ξαναμπαίνει μόλις
-# μεταφερθούν χειροκίνητα τα δύο domains στο νέο Worker (dashboard, βλ.
-# συζήτηση) -- βλ. TODO παρακάτω, ΝΑ ΑΦΑΙΡΕΘΕΙ αυτό το σχόλιο τότε.
-#
-# routes = [
-#   { pattern = "idmon.app", custom_domain = true },
-#   { pattern = "app.idmon.app", custom_domain = true }
-# ]
+# Section: μετονομασία Worker (26 Σεπ 2026) -- operations-portal-rag -> idmon.
+# Η μετάβαση ολοκληρώθηκε: τα δύο custom domains μεταφέρθηκαν χειροκίνητα
+# στο dashboard (Cloudflare δεν επιτρέπει το ίδιο domain σε δύο Workers
+# ταυτόχρονα, γι' αυτό χρειάστηκε προσωρινό σχολιασμό εδώ κατά τη μετάβαση),
+# και όλα τα secrets ξαναμπήκαν χειροκίνητα (write-only, δεν ακολουθούν
+# μετονομασία). Το routes block είναι πλέον ξανά ενεργό, ίδιο με πριν.
+routes = [
+  { pattern = "idmon.app", custom_domain = true },
+  { pattern = "app.idmon.app", custom_domain = true }
+]
 
 [[vectorize]]
 binding = "VECTORIZE"
