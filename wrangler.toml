@@ -27,7 +27,7 @@ routes = [
 
 [[vectorize]]
 binding = "VECTORIZE"
-index_name = "operations-portal-rag-index"
+index_name = "idmon-index"
 # Το τοπικό wrangler dev δεν υποστηρίζει καθόλου Vectorize emulation --
 # χωρίς αυτό, κάθε publish/delete εγγράφου σκάει τοπικά. Με remote = true,
 # το τοπικό dev μιλάει με το ΠΡΑΓΜΑΤΙΚΟ production index -- πρόσεξε: τα
@@ -40,10 +40,16 @@ remote = true
 binding = "DOCUMENT_REGISTRY"
 id = "e6ea2213cca7424b988d24d5307ee1ca"
 
+# Section: μετονομασία D1 + Vectorize (27 Σεπ 2026) -- rag-demo-tool-accounts/
+# operations-portal-rag-index -> idmon-accounts/idmon-index, παλιό branding.
+# ΚΑΙΝΟΥΡΙΟΙ, κενοί πόροι (όχι migration δεδομένων), γιατί δεν υπήρχαν ακόμα
+# πραγματικοί πελάτες -- ευκαιρία να καθαρίσουν και οι παλιοί δοκιμαστικοί
+# λογαριασμοί μαζί, χωρίς ξεχωριστή διαγραφή. Οι παλιοί πόροι μένουν άθικτοι
+# προς το παρόν, διαγράφονται μετά από λίγες μέρες παρακολούθησης.
 [[d1_databases]]
 binding = "DB"
-database_name = "rag-demo-tool-accounts"
-database_id = "240959e8-e3b3-48e5-937e-846f109454ca"
+database_name = "idmon-accounts"
+database_id = "7bad7817-c6e0-4509-972f-b8871e45aeec"
 
 # Section R, Στάδιο Β: Workers AI για την ΕΦΕΔΡΕΙΑ της σύνταξης απάντησης όταν το
 # Gemini αποτύχει (βλ. askGemini στο src/index.js). Στο wrangler dev καλεί πάντα το

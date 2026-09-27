@@ -120,8 +120,8 @@ The paid-access helper grants access when a subscription is `active` or `trialin
   home /         └─────────┬──────────┘
   editor /                 │
   article /                ├──▶ KV (DOCUMENT_REGISTRY)      documents, fallback logs, contradictions, widget settings, analytics counters, usage counters, one-time tokens
-  terms /                  ├──▶ D1 (rag-demo-tool-accounts) accounts, sessions, connections, billing mirror
-  privacy)                 ├──▶ Vectorize (operations-portal-rag-index)   embeddings for semantic search, per workspace
+  terms /                  ├──▶ D1 (idmon-accounts) accounts, sessions, connections, billing mirror
+  privacy)                 ├──▶ Vectorize (idmon-index)   embeddings for semantic search, per workspace
   Customer sites  ───▶     ├──▶ Gemini API                  gemini-embedding-001 for embeddings, gemini-3.6-flash for answers, PDF extraction, and contradiction detection
   (widget.js)              ├──▶ Paddle API                  checkout, subscriptions, customer portal, and webhooks
                           └──▶ Resend API                  transactional email: fallback alerts, verification, password reset
@@ -248,23 +248,23 @@ Create the required Cloudflare resources (or reuse existing ones and update `wra
 
 ```bash
 npx wrangler kv namespace create DOCUMENT_REGISTRY
-npx wrangler vectorize create operations-portal-rag-index --dimensions=768 --metric=cosine
-npx wrangler d1 create rag-demo-tool-accounts
+npx wrangler vectorize create idmon-index --dimensions=768 --metric=cosine
+npx wrangler d1 create idmon-accounts
 ```
 
 Apply the D1 schema, **both remote and local**. `wrangler dev` uses its own local copy of D1, so a schema applied only with `--remote` will still be missing locally:
 
 ```bash
-npx wrangler d1 execute rag-demo-tool-accounts --remote --file=schema.sql
-npx wrangler d1 execute rag-demo-tool-accounts --local --file=schema.sql
+npx wrangler d1 execute idmon-accounts --remote --file=schema.sql
+npx wrangler d1 execute idmon-accounts --local --file=schema.sql
 ```
 
 `schema.sql` is the complete, current schema (users, sessions, embed domains, connections, and the Paddle `customers`/`subscriptions` mirror), so a fresh setup needs nothing else. **Do not also run the files in `migrations/` on a fresh database:** their changes are already part of `schema.sql`, and re-applying them fails with `duplicate column name`. The migrations exist for databases created earlier that need to catch up. For those, list what is pending and apply them in order:
 
 ```bash
-npx wrangler d1 migrations list rag-demo-tool-accounts --remote
-npx wrangler d1 migrations apply rag-demo-tool-accounts --remote
-npx wrangler d1 migrations apply rag-demo-tool-accounts --local
+npx wrangler d1 migrations list idmon-accounts --remote
+npx wrangler d1 migrations apply idmon-accounts --remote
+npx wrangler d1 migrations apply idmon-accounts --local
 ```
 
 > `wrangler d1 execute --remote --file=...` occasionally fails with `Authentication error [code: 10000]`. This is a known intermittent Cloudflare API issue; retrying the same command once normally fixes it.
@@ -351,7 +351,7 @@ idmon/
 - File upload supports `.txt`, `.md`, and `.pdf`; `.docx` is not supported yet
 - Guest and Developer access still trust a client-supplied `X-Workspace-Id` header directly (no session backing them). This is acceptable for an anonymous-trial or demo workspace, but a logged-in account is always protected via server-side session lookup
 - The rate limiter uses per-IP buckets, so users behind a shared IP share a bucket; Cloudflare Turnstile (see [Accounts and sessions](#accounts-and-sessions)) supplements this against abuse spread across many IPs, but does not replace it
-- The Worker itself was renamed from the old `operations-portal-rag` branding to `idmon` on 26 Sep 2026. The Vectorize index (`operations-portal-rag-index`) and D1 database (`rag-demo-tool-accounts`) still use the old branding — renaming those requires a real data migration (Cloudflare has no in-place rename for either), planned as a separate, careful piece of work
+- The Worker (`idmon`), D1 database (`idmon-accounts`), and Vectorize index (`idmon-index`) were all renamed from the old `operations-portal-rag`/`rag-demo-tool-accounts` branding on 26–27 Sep 2026. The D1/Vectorize rename used fresh, empty resources rather than a data migration (no real customers yet at the time); the old resources are kept for a few days as a rollback safety net before deletion
 - The Terms of Service and Privacy Policy are templates and do not yet include a legal entity identification
 
 ## License
