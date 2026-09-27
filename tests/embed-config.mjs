@@ -31,9 +31,8 @@ function assert(condition, message) {
 const tmp = mkdtempSync(join(tmpdir(), "idmon-config-"));
 writeFileSync(
   join(tmp, "index.mjs"),
-  readFileSync(new URL("../src/index.js", import.meta.url), "utf8").replace("./crypto-helpers.js", "./crypto-helpers.mjs")
+  readFileSync(new URL("../src/index.js", import.meta.url), "utf8")
 );
-writeFileSync(join(tmp, "crypto-helpers.mjs"), readFileSync(new URL("../src/crypto-helpers.js", import.meta.url), "utf8"));
 const worker = (await import(pathToFileURL(join(tmp, "index.mjs")).href)).default;
 
 const PROTECTED = "efood-ops-demo";

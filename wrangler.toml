@@ -55,11 +55,11 @@ not_found_handling = "none"
 #   wrangler secret put RESEND_API_KEY
 NOTIFY_FROM_EMAIL = "notifications@idmon.app"
 
-# --- Google Drive OAuth connector ---
-# Το Client Secret ΔΕΝ μπαίνει εδώ -- είναι secret:
-#   wrangler secret put GOOGLE_CLIENT_SECRET
+# --- Google OAuth (client ID δημόσιο, όχι μυστικό) ---
+# Χρησιμοποιείται από το Section U (Sign in with Google, μόνο openid/email/
+# profile). Ο Drive connector (Section N) αφαιρέθηκε 26 Σεπ 2026 -- το ίδιο
+# Google Cloud OAuth client έμεινε, απλά πλέον εξυπηρετεί μόνο το Sign-In.
 GOOGLE_CLIENT_ID = "532047777604-98qlf4jfdp3kic0i7ko7pniteo89gaau.apps.googleusercontent.com"
-GOOGLE_REDIRECT_URI = "https://idmon.app/oauth/google/callback"
 
 # --- Paddle billing (Section R) ---
 # Το webhook secret ΔΕΝ μπαίνει εδώ -- είναι secret:

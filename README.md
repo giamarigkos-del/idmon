@@ -96,7 +96,7 @@ Limits are defined in `PLAN_LIMITS` in `src/index.js` and stored per account in 
 
 - Free and Basic plans show a "Powered by Idmon" badge in the widget; Pro hides it
 - Message limits are enforced per workspace per month in `checkAndIncrementUsage()`, called before any model request is made
-- Document limits are enforced on every path that creates a document (manual upload, URL sync, file upload, Drive import)
+- Document limits are enforced on every path that creates a document (manual upload, URL sync, file upload)
 - `GET /usage/status` returns the current plan, limits, and usage, and powers the editor banner
 - The protected demo workspace is exempt from the message limit
 - For local testing only, `MONTHLY_MESSAGE_LIMIT_OVERRIDE` in `.dev.vars` overrides the message limit (the variable does not exist in production)
@@ -135,8 +135,8 @@ Design decisions worth calling out:
 - **No background jobs.** Fallback-question logs, guest-workspace documents, and one-time tokens all expire via native KV TTL (`expirationTtl`), not a cron job or scheduled worker. Anything that needs cleanup expires itself.
 - **Sessions are server-side, not stateless JWTs.** A session token is meaningless on its own; every request re-checks it against D1. This costs one extra read per authenticated request but means logout and revocation actually work.
 - **Streaming with a safety net.** `/query/stream` wraps Gemini's `streamGenerateContent` in a small custom SSE protocol (`chunk`, `done`, `error` events). If a stream yields zero chunks, the non-streaming path is used automatically.
-- **Draft-then-publish everywhere.** Manual uploads, URL sync, file upload, and Drive import all create drafts. Nothing is embedded or visible to the public until it is explicitly published.
-- **Integrations share one table.** OAuth connections live in a single D1 `connections` table (workspace, provider, encrypted tokens, expiry), so a new provider is an addition, not a rewrite. Tokens are encrypted with AES-GCM (`src/crypto-helpers.js`) before they are stored.
+- **Draft-then-publish everywhere.** Manual uploads, URL sync, and file upload all create drafts. Nothing is embedded or visible to the public until it is explicitly published.
+- **Integrations share one table.** OAuth connections live in a single D1 `connections` table (workspace, provider, encrypted tokens, expiry), so a new provider is an addition, not a rewrite. No connector uses it today (the Google Drive connector that used to was removed 26 Sep 2026); a future connector would re-add a token-encryption helper before writing to it.
 
 ## Tech stack
 
@@ -234,16 +234,6 @@ Unless noted otherwise, endpoints resolve the workspace from `X-Session-Token` i
 | `GET` | `/embed/domains` | List the domain allow-list for the workspace's embed widget |
 | `PATCH` | `/embed/domains` | Update the domain allow-list (there is a maximum number of domains per workspace) |
 
-**Google Drive connector** (implemented, currently hidden in the editor UI, see [Known limitations](#known-limitations))
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/oauth/google/start` | Begin the OAuth flow (state stored in KV with a 10-minute single-use TTL) |
-| `GET` | `/oauth/google/callback` | Complete the flow; refuses to save a connection if `drive.readonly` was not granted |
-| `GET` | `/connections/google-drive/files` | List importable Docs and Sheets |
-| `POST` | `/connections/google-drive/import` | Import selected files as drafts (Docs as plain text, Sheets as CSV) |
-| `DELETE` | `/connections/google-drive` | Revoke the token at Google (best effort) and delete the connection |
-
 ## Getting started locally
 
 **Prerequisites:** a Cloudflare account, [Wrangler](https://developers.cloudflare.com/workers/wrangler/) installed, a Gemini API key, and (optionally, for email) a [Resend](https://resend.com) account.
@@ -285,15 +275,13 @@ Set the required secrets:
 npx wrangler secret put GEMINI_API_KEY
 npx wrangler secret put DEVELOPER_PASSWORD
 npx wrangler secret put RESEND_API_KEY          # needed for fallback alerts, verification, and password reset emails
-npx wrangler secret put TOKEN_ENCRYPTION_KEY    # 32-byte hex key, only needed for the Google Drive connector
-npx wrangler secret put GOOGLE_CLIENT_SECRET    # only needed for the Google Drive connector
 npx wrangler secret put PADDLE_API_KEY           # Paddle Live API key for server-side calls
 npx wrangler secret put PADDLE_WEBHOOK_SECRET    # Paddle notification signing secret
 ```
 
 Configure `[vars]` in `wrangler.toml`:
 - `NOTIFY_FROM_EMAIL`: the sender address for transactional email. It must belong to a domain you have verified on Resend (or use `onboarding@resend.dev`, Resend's shared test sender, which can only deliver to your own Resend account email)
-- `GOOGLE_CLIENT_ID` and `GOOGLE_REDIRECT_URI`: only for the Google Drive connector
+- `GOOGLE_CLIENT_ID`: public OAuth client ID, used by Sign in with Google (Section U)
 - `PADDLE_ENV`, `PADDLE_PRICE_BASIC_MONTHLY`, `PADDLE_PRICE_BASIC_ANNUAL`, `PADDLE_PRICE_PRO_MONTHLY`, and `PADDLE_PRICE_PRO_ANNUAL`: plain Paddle environment and price-ID vars. Keep the Live values for production.
 - `PADDLE_CLIENT_TOKEN`: the public Paddle.js client token, also a plain var; it is safe to send to the browser, but must match `PADDLE_ENV`.
 - `PADDLE_PRICE_BASIC` and `PADDLE_PRICE_PRO`: the monthly price IDs used by the current in-app upgrade flow and webhook plan mapping.
@@ -332,8 +320,7 @@ Tests live in `tests/` and run with Node (`node tests/<file>.mjs`). There are tw
 ```
 idmon/
 ├── src/
-│   ├── index.js            # Worker entry point: all API routes and business logic
-│   └── crypto-helpers.js   # AES-GCM encrypt/decrypt for stored OAuth tokens
+│   └── index.js            # Worker entry point: all API routes and business logic
 ├── public/
 │   ├── landing.html        # Entry point: Guest / Account (signup and login)
 │   ├── index.html          # Public marketing and pricing page at / (Free/Basic/Pro, monthly/annual toggle); sends returning visitors into the app
@@ -359,10 +346,8 @@ idmon/
 
 ## Known limitations
 
-- Single embedding/generation provider (Gemini), no fallback if the API is unavailable
 - Follow-up questions in the same conversation run two parallel retrieval searches (the new question alone, and combined with the previous question) to keep results relevant when the visitor changes topic — roughly doubling retrieval cost per follow-up turn
 - URL sync does not execute JavaScript: Cloudflare-obfuscated email addresses cannot be read, and pages that require login return the sign-in page as if it were the real content (no login-redirect detection yet)
-- Google Drive: the connector is implemented but hidden in the editor UI. `drive.readonly` is a restricted Google scope that needs an annual third-party security assessment before it can be offered outside Google's "Testing" mode. Sheets import reads only the first sheet
 - File upload supports `.txt`, `.md`, and `.pdf`; `.docx` is not supported yet
 - Guest and Developer access still trust a client-supplied `X-Workspace-Id` header directly (no session backing them). This is acceptable for an anonymous-trial or demo workspace, but a logged-in account is always protected via server-side session lookup
 - The rate limiter uses per-IP buckets, so users behind a shared IP share a bucket; Cloudflare Turnstile (see [Accounts and sessions](#accounts-and-sessions)) supplements this against abuse spread across many IPs, but does not replace it

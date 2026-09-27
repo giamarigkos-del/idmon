@@ -16,12 +16,8 @@ import { join } from "path";
 import { pathToFileURL } from "url";
 
 const tmp = mkdtempSync(join(tmpdir(), "idmon-wiring-"));
-const indexSrc = readFileSync(new URL("../src/index.js", import.meta.url), "utf8").replace(
-  "./crypto-helpers.js",
-  "./crypto-helpers.mjs"
-);
+const indexSrc = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
 writeFileSync(join(tmp, "index.mjs"), indexSrc);
-writeFileSync(join(tmp, "crypto-helpers.mjs"), readFileSync(new URL("../src/crypto-helpers.js", import.meta.url), "utf8"));
 const worker = (await import(pathToFileURL(join(tmp, "index.mjs")).href)).default;
 
 

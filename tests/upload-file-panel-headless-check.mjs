@@ -52,7 +52,7 @@ function buildHarness(fetchImpl) {
     function fetch(url, options) { return window.__mockFetch(url, options); }
     var WORKSPACE_ID = "ws-test";
     // null -- Guest/Developer flow (χωρίς λογαριασμό), ίδια σύμβαση με το
-    // google-drive-panel-headless-check.mjs μετά το audit fix του OAuth IDOR.
+    // audit fix του OAuth IDOR σε άλλα headless checks αυτού του project.
     var SESSION_TOKEN = null;
     var tuiEditorInstance = null;
     var currentSelectedId = null;

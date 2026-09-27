@@ -108,10 +108,13 @@ CREATE TABLE IF NOT EXISTS embed_domains (
 CREATE INDEX IF NOT EXISTS idx_embed_domains_workspace ON embed_domains(workspace_id);
 
 -- connections: οι OAuth συνδέσεις κάθε workspace με κάθε εξωτερικό provider
--- (Google Drive πρώτα, Notion/Slack/κλπ αργότερα με την ίδια δομή). Τα
--- access_token/refresh_token αποθηκεύονται κρυπτογραφημένα (AES-GCM, βλ.
--- src/crypto-helpers.js), ποτέ σε απλό κείμενο. Προστέθηκε με τη migration
--- 0003.
+-- (Notion/Slack/κλπ, με την ίδια δομή -- ο αρχικός Google Drive connector
+-- που χρησιμοποίησε πρώτος αυτόν τον πίνακα αφαιρέθηκε 26 Σεπ 2026, βλ. git
+-- history). Τα access_token/refresh_token πρέπει να αποθηκεύονται
+-- κρυπτογραφημένα (AES-GCM), ποτέ σε απλό κείμενο -- ο βοηθητικός κώδικας
+-- γι' αυτό αφαιρέθηκε μαζί με τον Drive connector, θα χρειαστεί να
+-- ξαναγραφτεί για τον επόμενο provider που θα χρησιμοποιήσει τον πίνακα.
+-- Προστέθηκε με τη migration 0003.
 CREATE TABLE IF NOT EXISTS connections (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
