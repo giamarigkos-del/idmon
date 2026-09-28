@@ -393,6 +393,10 @@ const TRANSLATIONS = {
     passwordsDontMatch: "Passwords don't match.",
     termsLink: "Terms of Service",
     privacyLink: "Privacy Policy",
+    // Section V (29 Σεπ 2026): link πίσω στη σελίδα τιμολόγησης (/) -- δίπλα
+    // στα Terms/Privacy, ρητά ζητήθηκε ΑΝΤΙ για το "Idmon" heading να γίνει
+    // link (εκείνο ξαναγύρισε σε απλό κείμενο, βλ. landing.html).
+    pricingLink: "Pricing",
     verifyingEmail: "Verifying your email…",
     continueToApp: "Continue",
     emailVerifiedSuccess: "Your email is verified! You can now continue.",
@@ -687,6 +691,7 @@ const TRANSLATIONS = {
     passwordsDontMatch: "Οι κωδικοί δεν ταιριάζουν.",
     termsLink: "Όροι Χρήσης",
     privacyLink: "Πολιτική Απορρήτου",
+    pricingLink: "Τιμολόγηση",
     verifyingEmail: "Επιβεβαίωση του email σου…",
     continueToApp: "Συνέχεια",
     emailVerifiedSuccess: "Το email σου επιβεβαιώθηκε! Μπορείς να συνεχίσεις.",

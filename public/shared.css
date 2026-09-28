@@ -47,9 +47,14 @@ input,textarea,button{font-family:inherit;}
 /* Κουμπί εναλλαγής γλώσσας (EN | GR) -- κοινό σε όλες τις σελίδες.
    Το ".lang-toggle-fixed" χρησιμοποιείται μόνο στο landing.html, που δεν
    έχει καθόλου top nav bar για να "κουμπώσει" επάνω του. */
-.lang-toggle{display:flex;gap:2px;background:var(--surface-2);border:1px solid var(--border);
-  border-radius:4px;padding:2px;margin-left:auto;}
+/* Section V (29 Σεπ 2026): αυτό ήταν πριν ένα κουτί με κοινό background/border
+   γύρω και από τα δύο κουμπιά -- το landing.html είχε ξεχωριστό, πιο όμορφο
+   στιλ (κάθε κουμπί δικό του στρογγυλεμένο "χάπι", χωρίς κοινό πλαίσιο).
+   Ζητήθηκε ρητά να γίνει αυτό το ΜΟΝΑΔΙΚΟ στιλ παντού, οπότε μπήκε εδώ, στη
+   βάση -- το landing.html δεν χρειάζεται πια δικό του ξεχωριστό override
+   (αφαιρέθηκε το duplicate CSS του εκεί). */
+.lang-toggle{display:flex;gap:6px;background:none;border:none;padding:0;margin-left:auto;}
 .lang-toggle-fixed{position:fixed;top:16px;right:16px;z-index:10;margin-left:0;}
-.lang-toggle .lang-btn{border:none;background:none;color:var(--text-soft);font-size:11px;
-  font-weight:700;padding:4px 8px;border-radius:3px;cursor:pointer;font-family:inherit;}
+.lang-toggle .lang-btn{border:none;background:none;color:var(--text-soft);font-size:13px;
+  font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;font-family:inherit;}
 .lang-toggle .lang-btn.active{background:var(--accent);color:var(--on-accent);}
