@@ -26,11 +26,16 @@
   του shared.js και ανακατεύθυνε κάθε πρωτοεπισκέπτη στο /landing.html -- ίδιο pattern με
   terms.html/privacy.html/index.html, απλά ξεχάστηκε όταν χτίστηκε αυτή η σελίδα.
 
-  FIX 29/09/2026 (#2): το κουμπί CTA εμφανιζόταν άδειο (χωρίς ορατό κείμενο) live -- πιθανή
-  σύγκρουση ονόματος με ήδη υπάρχον .cta στο shared.css. Μετονομάστηκε σε .dev-cta-btn
-  (μοναδικό όνομα, καμία εξάρτηση από κοινόχρηστο class) και προστέθηκε fallback χρώμα
-  ώστε το κείμενο να είναι πάντα ορατό ανεξάρτητα από το --bg. Αν παραμείνει άδειο μετά
-  από αυτό, χρειάζεται άμεσος έλεγχος του shared.css.
+  FIX 29/09/2026 (#2, αρχική -- ΛΑΝΘΑΣΜΕΝΗ υπόθεση): υποτέθηκε σύγκρουση ονόματος με
+  υποτιθέμενο .cta στο shared.css (δεν υπάρχει κανένα εκεί). Μετονομάστηκε σε .dev-cta-btn
+  ούτως ή άλλως (καλή πρακτική, μοναδικό όνομα), αλλά ΔΕΝ έλυσε το πρόβλημα.
+
+  FIX 29/09/2026 (#2β, πραγματική αιτία): το κουμπί βρίσκεται μέσα στο #content-el, που
+  έχει class "md-content". Το shared.css έχει τον κανόνα .md-content a{color:var(--accent);}
+  -- μεγαλύτερη specificity (class+element) από το δικό μας .dev-cta-btn (μόνο class), άρα
+  νικάει ανεξάρτητα από τη σειρά. Κι επειδή το --accent είναι ήδη κάνει override σε πορτοκαλί
+  εδώ (ίδιο με το background του κουμπιού), το κείμενο γινόταν πορτοκαλί πάνω σε πορτοκαλί --
+  υπαρκτό αλλά κυριολεκτικά αόρατο. Λύση: color: ... !important στο .dev-cta-btn.
 
   FIX 29/09/2026 (#3): γραμματικό λάθος στη σειρά ασθενούς αντωνυμίας -- "Στέλνεις μας
   email" (λάθος στην οριστική) διορθώθηκε σε "Μας στέλνεις email" (η αντωνυμία μπαίνει
@@ -61,7 +66,12 @@
   .lang-block{display:none;}
   #content-el{display:block;}
   .lead{color:var(--text-soft);font-size:1.05rem;margin:0 0 1.6em;max-width:640px;}
-  .dev-cta-btn{display:inline-block;text-align:center;padding:12px 22px;border-radius:6px;text-decoration:none;font-weight:700;font-size:1rem;line-height:1.3;background:var(--accent);color:var(--bg,#1a1a1a);}
+  /* color:!important -- χωρίς αυτό, ο γενικός κανόνας .md-content a{color:var(--accent);}
+     του shared.css (μεγαλύτερη specificity: class+element έναντι μόνο class) νικάει το
+     δικό μας χρώμα εδώ, κι επειδή το --accent είναι ήδη κάνει override σε πορτοκαλί, το
+     κείμενο του κουμπιού γινόταν πορτοκαλί πάνω σε πορτοκαλί background -- αόρατο, όχι απλά
+     "άδειο". Βρέθηκε live 29/09/2026, μετά από δύο προηγούμενα (λάθος) fixes. */
+  .dev-cta-btn{display:inline-block;text-align:center;padding:12px 22px;border-radius:6px;text-decoration:none;font-weight:700;font-size:1rem;line-height:1.3;background:var(--accent);color:var(--bg,#1a1a1a) !important;}
   .dev-cta-btn:hover{filter:brightness(1.08);}
   .hero-note{color:var(--text-soft);font-size:.88rem;max-width:640px;margin:.6em 0 0;}
   .steps{counter-reset:step;list-style:none;padding:0;margin:1.4em 0 2.2em;}
