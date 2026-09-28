@@ -25,6 +25,21 @@
   (βλ. σχόλιο δίπλα στο script). Χωρίς αυτό η σελίδα κληρονομούσε το workspace/session guard
   του shared.js και ανακατεύθυνε κάθε πρωτοεπισκέπτη στο /landing.html -- ίδιο pattern με
   terms.html/privacy.html/index.html, απλά ξεχάστηκε όταν χτίστηκε αυτή η σελίδα.
+
+  FIX 29/09/2026 (#2): το κουμπί CTA εμφανιζόταν άδειο (χωρίς ορατό κείμενο) live -- πιθανή
+  σύγκρουση ονόματος με ήδη υπάρχον .cta στο shared.css. Μετονομάστηκε σε .dev-cta-btn
+  (μοναδικό όνομα, καμία εξάρτηση από κοινόχρηστο class) και προστέθηκε fallback χρώμα
+  ώστε το κείμενο να είναι πάντα ορατό ανεξάρτητα από το --bg. Αν παραμείνει άδειο μετά
+  από αυτό, χρειάζεται άμεσος έλεγχος του shared.css.
+
+  FIX 29/09/2026 (#3): γραμματικό λάθος στη σειρά ασθενούς αντωνυμίας -- "Στέλνεις μας
+  email" (λάθος στην οριστική) διορθώθηκε σε "Μας στέλνεις email" (η αντωνυμία μπαίνει
+  πριν το ρήμα εκτός από προστακτική, π.χ. το "στείλε μας" παρακάτω είναι σωστό).
+
+  FIX 29/09/2026 (#4): το toggle EN/GR δεν άλλαζε ποτέ το περιεχόμενο (μόνο το κουμπί
+  γινόταν "active"). Αίτιο: έλειπε εντελώς το script που κρύβει/δείχνει τα .lang-block
+  ανάλογα με τη γλώσσα -- υπάρχει ήδη, δοκιμασμένο, στο terms.html· απλά δεν είχε
+  αντιγραφεί εδώ όταν χτίστηκε η σελίδα. Προστέθηκε το ίδιο ακριβώς pattern.
 -->
 <!DOCTYPE html>
 <html lang="el">
@@ -46,8 +61,8 @@
   .lang-block{display:none;}
   #content-el{display:block;}
   .lead{color:var(--text-soft);font-size:1.05rem;margin:0 0 1.6em;max-width:640px;}
-  .cta{display:inline-block;text-align:center;padding:12px 22px;border-radius:6px;text-decoration:none;font-weight:700;font-size:1rem;background:var(--accent);color:var(--bg);}
-  .cta:hover{filter:brightness(1.08);}
+  .dev-cta-btn{display:inline-block;text-align:center;padding:12px 22px;border-radius:6px;text-decoration:none;font-weight:700;font-size:1rem;line-height:1.3;background:var(--accent);color:var(--bg,#1a1a1a);}
+  .dev-cta-btn:hover{filter:brightness(1.08);}
   .hero-note{color:var(--text-soft);font-size:.88rem;max-width:640px;margin:.6em 0 0;}
   .steps{counter-reset:step;list-style:none;padding:0;margin:1.4em 0 2.2em;}
   .steps li{counter-increment:step;position:relative;padding:0 0 1.1em 40px;}
@@ -79,12 +94,12 @@
 
 <h1>Idmon για Developers &amp; Agencies</h1>
 <p class="lead">Χτίζεις sites ή διαχειρίζεσαι πελάτες; Πρόσθεσε το Idmon (chatbot που απαντά μόνο από τα έγγραφα του πελάτη σου) στα εργαλεία που ήδη προσφέρεις, με τη δική σου τιμή προς τον πελάτη.</p>
-<p><a class="cta" href="mailto:info@idmon.app?subject=Idmon%20for%20developers">Επικοινώνησε μαζί μας</a></p>
+<p><a class="dev-cta-btn" href="mailto:info@idmon.app?subject=Idmon%20for%20developers">Επικοινώνησε μαζί μας</a></p>
 <p class="hero-note">Δεν υπάρχει ακόμα αυτόματη φόρμα εγγραφής συνεργατών· στείλε μας email και το στήνουμε μαζί.</p>
 
 <h2>Πώς λειτουργεί</h2>
 <ol class="steps">
-  <li><strong>Στέλνεις μας email.</strong> Σου δίνουμε έναν δικό σου κωδικό συνεργάτη και τη χονδρική τιμή (χαμηλότερη από τη λιανική, μειώνεται όσο μεγαλώνει ο αριθμός των πελατών σου).</li>
+  <li><strong>Μας στέλνεις email.</strong> Σου δίνουμε έναν δικό σου κωδικό συνεργάτη και τη χονδρική τιμή (χαμηλότερη από τη λιανική, μειώνεται όσο μεγαλώνει ο αριθμός των πελατών σου).</li>
   <li><strong>Ο πελάτης σου κάνει εγγραφή.</strong> Στη φόρμα εγγραφής υπάρχει ένα προαιρετικό πεδίο «Κωδικός συνεργάτη» — του δίνεις τον δικό σου κωδικό, και το workspace συνδέεται μόνιμα μαζί σου, χωρίς cookies ή links που μπορεί να «χαθούν».</li>
   <li><strong>Εσύ χρεώνεις τον πελάτη σου ό,τι θέλεις.</strong> Μέσα σε πακέτο συντήρησης, ξεχωριστό τιμολόγιο, όπως ήδη δουλεύεις — κρατάς τη διαφορά.</li>
 </ol>
@@ -129,7 +144,7 @@
 
 <h1>Idmon for Developers &amp; Agencies</h1>
 <p class="lead">Build websites or manage clients? Add Idmon (a chatbot that answers only from your client's own documents) to what you already offer, at whatever price you decide for your client.</p>
-<p><a class="cta" href="mailto:info@idmon.app?subject=Idmon%20for%20developers">Get in touch</a></p>
+<p><a class="dev-cta-btn" href="mailto:info@idmon.app?subject=Idmon%20for%20developers">Get in touch</a></p>
 <p class="hero-note">There's no automatic sign-up form for partners yet — email us and we'll set it up together.</p>
 
 <h2>How it works</h2>
@@ -186,10 +201,21 @@
 </script>
 <script src="shared.js"></script>
 <script>
+  // Ίδιο pattern με terms.html: κρύβει όλα τα .lang-block και δείχνει μόνο
+  // το σωστό ανάλογα με τη γλώσσα. Έλειπε εντελώς εδώ -- χωρίς αυτό, το
+  // κουμπί EN/GR γινόταν "active" σωστά (το initLangToggle παρακάτω δουλεύει
+  // κανονικά) αλλά το περιεχόμενο δεν άλλαζε ποτέ, αφού το #content-el{display:block;}
+  // στο <style> πάνω παρέμενε σε ισχύ χωρίς τίποτα να το ανατρέψει.
+  document.querySelectorAll('.lang-block').forEach(function(el){ el.style.display = 'none'; });
+  var activeLang = getLang();
+  var activeBlock = document.getElementById('content-' + activeLang);
+  if (activeBlock) activeBlock.style.display = 'block';
+  document.documentElement.lang = activeLang;
+
   document.getElementById("pageTitle").textContent =
-    getLang() === "en" ? "Idmon for Developers & Agencies" : "Idmon για Developers & Agencies";
+    activeLang === "en" ? "Idmon for Developers & Agencies" : "Idmon για Developers & Agencies";
   document.getElementById("pageDescription").setAttribute("content",
-    getLang() === "en"
+    activeLang === "en"
       ? "Add Idmon to what you already offer your clients. Your price to your client, your margin."
       : "Πρόσθεσε το Idmon στα εργαλεία που ήδη προσφέρεις στους πελάτες σου. Δική σου τιμή προς τον πελάτη, δικό σου περιθώριο.");
   initLangToggle('langToggle');
