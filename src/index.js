@@ -4087,7 +4087,7 @@ async function applyPaddleSubscription(env, subscription, occurredAtIso, workspa
   // Ποιος λογαριασμός είναι; Πρώτα από το subscription ID που έχουμε ήδη
   // αποθηκεύσει, και αν δεν υπάρχει (πρώτη φορά), από το workspace_id που
   // περάσαμε στο checkout ως custom_data.
-  const selectCols = "id, plan, paddle_subscription_id, paddle_status, paddle_event_at";
+  const selectCols = "id, plan, paddle_subscription_id, paddle_status, paddle_event_at, agency_id";
   let user = await env.DB.prepare(
     `SELECT ${selectCols} FROM users WHERE paddle_subscription_id = ?`
   ).bind(subscription.id).first();
@@ -4141,6 +4141,15 @@ async function applyPaddleSubscription(env, subscription, occurredAtIso, workspa
     occurredAtIso,
     user.id
   ).run();
+
+  // Section V: κάθε αλλαγή πλάνου μπορεί να αλλάξει πόσα ενεργά workspaces
+  // έχει ο agency (νέος πληρωμένος πελάτης, ή ακύρωση) -- ξαναϋπολογίζουμε
+  // εδώ, στο ΜΟΝΟ σημείο απ' όπου περνάνε όλες οι αλλαγές πλάνου (webhook,
+  // reconcile, αλλαγή σε Pro). Best-effort: ποτέ δεν μπλοκάρει την απάντηση.
+  if (user.agency_id) {
+    const tier = await computeAgencyTier(env, user.agency_id);
+    await recordAgencyTier(env, user.agency_id, tier);
+  }
 
   return { outcome: "applied", plan: newPlan };
 }
