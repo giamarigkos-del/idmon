@@ -44,9 +44,11 @@ CREATE TABLE IF NOT EXISTS users (
   paddle_subscription_id TEXT,
   paddle_status TEXT,
   paddle_event_at TEXT,
+  agency_id TEXT REFERENCES agencies(id),
   created_at TEXT NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_users_agency ON users(agency_id);
 CREATE INDEX IF NOT EXISTS idx_users_paddle_customer ON users(paddle_customer_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_paddle_subscription ON users(paddle_subscription_id);
 
@@ -130,3 +132,18 @@ CREATE TABLE IF NOT EXISTS connections (
 -- Ένα workspace μπορεί να έχει μόνο μία ενεργή σύνδεση ανά provider
 CREATE UNIQUE INDEX IF NOT EXISTS idx_connections_workspace_provider
   ON connections (workspace_id, provider);
+
+-- Section V: agency/reseller μοντέλο (δικό μας, Μοντέλο Β -- βλ. migration 0009 για πλήρες
+-- σκεπτικό). agency_id σε κάθε workspace = ποιος developer το διαχειρίζεται, NULL αν κανένας.
+-- current_tier είναι cache, ξαναϋπολογίζεται ζωντανά σε κάθε σχετικό webhook event.
+CREATE TABLE IF NOT EXISTS agencies (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  agency_code TEXT UNIQUE NOT NULL,
+  current_tier INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agencies_code ON agencies(agency_code);
