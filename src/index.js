@@ -350,6 +350,12 @@ async function handleSignup(request, env) {
   const email = (body.email || "").trim().toLowerCase();
   const { password } = body;
   const lang = body.lang === "el" ? "el" : "en";
+  // Section V: προαιρετικός κωδικός agency, τον δίνει ο developer χειροκίνητα
+  // στον πελάτη του (ΟΧΙ μέσω link/cookie -- έτσι δεν χάνεται attribution σε
+  // cross-device σενάρια, βλ. συζήτηση 28 Σεπ 2026). Λάθος/άγνωστος κωδικός
+  // δεν μπλοκάρει ποτέ την εγγραφή -- απλά δεν συνδέεται με κανέναν agency,
+  // ίδια φιλοσοφία με το ήδη υπάρχον "best-effort, ποτέ δεν σπάει το βασικό flow".
+  const agencyCode = (body.agencyCode || "").trim();
 
   if (!email || !EMAIL_RE.test(email)) return jsonError(400, "Valid email is required");
   if (!password || password.length < 8) return jsonError(400, "Password must be at least 8 characters");
@@ -363,6 +369,14 @@ async function handleSignup(request, env) {
 
   const existing = await env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
   if (existing) return jsonError(409, "An account with this email already exists");
+
+  let agencyId = null;
+  if (agencyCode) {
+    const agencyRow = await env.DB.prepare(
+      "SELECT id FROM agencies WHERE agency_code = ? AND status = 'active'"
+    ).bind(agencyCode).first();
+    if (agencyRow) agencyId = agencyRow.id;
+  }
 
   const passwordHash = await hashPassword(password);
   // Section R: legacySalt/null -- οι στήλες password_salt/password_iterations
@@ -383,8 +397,8 @@ async function handleSignup(request, env) {
   // Πραγματικοί πληρωμένοι πελάτες αναβαθμίζονται χειροκίνητα (UPDATE users
   // SET plan=... WHERE email=...) μέχρι να μπει αυτόματη χρέωση.
   const result = await env.DB.prepare(
-    "INSERT INTO users (email, password_hash, password_salt, workspace_id, embed_id, plan, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  ).bind(email, passwordHash, legacySalt, workspaceId, embedId, "free", createdAt).run();
+    "INSERT INTO users (email, password_hash, password_salt, workspace_id, embed_id, plan, agency_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).bind(email, passwordHash, legacySalt, workspaceId, embedId, "free", agencyId, createdAt).run();
 
   const session = await createSession(env, result.meta.last_row_id, workspaceId);
 
@@ -2195,6 +2209,53 @@ function paddlePriceIds(env) {
   };
 }
 
+// Section V (28 Σεπ 2026): agency/reseller wholesale τιμές. Ίδιο σχήμα με το
+// paddlePriceIds παραπάνω, αλλά τρία ξεχωριστά sets ανά tier -- ο developer
+// πληρώνει απευθείας την Paddle σε αυτή την τιμή για κάθε workspace πελάτη
+// του, ΔΕΝ υπάρχει δικό μας ledger/payout από πάνω (καθαρό markup μοντέλο,
+// βλ. συζήτηση 28 Σεπ 2026). Grandfathering: η τιμή "κλειδώνει" στο
+// price_id που είχε η συνδρομή τη στιγμή του checkout -- ένα ανέβασμα tier
+// ΔΕΝ ξαναγράφει ήδη ενεργές συνδρομές, μόνο νέες αγορές από εκείνη τη
+// στιγμή και μετά.
+const AGENCY_TIER_THRESHOLDS = [
+  { max: 5, tier: 1 },
+  { max: 15, tier: 2 },
+  { max: Infinity, tier: 3 },
+];
+
+function agencyPriceIds(env, tier) {
+  return {
+    basic: env[`PADDLE_PRICE_BASIC_AGENCY_T${tier}`] || null,
+    pro: env[`PADDLE_PRICE_PRO_AGENCY_T${tier}`] || null,
+  };
+}
+
+// Μετράει πόσα workspaces αυτού του agency έχουν ΤΩΡΑ ζωντανή συνδρομή, και
+// επιστρέφει το σωστό tier -- ζωντανός υπολογισμός, καμία αποθηκευμένη τιμή
+// δεν εμπιστεύεται σαν πηγή αλήθειας. Το agencies.current_tier είναι μόνο
+// cache για εμφάνιση, ενημερώνεται ξεχωριστά (recordAgencyTier παρακάτω).
+async function computeAgencyTier(env, agencyId) {
+  if (!agencyId) return 1;
+  const statusPlaceholders = [...PADDLE_LIVE_SUBSCRIPTION_STATUSES].map(() => "?").join(",");
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM users WHERE agency_id = ? AND paddle_status IN (${statusPlaceholders})`
+  ).bind(agencyId, ...PADDLE_LIVE_SUBSCRIPTION_STATUSES).first();
+  const count = row ? row.n : 0;
+  const match = AGENCY_TIER_THRESHOLDS.find((t) => count <= t.max);
+  return match ? match.tier : AGENCY_TIER_THRESHOLDS[AGENCY_TIER_THRESHOLDS.length - 1].tier;
+}
+
+// Ενημερώνει το cache (agencies.current_tier) ώστε ένα μελλοντικό admin
+// panel να μπορεί να το διαβάσει με ένα απλό SELECT, χωρίς να ξαναμετράει.
+// Best-effort -- ποτέ δεν μπλοκάρει το πραγματικό checkout/webhook αν αργήσει.
+async function recordAgencyTier(env, agencyId, tier) {
+  try {
+    await env.DB.prepare("UPDATE agencies SET current_tier = ? WHERE id = ?").bind(tier, agencyId).run();
+  } catch (err) {
+    // best-effort, βλ. σχόλιο πάνω
+  }
+}
+
 // withEmail: true ΜΟΝΟ όταν το αίτημα έχει έγκυρο session (X-Session-Token). Τότε η
 // προσφορά περιέχει και το email του λογαριασμού, ώστε το checkout να το έχει ήδη
 // συμπληρωμένο και κλειδωμένο (Paddle email = email λογαριασμού). Χωρίς session
@@ -2205,18 +2266,45 @@ async function buildUpgradeOffer(env, workspaceId, plan, withEmail = false) {
   if (plan !== "free" && plan !== "basic") return null;
   if (!env.PADDLE_CLIENT_TOKEN || !env.PADDLE_ENV) return null;
 
-  const row = await env.DB.prepare("SELECT paddle_status, email FROM users WHERE workspace_id = ?").bind(workspaceId).first();
+  const row = await env.DB.prepare("SELECT paddle_status, email, agency_id FROM users WHERE workspace_id = ?").bind(workspaceId).first();
   if (!row) return null;
   if (row.paddle_status && PADDLE_LIVE_SUBSCRIPTION_STATUSES.has(row.paddle_status)) return null;
+
+  // Section V: αν το workspace ανήκει σε agency, δείξε τη wholesale τιμή του
+  // τρέχοντος tier αντί για τη λιανική -- ο ίδιος ο developer κάνει εδώ το
+  // checkout (ή δίνει στον πελάτη του να το κάνει), πληρώνοντας απευθείας
+  // την Paddle σε αυτή την τιμή. Χωρίς agency_id, καμία αλλαγή στη
+  // συμπεριφορά που ήδη υπήρχε.
+  let wholesale = null;
+  if (row.agency_id) {
+    const tier = await computeAgencyTier(env, row.agency_id);
+    const agencyIds = agencyPriceIds(env, tier);
+    if (agencyIds.basic || agencyIds.pro) wholesale = { tier, agencyIds };
+  }
 
   // Κάθε πλάνο προσφέρεται με μηνιαία και (αν έχει ρυθμιστεί) ετήσια τιμή. Το
   // priceId μένει το μηνιαίο, για συμβατότητα με ό,τι το διαβάζει ήδη.
   const ids = paddlePriceIds(env);
   const candidates = [];
   const addCandidate = (planKey) => {
+    // Wholesale price ID αντικαθιστά το μηνιαίο retail όταν υπάρχει agency
+    // και έχει ρυθμιστεί τιμή για αυτό ακριβώς το πλάνο/tier -- αλλιώς
+    // πέφτει πίσω στη συνηθισμένη λιανική τιμή, ποτέ δεν σπάει σιωπηλά.
+    const wholesalePriceId = wholesale && wholesale.agencyIds[planKey];
     const p = ids[planKey];
-    if (!p.monthly && !p.annual) return;
-    candidates.push({ plan: planKey, priceId: p.monthly || p.annual, prices: { monthly: p.monthly, annual: p.annual } });
+    if (!p.monthly && !p.annual && !wholesalePriceId) return;
+    candidates.push({
+      plan: planKey,
+      priceId: wholesalePriceId || p.monthly || p.annual,
+      // Το frontend (editor.html, offerPrice) διαβάζει prices[period], ΟΧΙ το
+      // priceId -- άρα η wholesale τιμή πρέπει να μπει ΕΔΩ, αλλιώς το checkout
+      // θα άνοιγε σιωπηλά με τη λιανική. Wholesale = μόνο μηνιαίο (annual: null),
+      // ώστε να μην εμφανίζεται ετήσιο toggle που θα γύριζε σε λιανική τιμή.
+      prices: wholesalePriceId
+        ? { monthly: wholesalePriceId, annual: null }
+        : { monthly: p.monthly, annual: p.annual },
+      wholesale: !!wholesalePriceId,
+    });
   };
   if (plan === "free") addCandidate("basic");
   addCandidate("pro");
@@ -2228,10 +2316,12 @@ async function buildUpgradeOffer(env, workspaceId, plan, withEmail = false) {
     workspaceId,
     currentPlan: plan,
     email: withEmail && row.email ? row.email : null,
+    agencyTier: wholesale ? wholesale.tier : null,
     offers: candidates.map((c) => ({
       plan: c.plan,
       priceId: c.priceId,
       prices: c.prices,
+      wholesale: c.wholesale,
       messages: PLAN_LIMITS[c.plan].messages,
       docs: PLAN_LIMITS[c.plan].docs === Infinity ? null : PLAN_LIMITS[c.plan].docs,
     })),
@@ -2246,7 +2336,7 @@ async function buildUpgradeOffer(env, workspaceId, plan, withEmail = false) {
 // null = δεν εμφανίζεται τίποτα (Guest, χωρίς συνδρομή, ή δεν έχει ρυθμιστεί το billing API).
 async function getBillingUser(env, workspaceId) {
   return await env.DB.prepare(
-    "SELECT plan, paddle_customer_id, paddle_subscription_id, paddle_status FROM users WHERE workspace_id = ?"
+    "SELECT plan, paddle_customer_id, paddle_subscription_id, paddle_status, agency_id FROM users WHERE workspace_id = ?"
   ).bind(workspaceId).first();
 }
 
@@ -2256,7 +2346,13 @@ function billingConfigured(env) {
 
 function canChangeToPro(env, row) {
   const pro = paddlePriceIds(env).pro;
-  return !!((pro.monthly || pro.annual) && row.plan === "basic" && row.paddle_status === "active" && row.paddle_subscription_id);
+  // Section V: ένα workspace agency ΔΕΝ πρέπει ποτέ να αλλάζει σιωπηλά σε λιανική
+  // Pro τιμή. Προσφέρεται η αλλαγή μόνο αν υπάρχει ρυθμισμένη wholesale Pro τιμή
+  // (το ακριβές tier ελέγχεται στο proTargetForChange).
+  const hasPro = row.agency_id
+    ? AGENCY_TIER_THRESHOLDS.some((t) => !!env[`PADDLE_PRICE_PRO_AGENCY_T${t.tier}`])
+    : !!(pro.monthly || pro.annual);
+  return !!(hasPro && row.plan === "basic" && row.paddle_status === "active" && row.paddle_subscription_id);
 }
 
 async function buildManageInfo(env, workspaceId) {
@@ -3836,15 +3932,21 @@ async function verifyPaddleSignature(rawBody, header, secret, nowMs = Date.now()
 function planFromPaddleSubscription(env, subscription) {
   const items = Array.isArray(subscription.items) ? subscription.items : [];
   const plans = new Set();
+  // Section V: τα wholesale (agency) price IDs αντιστοιχούν στα ΙΔΙΑ πλάνα με τα
+  // λιανικά -- χωρίς αυτά, ένας developer θα πλήρωνε και το workspace θα έμενε free.
+  const agencyBasic = AGENCY_TIER_THRESHOLDS.map((t) => env[`PADDLE_PRICE_BASIC_AGENCY_T${t.tier}`]);
+  const agencyPro = AGENCY_TIER_THRESHOLDS.map((t) => env[`PADDLE_PRICE_PRO_AGENCY_T${t.tier}`]);
   const priceIds = new Set([
     env.PADDLE_PRICE_BASIC,
     env.PADDLE_PRICE_BASIC_MONTHLY,
     env.PADDLE_PRICE_BASIC_ANNUAL,
+    ...agencyBasic,
   ].filter(Boolean));
   const proPriceIds = new Set([
     env.PADDLE_PRICE_PRO,
     env.PADDLE_PRICE_PRO_MONTHLY,
     env.PADDLE_PRICE_PRO_ANNUAL,
+    ...agencyPro,
   ].filter(Boolean));
   for (const item of items) {
     const priceId = item && item.price && item.price.id;
@@ -4335,6 +4437,15 @@ function planChangeBody(priceId) {
 // webhook), το ρωτάμε από το Paddle. Αν ούτε αυτό απαντήσει, ΔΕΝ μαντεύουμε.
 // Επιστρέφει { priceId, period } ή { error }.
 async function proTargetForChange(env, user) {
+  // Section V: workspace agency -> wholesale Pro τιμή του ΤΡΕΧΟΝΤΟΣ tier (μόνο
+  // μηνιαία, όπως και το wholesale checkout). Αν λείπει η τιμή γι' αυτό το tier,
+  // σταματάμε με σαφές σφάλμα αντί να χρεώσουμε λιανική Pro.
+  if (user.agency_id) {
+    const tier = await computeAgencyTier(env, user.agency_id);
+    const wholesalePro = agencyPriceIds(env, tier).pro;
+    if (!wholesalePro) return { error: billingError(503, "unavailable", "Billing is temporarily unavailable") };
+    return { priceId: wholesalePro, period: "monthly" };
+  }
   const ids = paddlePriceIds(env);
   let currentPriceId = null;
   const mirrored = await env.DB.prepare(

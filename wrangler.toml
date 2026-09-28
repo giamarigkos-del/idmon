@@ -85,6 +85,16 @@ PADDLE_PRICE_BASIC_ANNUAL = "pri_01m2ynemzv76wbb37zvr1q9fnb"
 PADDLE_PRICE_PRO_MONTHLY = "pri_01m2ynen6sh5949wn1pnsr1s51"
 PADDLE_PRICE_PRO_ANNUAL = "pri_01m2ynend8w7383t0nqzgd0f1z"
 
+# --- Section V: agency/reseller wholesale prices (28 Σεπ 2026) ---
+# Ίδιο product στο Paddle με τα λιανικά παραπάνω (Basic/Pro), τρία prices
+# επιπλέον σε κάθε ένα -- ΟΧΙ ξεχωριστά products. Μόνο μηνιαία, σκόπιμα.
+PADDLE_PRICE_BASIC_AGENCY_T1 = "pri_01m3mmh74be8ec7et19f94ad1k"
+PADDLE_PRICE_BASIC_AGENCY_T2 = "pri_01m3mmm5xzqx7e11psnssyfz7c"
+PADDLE_PRICE_BASIC_AGENCY_T3 = "pri_01m3mmrbfk18rfd0kns5c6jmgq"
+PADDLE_PRICE_PRO_AGENCY_T1 = "pri_01m3mn6g18bavgpzdazmnvrfh0"
+PADDLE_PRICE_PRO_AGENCY_T2 = "pri_01m3mn7xqdjt2ejw242twf7wvj"
+PADDLE_PRICE_PRO_AGENCY_T3 = "pri_01m3mn949sxke52qzx9cz25g8z"
+
 # Checkout στο editor.html: ο server στέλνει αυτά τα δύο στον browser μαζί με
 # τα price IDs (GET /usage/status, πεδίο "upgrade"). Το client-side token είναι
 # ΔΗΜΟΣΙΟ by design (το χρησιμοποιεί το Paddle.js στον browser) -- δεν είναι
