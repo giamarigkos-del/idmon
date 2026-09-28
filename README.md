@@ -102,6 +102,18 @@ Limits are defined in `PLAN_LIMITS` in `src/index.js` and stored per account in 
 - The protected demo workspace is exempt from the message limit
 - For local testing only, `MONTHLY_MESSAGE_LIMIT_OVERRIDE` in `.dev.vars` overrides the message limit (the variable does not exist in production)
 
+## Agencies and resellers
+
+A developer or agency can resell Idmon to their own clients at whatever price they choose, paying Idmon a lower, wholesale rate per client workspace instead of the public retail price (a markup model, not a referral-commission one — see [`public/developers.html`](public/developers.html) for the public-facing explanation).
+
+- The `agencies` table (added in migration `0009_agencies.sql`) holds one row per partner: `agency_code`, contact info, and a `current_tier` cache column
+- A new account links to an agency by entering that agency's `agency_code` in an optional field on the signup form (`public/landing.html`), stored as `users.agency_id`. This is deliberately not cookie- or link-based: a link can be opened on one device and completed on another, silently losing the attribution, whereas a code typed in at signup can't
+- Wholesale pricing is tiered by how many of an agency's workspaces currently have a live subscription (`transaction.completed`/`active`/`trialing`), computed live by `computeAgencyTier()` — never trusted from a stored value — and cached afterwards into `agencies.current_tier` for display via `recordAgencyTier()`. Tier price IDs are `PADDLE_PRICE_{BASIC,PRO}_AGENCY_T{1,2,3}` env vars (see [Getting started](#getting-started-locally))
+- `buildUpgradeOffer()` swaps in the wholesale monthly price for a workspace's current tier in place of the retail price whenever `users.agency_id` is set; annual billing is not offered to agency workspaces, deliberately, to keep the tier logic to one billing period
+- **Grandfathering:** a workspace's price is fixed to whatever price ID its subscription was created under. When an agency's tier changes (a client subscribes or cancels), only *new* checkouts see the new tier's price — existing subscriptions are untouched, matching how the domain-reseller and general SaaS tiered-pricing precedents this was based on handle it
+- The tier recompute lives in the single function every plan change already passes through, `applyPaddleSubscription()` — so it fires consistently from the Paddle webhook, the `/billing/reconcile` fallback, and the Basic→Pro change endpoint, with no duplicated logic
+- There is no self-serve agency signup yet: a new agency is inserted directly into D1 (`INSERT INTO agencies (...)`) by whoever runs the product. `public/developers.html` points prospective partners to an email address, not a form
+
 ## Billing
 
 Paddle is the payment provider and Merchant of Record for the Basic and Pro plans. Monthly and annual prices are configured as Paddle Live price IDs; the public pricing page includes a monthly/annual toggle and VAT-inclusive prices.
@@ -172,7 +184,7 @@ Unless noted otherwise, endpoints resolve the workspace from `X-Session-Token` i
 | `GET` | `/health` | Liveness check |
 | `GET` | `/config/public` | Public, non-secret runtime config for the frontend — Turnstile site key and Paddle client token for this environment |
 | `POST` | `/developer-login` | Exchange a password for the protected demo workspace ID (rate limited) |
-| `POST` | `/account/signup` | Create an account: `{email, password, turnstileToken}` to `{sessionToken, workspaceId}` (Turnstile + rate limited) |
+| `POST` | `/account/signup` | Create an account: `{email, password, turnstileToken, agencyCode?}` to `{sessionToken, workspaceId}` (Turnstile + rate limited). `agencyCode` is optional; an unknown or blank code is ignored silently rather than blocking signup — see [Agencies and resellers](#agencies-and-resellers) |
 | `POST` | `/account/login` | `{email, password, turnstileToken}` to a new `{sessionToken, workspaceId}` (Turnstile + rate limited) |
 | `POST` | `/account/logout` | Invalidate the session behind `X-Session-Token` |
 | `POST` | `/account/forgot-password` | Send a password reset email; body includes `turnstileToken` (Turnstile + rate limited) |
@@ -226,7 +238,7 @@ Unless noted otherwise, endpoints resolve the workspace from `X-Session-Token` i
 | `GET` | `/contradictions` | List stored contradiction findings for the workspace |
 | `DELETE` | `/contradictions/{id}` | Dismiss a contradiction finding |
 | `GET` | `/analytics/summary?days=N` | Daily question and fallback counts for the last N days |
-| `GET` | `/usage/status` | Current plan, limits, and usage for the workspace |
+| `GET` | `/usage/status` | Current plan, limits, and usage for the workspace, plus an upgrade offer (retail or, for an agency-linked workspace, that agency's current wholesale tier — see [Agencies and resellers](#agencies-and-resellers)) |
 
 **Workspace settings and embed**
 
@@ -263,7 +275,7 @@ npx wrangler d1 execute idmon-accounts --remote --file=schema.sql
 npx wrangler d1 execute idmon-accounts --local --file=schema.sql
 ```
 
-`schema.sql` is the complete, current schema (users, sessions, embed domains, connections, and the Paddle `customers`/`subscriptions` mirror), so a fresh setup needs nothing else. **Do not also run the files in `migrations/` on a fresh database:** their changes are already part of `schema.sql`, and re-applying them fails with `duplicate column name`. The migrations exist for databases created earlier that need to catch up. For those, list what is pending and apply them in order:
+`schema.sql` is the complete, current schema (users, sessions, embed domains, connections, agencies, and the Paddle `customers`/`subscriptions` mirror), so a fresh setup needs nothing else. **Do not also run the files in `migrations/` on a fresh database:** their changes are already part of `schema.sql`, and re-applying them fails with `duplicate column name`. The migrations exist for databases created earlier that need to catch up. For those, list what is pending and apply them in order:
 
 ```bash
 npx wrangler d1 migrations list idmon-accounts --remote
@@ -292,6 +304,7 @@ Configure `[vars]` in `wrangler.toml`:
 - `PADDLE_ENV`, `PADDLE_PRICE_BASIC_MONTHLY`, `PADDLE_PRICE_BASIC_ANNUAL`, `PADDLE_PRICE_PRO_MONTHLY`, and `PADDLE_PRICE_PRO_ANNUAL`: plain Paddle environment and price-ID vars. Keep the Live values for production.
 - `PADDLE_CLIENT_TOKEN`: the public Paddle.js client token, also a plain var; it is safe to send to the browser, but must match `PADDLE_ENV`.
 - `PADDLE_PRICE_BASIC` and `PADDLE_PRICE_PRO`: the monthly price IDs used by the current in-app upgrade flow and webhook plan mapping.
+- `PADDLE_PRICE_{BASIC,PRO}_AGENCY_T1`, `_T2`, `_T3`: the six agency wholesale monthly price IDs (see [Agencies and resellers](#agencies-and-resellers)). Optional — if unset for a given plan/tier, `buildUpgradeOffer()` falls back to showing the retail price for a new checkout, but the Basic→Pro change endpoint refuses the change outright rather than silently charging retail.
 
 The values for `PADDLE_API_KEY`, `PADDLE_WEBHOOK_SECRET`, `TURNSTILE_SECRET_KEY`, and `AI_GATEWAY_TOKEN` must be Wrangler secrets, never committed to `wrangler.toml` or `.env.example`. The variable names and non-secret Live price IDs are listed in `.env.example` for local setup.
 
@@ -329,8 +342,9 @@ idmon/
 ├── src/
 │   └── index.js            # Worker entry point: all API routes and business logic
 ├── public/
-│   ├── landing.html        # Entry point: Guest / Account (signup and login)
+│   ├── landing.html        # Entry point: Guest / Account (signup, with an optional agency code field, and login)
 │   ├── index.html          # Public marketing and pricing page at / (Free/Basic/Pro, monthly/annual toggle); sends returning visitors into the app
+│   ├── developers.html     # Public "for developers & agencies" page (see Agencies and resellers)
 │   ├── home.html           # App home: published documents + Q&A widget
 │   ├── editor.html         # Content management dashboard (CMS), settings, analytics, embed, account
 │   ├── article.html        # Single published document, read-only view
@@ -343,7 +357,8 @@ idmon/
 │   └── shared.js           # Shared frontend logic: workspace/session resolution, i18n, markdown rendering, slugs
 ├── widget-test/            # Permanent widget test page, served by the idmon-widget-test Worker
 ├── migrations/             # D1 migrations (0002 onward), for upgrading databases created earlier
-│   └── 0008_paddle_mirror.sql # Paddle customers/subscriptions mirror tables
+│   ├── 0008_paddle_mirror.sql # Paddle customers/subscriptions mirror tables
+│   └── 0009_agencies.sql   # agencies table and users.agency_id (see Agencies and resellers)
 ├── tests/                  # Integration and headless tests, see Testing
 ├── .env.example            # Paddle variable names and non-secret Live price IDs
 ├── schema.sql              # Complete current D1 schema for fresh setups, including billing mirror tables
@@ -360,6 +375,7 @@ idmon/
 - Guest and Developer access still trust a client-supplied `X-Workspace-Id` header directly (no session backing them). This is acceptable for an anonymous-trial or demo workspace, but a logged-in account is always protected via server-side session lookup
 - The rate limiter uses per-IP buckets, so users behind a shared IP share a bucket; Cloudflare Turnstile (see [Accounts and sessions](#accounts-and-sessions)) supplements this against abuse spread across many IPs, but does not replace it
 - The Worker (`idmon`), D1 database (`idmon-accounts`), and Vectorize index (`idmon-index`) were all renamed from the old `operations-portal-rag`/`rag-demo-tool-accounts` branding on 26–27 Sep 2026. The D1/Vectorize rename used fresh, empty resources rather than a data migration (no real customers yet at the time); the old resources are kept for a few days as a rollback safety net before deletion
+- Agencies (see [Agencies and resellers](#agencies-and-resellers)) are onboarded by directly inserting a row into D1; there is no admin UI or self-serve signup flow for partners yet
 
 ## License
 
