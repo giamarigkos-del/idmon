@@ -20,6 +20,11 @@
 
   Δεν υπάρχει ακόμα link προς αυτή τη σελίδα από το κύριο site -- προστέθηκε ένα, διακριτικό,
   στο footer-links του index.html (και στις δύο γλώσσες) στο ίδιο commit.
+
+  FIX 28/09/2026: προστέθηκε window.__SKIP_WORKSPACE_REDIRECT__ = true πριν το shared.js
+  (βλ. σχόλιο δίπλα στο script). Χωρίς αυτό η σελίδα κληρονομούσε το workspace/session guard
+  του shared.js και ανακατεύθυνε κάθε πρωτοεπισκέπτη στο /landing.html -- ίδιο pattern με
+  terms.html/privacy.html/index.html, απλά ξεχάστηκε όταν χτίστηκε αυτή η σελίδα.
 -->
 <!DOCTYPE html>
 <html lang="el">
@@ -172,6 +177,13 @@
 
 </div>
 
+<script>
+  // Το developers.html δεν χρειάζεται ΠΟΤΕ κάποιο workspace -- καθαρά δημόσιο,
+  // στατικό περιεχόμενο (ίδιο σκεπτικό/pattern με terms.html, privacy.html, index.html).
+  // Χωρίς αυτό, ένας πρωτοεπισκέπτης χωρίς αποθηκευμένο workspaceId ανακατευθυνόταν
+  // στο /landing.html αντί να δει τη σελίδα. Βρέθηκε σε ζωντανή χρήση, 28 Σεπ 2026.
+  window.__SKIP_WORKSPACE_REDIRECT__ = true;
+</script>
 <script src="shared.js"></script>
 <script>
   document.getElementById("pageTitle").textContent =
