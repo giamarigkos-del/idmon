@@ -383,6 +383,11 @@ const TRANSLATIONS = {
     newPasswordLabel: "New password",
     confirmPasswordLabel: "Confirm new password",
     confirmPasswordSignupLabel: "Confirm password",
+    // Section V: προαιρετικό πεδίο, μόνο στο signup, ώστε ένα workspace να
+    // συνδεθεί με έναν agency ΧΩΡΙΣ να βασιζόμαστε σε cookie/link (βλ.
+    // συζήτηση 28 Σεπ 2026 για cross-device attribution).
+    agencyCodeLabel: "Agency code (optional)",
+    agencyCodePlaceholder: "Only if a partner gave you one",
     setNewPasswordBtn: "Set new password",
     passwordTooShort: "Password must be at least 8 characters.",
     passwordsDontMatch: "Passwords don't match.",
@@ -675,6 +680,8 @@ const TRANSLATIONS = {
     newPasswordLabel: "Νέος κωδικός",
     confirmPasswordLabel: "Επιβεβαίωση νέου κωδικού",
     confirmPasswordSignupLabel: "Επιβεβαίωση κωδικού",
+    agencyCodeLabel: "Κωδικός συνεργάτη (προαιρετικό)",
+    agencyCodePlaceholder: "Μόνο αν σου τον έδωσε κάποιος συνεργάτης",
     setNewPasswordBtn: "Ορισμός νέου κωδικού",
     passwordTooShort: "Ο κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες.",
     passwordsDontMatch: "Οι κωδικοί δεν ταιριάζουν.",

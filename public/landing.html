@@ -167,6 +167,8 @@
         <input type="password" id="accountConfirmPassword" placeholder="••••••••" autocomplete="new-password">
         <button type="button" class="password-toggle-btn" id="accountConfirmPasswordToggle" aria-label="Show password"></button>
       </div>
+      <label for="accountAgencyCode" style="margin-top:10px;" id="accountAgencyCodeLabel" data-i18n="agencyCodeLabel">Agency code (optional)</label>
+      <input type="text" id="accountAgencyCode" data-i18n-placeholder="agencyCodePlaceholder" placeholder="Only if a partner gave you one" autocomplete="off" style="width:100%;">
       <a href="#" class="forgot-link" id="forgotLink" data-i18n="forgotLink" style="display:none;">Forgot password?</a>
       <div class="cf-turnstile" id="accountTurnstile" style="margin-top:10px;"></div>
       <div class="dev-form-actions">
@@ -470,7 +472,11 @@
     // στο login υπάρχει ήδη ο λογαριασμός, δεν διαλέγει κανείς κωδικό τώρα.
     el("accountConfirmPasswordLabel").style.display = mode === "signup" ? "block" : "none";
     el("accountConfirmPasswordWrap").style.display = mode === "signup" ? "block" : "none";
-    if (mode === "login") el("accountConfirmPassword").value = "";
+    // Section V: ίδια λογική με το confirm password -- ο κωδικός agency
+    // έχει νόημα μόνο σε νέο λογαριασμό, όχι σε login.
+    el("accountAgencyCodeLabel").style.display = mode === "signup" ? "block" : "none";
+    el("accountAgencyCode").style.display = mode === "signup" ? "block" : "none";
+    if (mode === "login") { el("accountConfirmPassword").value = ""; el("accountAgencyCode").value = ""; }
     el("accountError").classList.remove("show");
   }
 
@@ -490,6 +496,7 @@
     el("accountEmail").value = "";
     el("accountPassword").value = "";
     el("accountConfirmPassword").value = "";
+    el("accountAgencyCode").value = "";
   });
 
   el("signupTabBtn").addEventListener("click", () => setAccountMode("signup"));
@@ -528,12 +535,18 @@
     btn.textContent = t("checking");
 
     const endpoint = accountMode === "signup" ? "/account/signup" : "/account/login";
+    // Section V: agencyCode μόνο στο signup, και μόνο αν συμπληρώθηκε --
+    // το backend το αγνοεί σιωπηλά αν είναι κενό ή άγνωστο (δεν μπλοκάρει
+    // ποτέ την εγγραφή).
+    const agencyCode = accountMode === "signup" ? el("accountAgencyCode").value.trim() : "";
+    const requestBody = { email, password, lang: getLang(), turnstileToken: turnstileTokens.account };
+    if (agencyCode) requestBody.agencyCode = agencyCode;
 
     try {
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, lang: getLang(), turnstileToken: turnstileTokens.account }),
+        body: JSON.stringify(requestBody),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
