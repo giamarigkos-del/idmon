@@ -1,0 +1,187 @@
+<!--
+  ΣΗΜΕΙΩΣΗ ΓΙΑ ΤΟΝ GIANNIS (δεν εμφανίζεται στους επισκέπτες):
+  Σελίδα "For Developers", Μοντέλο Β (agency/reseller, βλ. Section V, 28 Σεπ 2026).
+  ΟΧΙ το παλιό affiliate/commission μοντέλο (Sled, εγκαταλελειμμένο 27 Σεπ 2026).
+  Δίγλωσση, ίδιος μηχανισμός με index.html/privacy.html: shared.css + shared.js
+  (getLang, initLangToggle), ίδια ζεστή παλέτα (--accent override).
+
+  ΣΚΟΠΙΜΑ ΔΕΝ ΑΝΑΦΕΡΕΙ:
+  - Ακριβή wholesale τιμή/ποσοστό (μοτίβο Chatbase, βλ. έρευνα marketing 27 Σεπ 2026):
+    αποκαλύπτεται μόνο μετά από επικοινωνία/setup, για ευελιξία σε μελλοντική αλλαγή τιμής.
+  - Εσωτερική αρχιτεκτονική/tech stack/κόστος-περιθώριο: ένας συνεργάτης χρειάζεται το
+    προϊόν και τους όρους, όχι τα εσωτερικά.
+  - "Δημιούργησε ο ίδιος workspace για τον πελάτη σου" (Επιλογή Α από τη συζήτηση 28 Σεπ):
+    ΔΕΝ έχει χτιστεί κώδικας για αυτό ακόμα, μόνο η Επιλογή Β (agency code στη φόρμα
+    εγγραφής του πελάτη, βλ. public/landing.html #accountAgencyCode) είναι live.
+
+  ΔΕΝ υπάρχει δημόσια φόρμα εγγραφής agency (κανένα endpoint/UI για self-serve signup) --
+  agencies δημιουργούνται χειροκίνητα από τον Giannis (SQL insert). Το CTA είναι mailto,
+  όχι φόρμα. Αν/όταν χτιστεί self-serve agency signup, αυτή η σελίδα χρειάζεται αναθεώρηση.
+
+  Δεν υπάρχει ακόμα link προς αυτή τη σελίδα από το κύριο site -- προστέθηκε ένα, διακριτικό,
+  στο footer-links του index.html (και στις δύο γλώσσες) στο ίδιο commit.
+-->
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<title id="pageTitle">Idmon για Developers &amp; Agencies</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta id="pageDescription" name="description" content="Πρόσθεσε το Idmon στα εργαλεία που ήδη προσφέρεις στους πελάτες σου. Δική σου τιμή προς τον πελάτη, δικό σου περιθώριο.">
+<link rel="canonical" href="https://idmon.app/developers.html">
+<link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="shared.css">
+<style>
+  :root{--accent:#D97757;--accent-soft:rgba(217,119,87,.16);}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 24px;border-bottom:1px solid var(--border);}
+  .topbar a.brand{color:var(--text);font-weight:700;text-decoration:none;}
+  .page-wrap{max-width:760px;margin:0 auto;padding:40px 20px 80px;}
+  .lang-block{display:none;}
+  #content-el{display:block;}
+  .lead{color:var(--text-soft);font-size:1.05rem;margin:0 0 1.6em;max-width:640px;}
+  .cta{display:inline-block;text-align:center;padding:12px 22px;border-radius:6px;text-decoration:none;font-weight:700;font-size:1rem;background:var(--accent);color:var(--bg);}
+  .cta:hover{filter:brightness(1.08);}
+  .hero-note{color:var(--text-soft);font-size:.88rem;max-width:640px;margin:.6em 0 0;}
+  .steps{counter-reset:step;list-style:none;padding:0;margin:1.4em 0 2.2em;}
+  .steps li{counter-increment:step;position:relative;padding:0 0 1.1em 40px;}
+  .steps li::before{content:counter(step);position:absolute;left:0;top:0;width:26px;height:26px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:.85rem;display:flex;align-items:center;justify-content:center;}
+  .steps strong{display:block;margin-bottom:2px;}
+  .benefits{list-style:none;padding:0;margin:1.4em 0 2.2em;display:grid;gap:14px;}
+  .benefits li{padding:14px 16px;border:1px solid var(--border);border-radius:8px;}
+  .benefits strong{display:block;margin-bottom:3px;}
+  .benefits span{color:var(--text-soft);font-size:.92rem;}
+  .faq h3{margin:1.4em 0 .3em;font-size:1.02rem;}
+  .faq p{margin:0;color:var(--text-soft);}
+  .footer-links{margin-top:3em;padding-top:1.2em;border-top:1px solid var(--border);font-size:.9rem;color:var(--text-soft);}
+  .footer-links a{color:var(--text-soft);}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <a class="brand" href="/">idmon.app</a>
+  <div id="langToggle" class="lang-toggle">
+    <button class="lang-btn" data-lang="en">EN</button>
+    <button class="lang-btn" data-lang="el">EL</button>
+  </div>
+</div>
+
+<div class="page-wrap">
+
+<div id="content-el" class="lang-block md-content">
+
+<h1>Idmon για Developers &amp; Agencies</h1>
+<p class="lead">Χτίζεις sites ή διαχειρίζεσαι πελάτες; Πρόσθεσε το Idmon (chatbot που απαντά μόνο από τα έγγραφα του πελάτη σου) στα εργαλεία που ήδη προσφέρεις, με τη δική σου τιμή προς τον πελάτη.</p>
+<p><a class="cta" href="mailto:info@idmon.app?subject=Idmon%20for%20developers">Επικοινώνησε μαζί μας</a></p>
+<p class="hero-note">Δεν υπάρχει ακόμα αυτόματη φόρμα εγγραφής συνεργατών· στείλε μας email και το στήνουμε μαζί.</p>
+
+<h2>Πώς λειτουργεί</h2>
+<ol class="steps">
+  <li><strong>Στέλνεις μας email.</strong> Σου δίνουμε έναν δικό σου κωδικό συνεργάτη και τη χονδρική τιμή (χαμηλότερη από τη λιανική, μειώνεται όσο μεγαλώνει ο αριθμός των πελατών σου).</li>
+  <li><strong>Ο πελάτης σου κάνει εγγραφή.</strong> Στη φόρμα εγγραφής υπάρχει ένα προαιρετικό πεδίο «Κωδικός συνεργάτη» — του δίνεις τον δικό σου κωδικό, και το workspace συνδέεται μόνιμα μαζί σου, χωρίς cookies ή links που μπορεί να «χαθούν».</li>
+  <li><strong>Εσύ χρεώνεις τον πελάτη σου ό,τι θέλεις.</strong> Μέσα σε πακέτο συντήρησης, ξεχωριστό τιμολόγιο, όπως ήδη δουλεύεις — κρατάς τη διαφορά.</li>
+</ol>
+
+<h2>Τι περιλαμβάνει</h2>
+<ul class="benefits">
+  <li><strong>Χονδρική τιμή που μειώνεται με τον αριθμό πελατών</strong><br><span>Όσο περισσότερα workspaces διαχειρίζεσαι, τόσο χαμηλότερη η τιμή ανά πελάτη — αυτόματα, χωρίς να χρειάζεται να μας ξαναγράψεις.</span></li>
+  <li><strong>Καμία χαμένη σύνδεση</strong><br><span>Ο κωδικός συνεργάτη μπαίνει απευθείας στην εγγραφή του πελάτη σου, όχι μέσω link ή cookie — δουλεύει ακόμα κι αν ο πελάτης σου ανοίξει τη σελίδα από άλλη συσκευή.</span></li>
+  <li><strong>Λευκή ετικέτα έτοιμη</strong><br><span>Στο πλάνο Pro το «Powered by Idmon» εξαφανίζεται αυτόματα από το widget — ο πελάτης σου βλέπει μόνο το δικό του όνομα, χρώμα και λογότυπο.</span></li>
+  <li><strong>Ξεκάθαρη χρέωση</strong><br><span>Πληρώνεις εσύ την Idmon απευθείας μέσω Paddle, στη χονδρική τιμή, ανά workspace πελάτη. Καμία μεσολάβηση, κανένα ξεχωριστό «σύστημα πληρωμών συνεργατών».</span></li>
+</ul>
+
+<h2>Συχνές ερωτήσεις</h2>
+<div class="faq">
+
+<h3>Πόσο κοστίζει;</h3>
+<p>Η χονδρική τιμή είναι χαμηλότερη από τη δημόσια τιμή λιανικής και μειώνεται σε βαθμίδες όσο αυξάνεται ο αριθμός των ενεργών workspaces που διαχειρίζεσαι. Σου τη στέλνουμε όταν επικοινωνήσεις μαζί μας.</p>
+
+<h3>Υπάρχει ελάχιστος αριθμός πελατών για να ξεκινήσω;</h3>
+<p>Όχι. Ξεκινάς από έναν πελάτη, και η τιμή μειώνεται μόνη της καθώς προσθέτεις κι άλλους.</p>
+
+<h3>Τι γίνεται αν ένας πελάτης μου ακυρώσει;</h3>
+<p>Ο αριθμός των ενεργών workspaces σου ενημερώνεται αυτόματα. Δεν επηρεάζει τους υπόλοιπους πελάτες σου.</p>
+
+<h3>Μπορώ να διαλέξω εγώ την τιμή προς τον πελάτη μου;</h3>
+<p>Ναι, εντελώς. Δεν βλέπουμε ούτε μας αφορά τι χρεώνεις εσύ τον δικό σου πελάτη.</p>
+
+<h3>Ποιος εξυπηρετεί τον τελικό πελάτη αν κάτι πάει στραβά;</h3>
+<p>Εσύ, ως ο άμεσος συνεργάτης του. Δες τους <a href="/terms.html">Όρους Χρήσης</a> για λεπτομέρειες.</p>
+
+</div>
+
+<div class="footer-links">
+  <a href="/terms.html">Όροι Χρήσης</a> ·
+  <a href="/privacy.html">Πολιτική Απορρήτου</a> ·
+  <a href="mailto:info@idmon.app">info@idmon.app</a>
+</div>
+
+</div>
+
+<div id="content-en" class="lang-block md-content">
+
+<h1>Idmon for Developers &amp; Agencies</h1>
+<p class="lead">Build websites or manage clients? Add Idmon (a chatbot that answers only from your client's own documents) to what you already offer, at whatever price you decide for your client.</p>
+<p><a class="cta" href="mailto:info@idmon.app?subject=Idmon%20for%20developers">Get in touch</a></p>
+<p class="hero-note">There's no automatic sign-up form for partners yet — email us and we'll set it up together.</p>
+
+<h2>How it works</h2>
+<ol class="steps">
+  <li><strong>You email us.</strong> We give you your own partner code and your wholesale rate (lower than retail, and it drops further as you manage more clients).</li>
+  <li><strong>Your client signs up.</strong> The signup form has an optional "Agency code" field — your client enters your code, and their workspace is permanently linked to you, no cookies or links to lose.</li>
+  <li><strong>You charge your client whatever you like.</strong> Bundle it into a maintenance package, invoice separately, however you already work — you keep the difference.</li>
+</ol>
+
+<h2>What's included</h2>
+<ul class="benefits">
+  <li><strong>Wholesale pricing that drops as you grow</strong><br><span>The more workspaces you manage, the lower your per-client rate — automatically, no need to email us again.</span></li>
+  <li><strong>No lost attribution</strong><br><span>Your partner code is entered directly at your client's signup, not tracked via link or cookie — it works even if your client opens the signup page on a different device.</span></li>
+  <li><strong>White-label, ready to go</strong><br><span>On the Pro plan, "Powered by Idmon" disappears automatically from the widget — your client only sees their own name, color and logo.</span></li>
+  <li><strong>Straightforward billing</strong><br><span>You pay Idmon directly through Paddle, at your wholesale rate, per client workspace. No middleman, no separate "partner payments" system.</span></li>
+</ul>
+
+<h2>FAQ</h2>
+<div class="faq">
+
+<h3>How much does it cost?</h3>
+<p>Wholesale pricing is lower than the public retail price and drops in tiers as the number of active workspaces you manage grows. We'll send you the current rate when you reach out.</p>
+
+<h3>Is there a minimum number of clients to get started?</h3>
+<p>No. Start with one client, and your rate drops on its own as you add more.</p>
+
+<h3>What happens if one of my clients cancels?</h3>
+<p>Your active workspace count updates automatically. It doesn't affect your other clients.</p>
+
+<h3>Can I choose what to charge my client?</h3>
+<p>Yes, entirely. We don't see or care what you charge your own client.</p>
+
+<h3>Who handles support if something goes wrong for the end client?</h3>
+<p>You, as their direct point of contact. See the <a href="/terms.html">Terms of Service</a> for details.</p>
+
+</div>
+
+<div class="footer-links">
+  <a href="/terms.html">Terms of Service</a> ·
+  <a href="/privacy.html">Privacy Policy</a> ·
+  <a href="mailto:info@idmon.app">info@idmon.app</a>
+</div>
+
+</div>
+
+</div>
+
+<script src="shared.js"></script>
+<script>
+  document.getElementById("pageTitle").textContent =
+    getLang() === "en" ? "Idmon for Developers & Agencies" : "Idmon για Developers & Agencies";
+  document.getElementById("pageDescription").setAttribute("content",
+    getLang() === "en"
+      ? "Add Idmon to what you already offer your clients. Your price to your client, your margin."
+      : "Πρόσθεσε το Idmon στα εργαλεία που ήδη προσφέρεις στους πελάτες σου. Δική σου τιμή προς τον πελάτη, δικό σου περιθώριο.");
+  initLangToggle('langToggle');
+</script>
+
+</body>
+</html>
