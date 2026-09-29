@@ -501,6 +501,7 @@ const TRANSLATIONS = {
     settingsSaveErrorPrefix: "Save error: ",
     settingsLoadError: "Could not load settings.",
     widgetSettingsTooltip: "Widget settings",
+    topMenuTooltip: "Menu",
 
     // human handoff (Section J)
     contactSectionTitle: "Human contact",
@@ -793,6 +794,7 @@ const TRANSLATIONS = {
     settingsSaveErrorPrefix: "Σφάλμα αποθήκευσης: ",
     settingsLoadError: "Δεν ήταν δυνατή η φόρτωση ρυθμίσεων.",
     widgetSettingsTooltip: "Ρυθμίσεις widget",
+    topMenuTooltip: "Μενού",
 
     // human handoff (Section J)
     contactSectionTitle: "Επικοινωνία με άνθρωπο",

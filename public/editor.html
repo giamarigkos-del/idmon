@@ -29,6 +29,24 @@
   .top-bar .back-link:hover{background:var(--accent-soft);border-color:var(--accent);}
   .top-bar-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
   .top-bar-right .lang-toggle{margin-left:0;}
+  /* Section V (29 Σεπ 2026): το .top-menu (Portal, Manage subscription, Log out) είναι
+     display:contents σε desktop, δηλαδή ΔΕΝ δημιουργεί δικό του box και τα κουμπιά του
+     συμπεριφέρονται σαν άμεσα παιδιά του .top-bar-right, ακριβώς όπως πριν. Η σειρά
+     τους ορίζεται ρητά με order, ώστε να μείνει ίδια με το παλιό HTML. Σε ≤900px
+     γίνεται αναδυόμενο μενού (⋮), βλ. @media παρακάτω. */
+  .top-menu{display:contents;}
+  .top-bar-right #topPortalLink{order:1;}
+  .top-bar-right #topAllDocsBtn{order:2;}
+  .top-bar-right #manageSubBtn{order:3;}
+  .top-bar-right #changePlanBtn{order:4;}
+  .top-bar-right #upgradeBtn{order:5;}
+  .top-bar-right #settingsBtn{order:6;}
+  .top-bar-right #embedBtn{order:7;}
+  .top-bar-right #analyticsBtn{order:8;}
+  .top-bar-right #switchModeLink{order:9;}
+  .top-bar-right #langToggle{order:10;}
+  .top-bar-right #topMenuBtn{display:none;}
+  .icon-btn[aria-expanded="true"]{background:var(--accent-soft);border-color:var(--accent);}
 
   .verify-banner{flex-shrink:0;background:var(--accent-soft);border-bottom:1px solid var(--accent);
     display:flex;align-items:center;gap:14px;padding:8px 24px;font-size:12.5px;}
@@ -423,13 +441,26 @@
        ορατή ένδειξη οριζόντιου scroll. Βρέθηκε σε ζωντανή χρήση σε κινητό,
        Σεπτέμβριος 2026. Εδώ επιτρέπουμε δεύτερη γραμμή αντί για ξεχείλισμα,
        και μικραίνουμε λίγο το padding/gap ώστε να χωράει πιο άνετα. */
-    .top-bar{height:auto;min-height:56px;flex-wrap:wrap;padding:10px 12px;gap:8px;}
-    .top-bar-right{flex-wrap:wrap;gap:8px;}
-    /* Section V (29 Σεπ 2026): σε στενή οθόνη ο τίτλος παίρνει ολόκληρη την πρώτη γραμμή και
-       τα κουμπιά ολόκληρη τη δεύτερη, στοιχισμένα αριστερά κάτω από τον τίτλο. Πριν, το
-       margin-left:auto έσπρωχνε τα τυλιγμένα κουμπιά δεξιά ενώ ο τίτλος έμενε αριστερά. */
-    .top-bar strong{flex:1 1 100%;}
-    .top-bar-right{flex:1 1 100%;margin-left:0;justify-content:flex-start;}
+    .top-bar{height:auto;min-height:56px;flex-wrap:wrap;padding:10px 12px;gap:8px;position:relative;}
+    /* Section V (29 Σεπ 2026): header κινητού σε δύο γραμμές.
+       Γραμμή 1: τίτλος αριστερά, EN/GR και κουμπί ⋮ δεξιά.
+       Γραμμή 2 (μόνο όταν υπάρχει): ΕΝΑ κουμπί Upgrade ή Switch to Pro, πλήρους πλάτους.
+       Όλα τα άλλα (Portal, Manage subscription, Log out, και ό,τι προστεθεί στο μέλλον)
+       μπαίνουν μέσα στο .top-menu, που εδώ γίνεται αναδυόμενο μενού. Έτσι το header δεν
+       "σπάει" όσα κουμπιά κι αν προστεθούν. Το .top-bar-right γίνεται display:contents,
+       ώστε τα παιδιά του να τακτοποιούνται απευθείας μέσα στο .top-bar με το order. */
+    .top-bar-right{display:contents;}
+    .top-bar strong{order:1;flex:1 1 0;min-width:0;}
+    .top-bar-right #langToggle{order:2;flex:0 0 auto;}
+    .top-bar-right #topMenuBtn{order:3;display:flex;flex:0 0 auto;}
+    .top-bar-right #changePlanBtn,.top-bar-right #upgradeBtn{order:4;flex:1 1 100%;
+      padding:9px 12px;font-size:12.5px;}
+    .top-menu{display:none;position:absolute;right:12px;top:100%;z-index:50;
+      flex-direction:column;gap:6px;padding:8px;min-width:200px;
+      background:var(--surface);border:1px solid var(--border);border-radius:8px;
+      box-shadow:0 8px 24px rgba(0,0,0,.45);}
+    .top-bar.menu-open .top-menu{display:flex;}
+    .top-menu .back-link{display:block;text-align:left;font-size:13px;padding:10px 12px;}
   }
 </style>
 </head>
@@ -438,19 +469,22 @@
   <div class="top-bar">
     <strong data-i18n="editorHeading">Content Management</strong>
     <div class="top-bar-right">
-      <a class="back-link" href="/home.html">Portal</a>
+      <div class="top-menu" id="topMenu">
+        <a class="back-link" id="topPortalLink" href="/home.html">Portal</a>
+        <button type="button" class="back-link" id="manageSubBtn" data-i18n="manageSubBtn" style="display:none;">Manage subscription</button>
+        <a class="back-link" id="switchModeLink" href="#" data-i18n="switchMode">Log out</a>
+      </div>
       <a class="back-link" id="topAllDocsBtn" href="#" data-i18n="allDocs">All documents</a>
-      <button type="button" class="back-link" id="manageSubBtn" data-i18n="manageSubBtn" style="display:none;">Manage subscription</button>
       <button type="button" class="upgrade-btn" id="changePlanBtn" data-i18n="changePlanBtn" style="display:none;">Switch to Pro</button>
       <button type="button" class="upgrade-btn" id="upgradeBtn" data-i18n="upgradeBtn" style="display:none;">Upgrade</button>
       <button type="button" class="icon-btn" id="settingsBtn" data-i18n-title="widgetSettingsTooltip" title="Widget settings">⚙</button>
       <button type="button" class="icon-btn" id="embedBtn" data-i18n-title="embedTooltip" title="Embed on your site">🔗</button>
       <button type="button" class="icon-btn" id="analyticsBtn" data-i18n-title="analyticsTooltip" title="Analytics">📊</button>
-      <a class="back-link" id="switchModeLink" href="#" data-i18n="switchMode">Log out</a>
       <div class="lang-toggle" id="langToggle">
         <button type="button" class="lang-btn" data-lang="en">EN</button>
         <button type="button" class="lang-btn" data-lang="el">GR</button>
       </div>
+      <button type="button" class="icon-btn" id="topMenuBtn" data-i18n-title="topMenuTooltip" title="Menu" aria-haspopup="true" aria-expanded="false">⋮</button>
     </div>
   </div>
 
@@ -2817,6 +2851,31 @@
     e.preventDefault();
     logoutAndSwitchMode();
   });
+
+  // Section V (29 Σεπ 2026): μενού ⋮ του top-bar (ορατό μόνο ≤900px, βλ. CSS).
+  // Κλείνει με: νέο πάτημα στο ⋮, πάτημα σε οποιοδήποτε στοιχείο του μενού, πάτημα
+  // έξω από αυτό, ή Escape. Τα ίδια τα κουμπιά (Portal, Manage subscription, Log out)
+  // κρατούν τα ίδια id και handlers -- εδώ δεν αγγίζουμε τη λογική τους.
+  (function initTopMenu() {
+    const bar = document.querySelector(".top-bar");
+    const btn = el("topMenuBtn");
+    const menu = el("topMenu");
+    function setOpen(open) {
+      bar.classList.toggle("menu-open", open);
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setOpen(!bar.classList.contains("menu-open"));
+    });
+    menu.addEventListener("click", () => setOpen(false));
+    document.addEventListener("click", (e) => {
+      if (!menu.contains(e.target)) setOpen(false);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") setOpen(false);
+    });
+  })();
 
   // Section O follow-up: banner "μη επιβεβαιωμένο email" -- ΜΟΝΟ για
   // πραγματικούς λογαριασμούς (υπάρχει sessionToken· το Guest/Developer flow
