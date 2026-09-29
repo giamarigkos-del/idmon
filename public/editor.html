@@ -97,6 +97,10 @@
   .period-toggle button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent);}
 
   .layout{flex:1;display:flex;min-height:0;}
+  /* Section V (29 Σεπ 2026): tab bar για κινητό -- κρυμμένο εντελώς σε desktop
+     (display:none), ώστε να μην πιάνει καθόλου στήλη στο flex row layout.
+     Γίνεται ορατό μόνο μέσα στο @media (max-width: 900px) παρακάτω. */
+  .mobile-tabs{display:none;}
 
   .sidebar{width:340px;flex-shrink:0;border-left:1px solid var(--border);background:var(--surface);
     display:flex;flex-direction:column;min-height:0;overflow-y:auto;order:2;}
@@ -386,6 +390,24 @@
      ΙΔΙΑ η σελίδα κυλάει κανονικά, σαν παντού αλλού στο site. */
   @media (max-width: 900px){
     .layout{flex-direction:column;}
+    /* Section V (29 Σεπ 2026): 4 tabs (Έγγραφα/Analytics/Embed/Ρυθμίσεις).
+       Μόνο ΕΝΑ από τα δύο (κύριο panel + sidebar) έχει νόημα κάθε φορά σε
+       στενή οθόνη -- πριν, το μόνιμο sidebar (Νέο έγγραφο, λίστα εγγράφων...)
+       εμφανιζόταν ΠΑΝΤΑ κάτω από ό,τι άλλο panel (Analytics/Embed/Settings),
+       μπερδεύοντας τον χρήστη. Το sidebar τώρα κρύβεται εκτός από το tab
+       "Έγγραφα" (βλ. κανόνα body[data-active-panel] παρακάτω). Τα ίδια τα
+       κουμπιά ⚙🔗📊/All documents στο top-bar παραμένουν λειτουργικά και
+       ενεργοποιούν το ίδιο state (βλ. setActivePanel στο script) -- κρύβονται
+       εδώ μόνο οπτικά, ώστε να μη διπλασιάζεται το ίδιο tab σε δύο σημεία. */
+    .mobile-tabs{display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid var(--border);
+      overflow-x:auto;order:0;}
+    .mobile-tabs button{flex:1;border:1px solid var(--border);background:none;
+      color:var(--text-soft);font-size:12px;font-weight:700;padding:8px 4px;
+      border-radius:4px;cursor:pointer;font-family:inherit;white-space:nowrap;}
+    .mobile-tabs button.active{background:#D97757;color:var(--bg);border-color:#D97757;}
+    .top-bar-right #topAllDocsBtn,.top-bar-right #settingsBtn,
+    .top-bar-right #embedBtn,.top-bar-right #analyticsBtn{display:none;}
+    body[data-active-panel]:not([data-active-panel="documents"]) .sidebar{display:none;}
     .main{order:1;flex:none;overflow-y:visible;padding:20px;}
     .sidebar{width:100%;border-left:none;border-top:1px solid var(--border);
       order:2;flex-shrink:0;overflow-y:visible;}
@@ -402,7 +424,7 @@
   }
 </style>
 </head>
-<body>
+<body data-active-panel="documents">
 
   <div class="top-bar">
     <strong data-i18n="editorHeading">Content Management</strong>
@@ -453,6 +475,12 @@
   </div>
 
   <div class="layout">
+    <div class="mobile-tabs" id="mobileTabs">
+      <button type="button" class="active" data-panel="documents" id="mobileTabDocuments" data-i18n="allDocs">All documents</button>
+      <button type="button" data-panel="analytics" id="mobileTabAnalytics" data-i18n="analyticsTooltip">Analytics</button>
+      <button type="button" data-panel="embed" id="mobileTabEmbed" data-i18n="embedTooltip">Embed on your site</button>
+      <button type="button" data-panel="settings" id="mobileTabSettings" data-i18n="widgetSettingsTooltip">Widget settings</button>
+    </div>
     <div class="sidebar">
       <div class="sidebar-section">
         <button class="new-doc-btn" id="newDocBtn" data-i18n="newDoc">+ New document</button>
@@ -1537,7 +1565,26 @@
   }
 
   el("newDocBtn").addEventListener("click", enterNewDocumentMode);
-  el("settingsBtn").addEventListener("click", renderSettingsPanel);
+
+  // Section V (29 Σεπ 2026): mobile tabs -- ενημερώνει ποιο tab δείχνεται
+  // ενεργό ΚΑΙ αν το sidebar πρέπει να κρύβεται σε στενή οθόνη (βλ. CSS
+  // body[data-active-panel] μέσα στο @media 900px). Σε desktop δεν έχει
+  // ΚΑΝΕΝΑ ορατό αποτέλεσμα -- το .mobile-tabs είναι display:none εκεί.
+  function setActivePanel(name) {
+    document.body.dataset.activePanel = name;
+    document.querySelectorAll(".mobile-tabs button").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.panel === name);
+    });
+  }
+  // Τα νέα κουμπιά tab απλά "πατάνε" τα ήδη υπάρχοντα, πραγματικά κουμπιά --
+  // καμία διπλή λογική, ό,τι ήδη δουλεύει (Section I/K/settings) τρέχει
+  // ακριβώς όπως πριν, μόνο η οπτική ένδειξη/το sidebar toggle είναι νέα.
+  el("mobileTabDocuments").addEventListener("click", () => el("topAllDocsBtn").click());
+  el("mobileTabAnalytics").addEventListener("click", () => el("analyticsBtn").click());
+  el("mobileTabEmbed").addEventListener("click", () => el("embedBtn").click());
+  el("mobileTabSettings").addEventListener("click", () => el("settingsBtn").click());
+
+  el("settingsBtn").addEventListener("click", () => { setActivePanel("settings"); renderSettingsPanel(); });
 
   // Section I: πάνελ embed layer -- λίστα domains + έτοιμο script tag.
   // Χωρίς ΚΑΝΕΝΑ καταχωρημένο domain, δεν εμφανίζεται καν το script tag --
@@ -1686,7 +1733,7 @@
     wireEmbedEvents(data, settings);
   }
 
-  el("embedBtn").addEventListener("click", renderEmbedPanel);
+  el("embedBtn").addEventListener("click", () => { setActivePanel("embed"); renderEmbedPanel(); });
 
   // Section K: πάνελ analytics -- μεγάλοι αριθμοί + απλό CSS bar chart
   // (χωρίς εξωτερική βιβλιοθήκη γραφημάτων, το ίδιο πνεύμα με το widget.js:
@@ -1805,7 +1852,7 @@
     wireAnalyticsEvents();
   }
 
-  el("analyticsBtn").addEventListener("click", renderAnalyticsPanel);
+  el("analyticsBtn").addEventListener("click", () => { setActivePanel("analytics"); renderAnalyticsPanel(); });
 
   function goToAllDocuments() {
     if (tuiEditorInstance) { tuiEditorInstance.destroy(); tuiEditorInstance = null; }
@@ -1816,6 +1863,7 @@
 
   el("topAllDocsBtn").addEventListener("click", (e) => {
     e.preventDefault();
+    setActivePanel("documents");
     goToAllDocuments();
   });
 
