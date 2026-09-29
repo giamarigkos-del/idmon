@@ -52,6 +52,7 @@ Documentation (verification steps, exception handling, FAQs, compliance notes) u
 - Test-question panel: a threaded conversation (with a "New conversation" button) so multi-turn context can be verified before publishing changes
 - Account section (real accounts only): data export and account deletion
 - Usage banner: shown to the workspace owner when the plan's message or document limit is reached
+- Mobile navigation (≤900px): the persistent sidebar (new document, document list, test question, etc.) is document-specific and only makes sense alongside the document browser, so on narrow screens it is hidden behind a tab bar (Documents / Analytics / Embed / Widget settings) instead of always stacking underneath whichever panel is open. The existing top-bar buttons stay functional and drive the same state (`setActivePanel()`) — the tabs are just an additional, mobile-only way to trigger them, not a parallel implementation. No effect above the breakpoint, where the sidebar is always visible next to the main panel
 
 **Plans and usage limits**
 - Three plans (Free, Basic, Pro) with monthly message and document limits per workspace, enforced in the backend (see [Plans](#plans-and-usage-limits))
