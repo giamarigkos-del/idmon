@@ -400,7 +400,11 @@
        ενεργοποιούν το ίδιο state (βλ. setActivePanel στο script) -- κρύβονται
        εδώ μόνο οπτικά, ώστε να μη διπλασιάζεται το ίδιο tab σε δύο σημεία. */
     .mobile-tabs{display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid var(--border);
-      overflow-x:auto;order:0;}
+      overflow-x:auto;order:0;flex-shrink:0;}
+    /* flex-shrink:0 (29 Σεπ 2026): το .layout έχει σταθερό ύψος (flex:1;min-height:0) και
+       τα .main/.sidebar αρνούνται να συρρικνωθούν, οπότε όταν το sidebar ήταν ορατό
+       (tab Documents) η μπάρα των tabs ήταν το μόνο στοιχείο που υποχωρούσε: 47px -> 19px,
+       και τα κουμπιά της έβγαιναν κομμένα. Μετρήθηκε σε headless Chromium. */
     .mobile-tabs button{flex:1;border:1px solid var(--border);background:none;
       color:var(--text-soft);font-size:12px;font-weight:700;padding:8px 4px;
       border-radius:4px;cursor:pointer;font-family:inherit;white-space:nowrap;}
@@ -421,6 +425,11 @@
        και μικραίνουμε λίγο το padding/gap ώστε να χωράει πιο άνετα. */
     .top-bar{height:auto;min-height:56px;flex-wrap:wrap;padding:10px 12px;gap:8px;}
     .top-bar-right{flex-wrap:wrap;gap:8px;}
+    /* Section V (29 Σεπ 2026): σε στενή οθόνη ο τίτλος παίρνει ολόκληρη την πρώτη γραμμή και
+       τα κουμπιά ολόκληρη τη δεύτερη, στοιχισμένα αριστερά κάτω από τον τίτλο. Πριν, το
+       margin-left:auto έσπρωχνε τα τυλιγμένα κουμπιά δεξιά ενώ ο τίτλος έμενε αριστερά. */
+    .top-bar strong{flex:1 1 100%;}
+    .top-bar-right{flex:1 1 100%;margin-left:0;justify-content:flex-start;}
   }
 </style>
 </head>
