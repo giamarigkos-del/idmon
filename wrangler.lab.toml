@@ -1,0 +1,42 @@
+# Lab Worker: πειραματικό περιβάλλον για το "Idmon για ομάδες" (branch team-experiment).
+# Ίδιος κώδικας με το production, αλλά ΕΝΤΕΛΩΣ δικοί του πόροι (βάση, KV, index),
+# ώστε τίποτα να μην αγγίζει το live προϊόν ή τους πραγματικούς πελάτες.
+# Δεν έχει Paddle: οι ομάδες δεν περνούν από checkout.
+#
+# Deploy:  npx wrangler deploy -c wrangler.lab.toml
+# Διεύθυνση: https://idmon-lab.<ο δικός σου υποτομέας>.workers.dev
+# (η ακριβής διεύθυνση φαίνεται στο τέλος του πρώτου deploy)
+
+name = "idmon-lab"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+# workers_dev = true ΣΚΟΠΙΜΑ: δεν χρειάζεται custom domain για το lab.
+workers_dev = true
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "idmon-lab-index"
+remote = true
+
+[[kv_namespaces]]
+binding = "DOCUMENT_REGISTRY"
+id = "0fae82d0e366443da0747926d408930e"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "idmon-lab-accounts"
+database_id = "6956c9a6-46fa-4773-a4e1-14b8c49709c4"
+
+[ai]
+binding = "AI"
+
+[assets]
+directory = "./public"
+not_found_handling = "none"
+
+[vars]
+NOTIFY_FROM_EMAIL = "notifications@idmon.app"
+
+# Το επίσημο δοκιμαστικό site key του Turnstile ("πάντα περνάει"), όπως στο staging.
+TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
