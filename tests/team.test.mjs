@@ -210,6 +210,7 @@ function installFetchMock(state) {
     if (u.includes("generateContent") || u.includes("streamGenerateContent")) {
       const prompt = body.contents[0].parts[0].text;
       state.prompts.push(prompt);
+      (state.urls = state.urls || []).push(u);
       if (state.llmDown) return new Response("{}", { status: 500 });
       const reply = (text) => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] }), { status: 200 });
       const sentenceWith = (text, phrase) => (text.split(".").find((x) => x.includes(phrase)) || phrase).trim() + ".";
@@ -606,6 +607,7 @@ section(`10. Το SMB δεν άλλαξε: ίδιες απαντήσεις με 
 {
   async function runSmb(worker) {
     const e = makeEnv();
+    e.CF_ACCOUNT_ID = "acc123"; e.AI_GATEWAY_ID = "idmon-ai"; // όπως στο production: εκεί τα URL πρέπει να μείνουν ίδια
     const st = { calls: [], prompts: [], emails: [] };
     installFetchMock(st);
     const ws = "ws-aaaaaaaaaaaaaaaaaaaaaaaa";
@@ -1296,6 +1298,22 @@ section("16. team-editor (εισερχόμενα), team-admin και portal: π�
   await new Promise((r) => setTimeout(r, 300));
   check("editor στη σελίδα admin: δεν εμφανίζεται κανένα δεδομένο διαχείρισης", $$(notAdmin, ".dept-row").length === 0 && $$(notAdmin, ".member-row").length === 0);
   state.judge = null;
+}
+
+// ============================================================================ 17. Διεύθυνση Gemini (gateway ή απευθείας)
+section("17. Κλήσεις Gemini: απευθείας όταν δεν υπάρχει gateway, gateway όταν υπάρχει");
+{
+  const oneSave = async (label) => {
+    state.urls = [];
+    state.judge = [{ x: "πέντε εργάσιμες ημέρες", y: "επτά εργάσιμες ημέρες", topic: "Χρόνος επιστροφής" }];
+    await call("ed_cc@demo.gr", "POST", "/team/documents", { title: label, departmentId: "cc", text: `Η επιστροφή χρημάτων γίνεται σε επτά εργάσιμες ημέρες. ${label}` });
+    state.judge = null;
+    return state.urls.filter((x) => x.includes("generateContent"));
+  };
+  check("lab (χωρίς CF_ACCOUNT_ID/AI_GATEWAY_ID): ο κριτής καλεί ΑΠΕΥΘΕΙΑΣ τη Google, ποτέ .../undefined/...", await (async () => { const urls = await oneSave("URL-A"); return urls.length > 0 && urls.every((x) => x.startsWith("https://generativelanguage.googleapis.com/v1beta/models/gemini-") && !x.includes("undefined")); })());
+  env.CF_ACCOUNT_ID = "acc123"; env.AI_GATEWAY_ID = "gw-test";
+  check("production (με τις δύο μεταβλητές): ο κριτής περνά από το gateway, όπως πριν", await (async () => { const urls = await oneSave("URL-B"); return urls.length > 0 && urls.every((x) => x.startsWith("https://gateway.ai.cloudflare.com/v1/acc123/gw-test/google-ai-studio/v1beta/models/gemini-")); })());
+  delete env.CF_ACCOUNT_ID; delete env.AI_GATEWAY_ID;
 }
 
 // ============================================================================ Σύνοψη

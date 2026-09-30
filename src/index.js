@@ -1600,6 +1600,12 @@ async function retrieveMatches(env, workspaceId, question, history, filter) {
 // συμπεριφοράς. Θεμέλιο για μελλοντικό fallback σε δεύτερο πάροχο (Στάδιο
 // Β, δεν έχει γίνει ακόμα) και δωρεάν logging/analytics στο μεταξύ.
 function geminiGatewayUrl(env, modelAndAction) {
+  // Περιβάλλον χωρίς gateway (π.χ. το lab "Idmon για ομάδες", 30 Σεπ 2026): αν λείπει το
+  // CF_ACCOUNT_ID ή το AI_GATEWAY_ID, η κλήση πηγαίνει απευθείας στη Google αντί για
+  // .../v1/undefined/undefined/... που αποτύγχανε πάντα. Το production έχει και τα δύο, άρα δεν αλλάζει.
+  if (!env.CF_ACCOUNT_ID || !env.AI_GATEWAY_ID) {
+    return `https://generativelanguage.googleapis.com/v1beta/models/${modelAndAction}`;
+  }
   return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${env.AI_GATEWAY_ID}/google-ai-studio/v1beta/models/${modelAndAction}`;
 }
 
