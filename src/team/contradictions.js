@@ -28,6 +28,7 @@ const MIN_QUOTE_CHARS = 8;
 const DEFAULT_MIN_SCORE = 0.7;
 const REMIND_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 const MAX_EMAIL_RECIPIENTS = 6;
+export const HIDDEN_TOPIC = "Πιθανή αντίφαση με έγγραφο κρυφού τμήματος";
 
 // ------------------------------------------------------------------ ο κριτής (LLM)
 function judgePrompt(newDoc, otherTitle, excerpts) {
@@ -275,9 +276,12 @@ function viewFor(member, departments, docIndex, row) {
   }
   const involved = member.role === "admin" || sides.some((s) => s.editable);
   if (!involved) return null;
+  // Ο τίτλος φτιάχνεται από το LLM συνοψίζοντας ΚΑΙ τα δύο κείμενα, άρα μπορεί να αποκαλύπτει το θέμα
+  // ενός κρυφού εγγράφου. Όταν μια πλευρά δεν είναι αναγνώσιμη για το μέλος, βλέπει γενικό τίτλο.
+  const anyHidden = sides.some((s) => !s.readable);
   return {
     id: row.id,
-    topic: row.topic,
+    topic: anyHidden ? HIDDEN_TOPIC : row.topic,
     status: row.status,
     createdAt: row.created_at,
     notifiedAt: row.notified_at || null,
