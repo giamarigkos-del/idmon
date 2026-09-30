@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Εισερχόμενα και έγγραφα · Idmon για ομάδες</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/shared.css">
+<style>
+  /* Section W (30 Σεπ 2026): οθόνη editor του "Idmon για ομάδες". Δύο όψεις: Εισερχόμενα (αντιφάσεις,
+     updates προς ενσωμάτωση, αναπάντητες ερωτήσεις) και Έγγραφα. Οι editors γράφουν ΜΟΝΟ στο δικό
+     τους τμήμα, οι admins παντού. Ο έλεγχος γίνεται στον server, εδώ απλώς κρύβουμε ό,τι δεν
+     επιτρέπεται. Όλα τα δεδομένα μπαίνουν με textContent (ποτέ innerHTML). */
+  :root{--accent:#D97757;--accent-soft:rgba(217,119,87,.16);}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 16px 56px;}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+    padding:14px 0;border-bottom:1px solid var(--border);margin-bottom:18px;}
+  .topbar h1{font-size:16px;margin:0;font-weight:600;}
+  .topbar a{color:var(--text-soft);font-size:13px;margin-left:14px;}
+  .tabs{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap;}
+  .tab{background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:8px;
+    padding:8px 16px;font-size:14px;cursor:pointer;font-family:inherit;}
+  .tab.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600;}
+  .counts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:22px;}
+  .count{border-radius:10px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);}
+  .count .l{font-size:12px;color:var(--text-soft);} .count .n{font-size:26px;font-weight:600;line-height:1.2;}
+  .count.danger{background:rgba(229,100,107,.12);border-color:rgba(229,100,107,.4);} .count.danger .n,.count.danger .l{color:var(--danger);}
+  .count.warn{background:var(--warn-bg);border-color:var(--warn-border);} .count.warn .n,.count.warn .l{color:var(--warn-border);}
+  h2.sec{font-size:15px;margin:26px 0 6px;font-weight:600;}
+  .hint{font-size:12.5px;color:var(--text-soft);margin:0 0 10px;}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:12px;}
+  .card h3{font-size:14px;margin:0 0 4px;font-weight:600;}
+  .sides{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin:10px 0;}
+  .side{border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
+  .side .who{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;color:var(--text-soft);margin-bottom:6px;}
+  .side .q{font-size:13.5px;line-height:1.6;}
+  mark{background:rgba(229,100,107,.22);color:var(--danger);padding:1px 4px;border-radius:4px;}
+  .pill{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--surface-2);color:var(--text-soft);white-space:nowrap;display:inline-block;}
+  .pill.you{background:var(--accent-soft);color:var(--accent);}
+  .status{font-size:12px;color:var(--text-soft);margin:6px 0;}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+  .btn{height:38px;padding:0 16px;border-radius:8px;border:none;background:var(--accent);color:var(--on-accent);font-size:13.5px;font-weight:600;cursor:pointer;}
+  .btn.secondary{background:var(--surface-2);color:var(--text);border:1px solid var(--border);}
+  .btn.danger{background:none;color:var(--danger);border:1px solid var(--danger);}
+  .btn:disabled{opacity:.55;cursor:default;}
+  .note{font-size:13px;margin-top:8px;min-height:16px;} .note.ok{color:var(--ok);} .note.err{color:var(--danger);}
+  .empty{font-size:13px;color:var(--text-soft);padding:10px 0;}
+  .diff{border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:13px;line-height:1.6;margin:10px 0;}
+  .diff div{padding:4px 12px;}
+  .diff .same{color:var(--text-soft);} .diff .del{background:rgba(229,100,107,.14);color:var(--danger);text-decoration:line-through;}
+  .diff .add{background:rgba(79,174,124,.14);color:var(--ok);}
+  .qrow{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 0;border-top:1px solid var(--border);font-size:14px;}
+  .qrow .c{font-size:12px;color:var(--text-soft);}
+  /* έγγραφα */
+  .grid{display:grid;grid-template-columns:minmax(240px,320px) 1fr;gap:22px;align-items:start;}
+  @media (max-width:760px){.grid{grid-template-columns:1fr;}}
+  .item{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;background:none;border:none;
+    border-top:1px solid var(--border);padding:9px 0;color:var(--text);cursor:pointer;font-family:inherit;}
+  .item .t{font-size:14px;} .item .m{font-size:12px;color:var(--text-soft);} .item.active .t{color:var(--accent);}
+  label{display:block;font-size:12.5px;color:var(--text-soft);margin:12px 0 4px;}
+  input[type=text],select,textarea{width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border);
+    background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;}
+  textarea{min-height:240px;line-height:1.6;resize:vertical;}
+  textarea.small{min-height:90px;}
+  .ro{font-size:12.5px;color:var(--text-soft);margin:0 0 6px;}
+  .readonly-text{white-space:pre-wrap;line-height:1.7;font-size:14.5px;margin:12px 0 0;}
+  .pending{border:1px dashed var(--warn-border);border-radius:8px;padding:8px 12px;margin:12px 0;font-size:13px;}
+  .pending .h{font-size:12px;color:var(--warn-border);margin-bottom:4px;}
+  hr.sep{border:none;border-top:1px solid var(--border);margin:18px 0;}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+(function () {
+  "use strict";
+  var app = document.getElementById("app");
+  var me = null;
+  var departments = [];
+  var docs = [];
+  var inbox = null;
+  var view = "inbox"; // "inbox" | "docs"
+  var currentId = null; // null = νέο έγγραφο
+  var prefillTitle = "";
+  var flash = null;
+
+  // ---------------------------------------------------------------- βοηθητικά
+  function h(tag, props, children) {
+    var node = document.createElement(tag);
+    props = props || {};
+    Object.keys(props).forEach(function (k) {
+      if (k === "class") node.className = props[k];
+      else if (k === "text") node.textContent = props[k];
+      else if (k === "value") node.value = props[k];
+      else if (k.slice(0, 2) === "on") node.addEventListener(k.slice(2), props[k]);
+      else node.setAttribute(k, props[k]);
+    });
+    (children || []).forEach(function (c) { if (c) node.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+    return node;
+  }
+  function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+  function api(path, method, body) {
+    var opts = { method: method || "GET", headers: {}, credentials: "same-origin" };
+    if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+    return fetch(path, opts).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (data) { return { status: res.status, data: data }; });
+    });
+  }
+  var ERRORS = {
+    forbidden: "Δεν έχεις δικαίωμα για αυτή την ενέργεια.", invalid_title: "Ο τίτλος είναι κενός ή πολύ μεγάλος.",
+    text_required: "Γράψε κείμενο.", text_too_long: "Το κείμενο είναι πολύ μεγάλο.", invalid_text: "Το κείμενο είναι κενό ή πολύ μεγάλο.",
+    ai_unavailable: "Ο πάροχος AI δεν είναι διαθέσιμος. Δοκίμασε ξανά σε λίγο.", bad_proposal: "Η πρόταση δεν ήταν χρήσιμη. Δοκίμασε ξανά ή γράψε το κείμενο μόνος σου.",
+    cooldown: "Έχει ήδη σταλεί υπενθύμιση πρόσφατα.", has_pending_updates: "Ενσωμάτωσε ή απόρριψε πρώτα τα εκκρεμή updates του εγγράφου.",
+    not_found: "Δεν βρέθηκε (ίσως άλλαξε στο μεταξύ).", not_open: "Έχει ήδη επιλυθεί."
+  };
+  function errText(r) { return ERRORS[r.data && r.data.error] || "Κάτι πήγε στραβά."; }
+
+  // Διαφορά κειμένου σε επίπεδο προτάσεων (LCS). Επιστρέφει [{type: same|del|add, text}].
+  function units(text) {
+    var out = [];
+    String(text).split(/\n+/).forEach(function (line) {
+      var parts = line.match(/[^.!;·]+[.!;·]?\s*/g) || [line];
+      parts.forEach(function (p) { p = p.trim(); if (p) out.push(p); });
+    });
+    return out;
+  }
+  function diffText(a, b) {
+    var x = units(a), y = units(b), n = x.length, m = y.length, i, j;
+    var t = [];
+    for (i = 0; i <= n; i++) { t.push(new Array(m + 1).fill(0)); }
+    for (i = n - 1; i >= 0; i--) for (j = m - 1; j >= 0; j--) t[i][j] = x[i] === y[j] ? t[i + 1][j + 1] + 1 : Math.max(t[i + 1][j], t[i][j + 1]);
+    var ops = []; i = 0; j = 0;
+    while (i < n && j < m) {
+      if (x[i] === y[j]) { ops.push({ type: "same", text: x[i] }); i++; j++; }
+      else if (t[i + 1][j] >= t[i][j + 1]) { ops.push({ type: "del", text: x[i] }); i++; }
+      else { ops.push({ type: "add", text: y[j] }); j++; }
+    }
+    while (i < n) ops.push({ type: "del", text: x[i++] });
+    while (j < m) ops.push({ type: "add", text: y[j++] });
+    return ops;
+  }
+  function renderDiff(base, proposed) {
+    var box = h("div", { class: "diff", "aria-label": "Αλλαγές" });
+    diffText(base, proposed).forEach(function (op) {
+      box.appendChild(h("div", { class: op.type, text: (op.type === "del" ? "− " : op.type === "add" ? "+ " : "  ") + op.text }));
+    });
+    return box;
+  }
+
+  // ---------------------------------------------------------------- κορυφή
+  function renderShell(content) {
+    clear(app);
+    var total = inbox ? inbox.counts.contradictions + inbox.counts.updates + inbox.counts.questions : 0;
+    var links = [h("a", { href: "/portal.html", text: "← Πίσω στην αναζήτηση" })];
+    if (me.role === "admin") links.push(h("a", { href: "/team-admin.html", text: "Διαχείριση" }));
+    app.appendChild(h("div", { class: "topbar" }, [h("h1", { text: (me.workspaceName || "") + " · Editor" }), h("div", null, links)]));
+    app.appendChild(h("div", { class: "tabs", role: "tablist" }, [
+      h("button", { class: "tab" + (view === "inbox" ? " active" : ""), type: "button", role: "tab", id: "tab-inbox",
+        onclick: function () { view = "inbox"; refreshInbox(); }, text: "Εισερχόμενα" + (total ? " (" + total + ")" : "") }),
+      h("button", { class: "tab" + (view === "docs" ? " active" : ""), type: "button", role: "tab", id: "tab-docs",
+        onclick: function () { view = "docs"; refreshDocs(); }, text: "Έγγραφα" }),
+    ]));
+    app.appendChild(content);
+  }
+
+  // ---------------------------------------------------------------- εισερχόμενα
+  function refreshInbox() {
+    return api("/team/inbox").then(function (r) { if (r.status === 200) inbox = r.data; renderInbox(); });
+  }
+
+  function highlight(node, quote) { node.appendChild(h("mark", { text: quote })); }
+
+  function contradictionCard(c) {
+    var msg = h("p", { class: "note", role: "status", "aria-live": "polite" });
+    var otherHiddenOrForeign = c.sides.some(function (s) { return s.hidden || !s.editable; });
+    var sides = h("div", { class: "sides" }, c.sides.map(function (s) {
+      if (s.hidden) {
+        return h("div", { class: "side hidden-side" }, [
+          h("div", { class: "who" }, [h("span", { text: "Έγγραφο κρυφού τμήματος" }), h("span", { class: "pill", text: "κρυφό" })]),
+          h("div", { class: "q", text: "Υπάρχει αντίφαση με έγγραφο που δεν έχεις πρόσβαση. Ο admin ειδοποιήθηκε." }),
+        ]);
+      }
+      var q = h("div", { class: "q" }); highlight(q, s.quote);
+      return h("div", { class: "side" }, [
+        h("div", { class: "who" }, [h("span", { text: s.title + " · " + s.departmentName }),
+          s.editable ? h("span", { class: "pill you", text: "Δικό σου" }) : h("span", { class: "pill", text: "μόνο ανάγνωση" })]),
+        q,
+        h("div", { class: "actions" }, [h("button", { class: "btn secondary", type: "button", text: "Άνοιγμα", onclick: function () { openDoc(s.documentId); } })]),
+      ]);
+    }));
+    var actions = h("div", { class: "actions" }, [
+      h("button", { class: "btn secondary", type: "button", text: "Δεν είναι αντίφαση", onclick: function () {
+        api("/team/contradictions/" + c.id + "/dismiss", "POST").then(function (r) {
+          if (r.status === 200) refreshInbox(); else { msg.className = "note err"; msg.textContent = errText(r); }
+        });
+      } }),
+    ]);
+    if (otherHiddenOrForeign) {
+      actions.appendChild(h("button", { class: "btn secondary", type: "button", text: "Υπενθύμιση στο άλλο τμήμα", onclick: function () {
+        api("/team/contradictions/" + c.id + "/remind", "POST").then(function (r) {
+          if (r.status === 200) { msg.className = "note ok"; msg.textContent = "Στάλθηκε υπενθύμιση."; }
+          else { msg.className = "note err"; msg.textContent = errText(r); }
+        });
+      } }));
+    }
+    var status = c.notifiedAt ? "Έχουν ειδοποιηθεί οι υπεύθυνοι." : "Βρέθηκε αυτόματα κατά τη δημοσίευση.";
+    return h("div", { class: "card contradiction" }, [
+      h("h3", { text: c.topic || "Πιθανή αντίφαση" }), h("p", { class: "status", text: status }), sides, actions, msg,
+    ]);
+  }
+
+  function updateCard(u) {
+    var msg = h("p", { class: "note", role: "status", "aria-live": "polite" });
+    var area = h("div", null);
+    var propose = h("button", { class: "btn", type: "button", text: "Πρότεινε ενσωμάτωση" });
+    propose.addEventListener("click", function () {
+      propose.disabled = true; msg.className = "note"; msg.textContent = "Ετοιμάζω πρόταση…";
+      api("/team/updates/" + u.id + "/propose", "POST").then(function (r) {
+        propose.disabled = false;
+        if (r.status !== 200) { msg.className = "note err"; msg.textContent = errText(r); return; }
+        msg.textContent = "";
+        clear(area);
+        var text = h("textarea", { "aria-label": "Τελικό κείμενο εγγράφου" }); text.value = r.data.proposedText;
+        var diffBox = h("div", null, [renderDiff(r.data.baseText, r.data.proposedText)]);
+        text.addEventListener("input", function () { clear(diffBox); diffBox.appendChild(renderDiff(r.data.baseText, text.value)); });
+        var apply = h("button", { class: "btn", type: "button", text: "Εφαρμογή στο άρθρο" });
+        apply.addEventListener("click", function () {
+          apply.disabled = true;
+          api("/team/updates/" + u.id + "/apply", "POST", { text: text.value }).then(function (a) {
+            if (a.status === 200) { flash = "Το update ενσωματώθηκε (έκδοση " + a.data.version + ")."; refreshInbox(); }
+            else { apply.disabled = false; msg.className = "note err"; msg.textContent = errText(a); }
+          });
+        });
+        area.appendChild(h("p", { class: "hint", text: "Έλεγξε τις αλλαγές. Μπορείς να διορθώσεις το κείμενο πριν το εγκρίνεις. Τίποτα δεν εφαρμόζεται μέχρι να πατήσεις «Εφαρμογή»." }));
+        area.appendChild(diffBox);
+        area.appendChild(h("label", { text: "Τελικό κείμενο (επεξεργάσιμο)" }));
+        area.appendChild(text);
+        area.appendChild(h("div", { class: "actions" }, [apply]));
+      });
+    });
+    var reject = h("button", { class: "btn danger", type: "button", text: "Απόρριψη update", onclick: function () {
+      if (!window.confirm("Να απορριφθεί αυτό το update;")) return;
+      api("/team/updates/" + u.id + "/reject", "POST").then(function (r) {
+        if (r.status === 200) refreshInbox(); else { msg.className = "note err"; msg.textContent = errText(r); }
+      });
+    } });
+    return h("div", { class: "card update" }, [
+      h("h3", { text: "Update στο «" + u.documentTitle + "»" }),
+      h("p", { class: "status", text: u.departmentName + " · οι υπάλληλοι το βλέπουν ήδη ως update" }),
+      h("div", { class: "q", style: "font-size:14px;line-height:1.6;white-space:pre-wrap;", text: u.text }),
+      h("div", { class: "actions" }, [propose, reject]), msg, area,
+    ]);
+  }
+
+  function questionRow(q) {
+    return h("div", { class: "qrow" }, [
+      h("span", null, [document.createTextNode(q.question), h("span", { class: "c", text: "  ·  " + q.count + (q.count === 1 ? " φορά" : " φορές") })]),
+      h("span", { class: "actions", style: "margin:0;" }, [
+        h("button", { class: "btn secondary", type: "button", text: "Γράψε άρθρο", onclick: function () {
+          prefillTitle = q.question; currentId = null; view = "docs"; refreshDocs();
+        } }),
+        h("button", { class: "btn secondary", type: "button", text: "Παράβλεψη", onclick: function () {
+          api("/team/inbox/questions/dismiss", "POST", { hash: q.hash }).then(function () { refreshInbox(); });
+        } }),
+      ]),
+    ]);
+  }
+
+  function renderInbox() {
+    var c = inbox ? inbox.counts : { contradictions: 0, updates: 0, questions: 0 };
+    var root = h("div", null);
+    if (flash) { root.appendChild(h("p", { class: "note ok", role: "status", text: flash })); flash = null; }
+    root.appendChild(h("div", { class: "counts" }, [
+      h("div", { class: "count danger" }, [h("div", { class: "l", text: "Αντιφάσεις" }), h("div", { class: "n", text: String(c.contradictions) })]),
+      h("div", { class: "count warn" }, [h("div", { class: "l", text: "Updates προς ενσωμάτωση" }), h("div", { class: "n", text: String(c.updates) })]),
+      h("div", { class: "count" }, [h("div", { class: "l", text: "Αναπάντητες ερωτήσεις" }), h("div", { class: "n", text: String(c.questions) })]),
+    ]));
+
+    root.appendChild(h("h2", { class: "sec", text: "Αντιφάσεις" }));
+    root.appendChild(h("p", { class: "hint", text: "Βρίσκονται αυτόματα όταν δημοσιεύεται ή αλλάζει ένα έγγραφο. Μπορείς να διορθώσεις μόνο έγγραφα του τμήματός σου." }));
+    if (!inbox || !inbox.contradictions.length) root.appendChild(h("div", { class: "empty", text: "Καμία ανοιχτή αντίφαση." }));
+    else inbox.contradictions.forEach(function (x) { root.appendChild(contradictionCard(x)); });
+
+    root.appendChild(h("h2", { class: "sec", text: "Updates προς ενσωμάτωση" }));
+    root.appendChild(h("p", { class: "hint", text: "Συμπληρώματα που δεν έχουν μπει ακόμα στο βασικό άρθρο. Το σύστημα προτείνει την αλλαγή και εσύ την εγκρίνεις." }));
+    if (!inbox || !inbox.updates.length) root.appendChild(h("div", { class: "empty", text: "Κανένα update σε αναμονή." }));
+    else inbox.updates.forEach(function (u) { root.appendChild(updateCard(u)); });
+
+    root.appendChild(h("h2", { class: "sec", text: "Αναπάντητες ερωτήσεις" }));
+    root.appendChild(h("p", { class: "hint", text: "Ερωτήσεις υπαλλήλων του τμήματός σου που ο βοηθός δεν βρήκε πού να τις απαντήσει. Δεν φαίνεται ποιος τις έκανε." }));
+    var qbox = h("div", { class: "card" });
+    if (!inbox || !inbox.questions.length) qbox.appendChild(h("div", { class: "empty", text: "Καμία αναπάντητη ερώτηση." }));
+    else inbox.questions.forEach(function (q) { qbox.appendChild(questionRow(q)); });
+    root.appendChild(qbox);
+    renderShell(root);
+  }
+
+  // ---------------------------------------------------------------- έγγραφα
+  function openDoc(id) { currentId = id; view = "docs"; refreshDocs(); }
+
+  function writableDepartments() {
+    if (me.role === "admin") return [{ id: "_all", name: "Όλη η εταιρεία" }].concat(departments.map(function (d) { return { id: d.id, name: d.name }; }));
+    return (me.departments || []).map(function (d) { return { id: d.id, name: d.name }; });
+  }
+
+  function refreshDocs() {
+    return api("/team/documents").then(function (r) { docs = (r.data && r.data.documents) || []; renderDocs(); });
+  }
+
+  function renderDocs() {
+    var list = h("div", { class: "card" }, [h("h3", { text: "Έγγραφα" })]);
+    list.appendChild(h("button", { class: "item" + (currentId === null ? " active" : ""), type: "button", onclick: function () { prefillTitle = ""; currentId = null; renderDocs(); } }, [
+      h("span", { class: "t", text: "+ Νέο έγγραφο" }),
+    ]));
+    docs.forEach(function (d) {
+      var extra = (d.editable ? "" : " · μόνο ανάγνωση") + (d.pendingUpdates ? " · " + d.pendingUpdates.count + " update" : "");
+      list.appendChild(h("button", { class: "item" + (currentId === d.id ? " active" : ""), type: "button", onclick: function () { currentId = d.id; renderDocs(); } }, [
+        h("span", { class: "t", text: d.title }), h("span", { class: "m", text: d.departmentName + extra }),
+      ]));
+    });
+    var panel = h("div", { class: "card", id: "panel" });
+    renderShell(h("div", { class: "grid" }, [list, panel]));
+    renderPanel(panel, null);
+    if (currentId !== null) {
+      api("/team/documents/" + encodeURIComponent(currentId)).then(function (r) { if (r.status === 200) renderPanel(panel, r.data); });
+    }
+  }
+
+  function pendingBlock(list) {
+    if (!list || !list.length) return null;
+    var box = h("div", { class: "pending" }, [h("div", { class: "h", text: "Updates που δεν έχουν ενσωματωθεί ακόμα (οι υπάλληλοι τα βλέπουν)" })]);
+    list.forEach(function (u) { box.appendChild(h("div", { style: "white-space:pre-wrap;margin-top:4px;", text: "• " + u.text })); });
+    return box;
+  }
+
+  function renderPanel(panel, doc) {
+    clear(panel);
+    var isNew = currentId === null;
+    if (doc && !doc.editable) {
+      panel.appendChild(h("h3", { text: doc.title }));
+      panel.appendChild(h("p", { class: "ro", text: doc.departmentName + " · μόνο ανάγνωση (ανήκει σε άλλο τμήμα)" }));
+      var pb = pendingBlock(doc.pendingUpdates); if (pb) panel.appendChild(pb);
+      panel.appendChild(h("div", { class: "readonly-text", text: doc.fullText }));
+      return;
+    }
+    if (!isNew && !doc) { panel.appendChild(h("p", { class: "ro", text: "Φόρτωση…" })); return; }
+
+    var writable = writableDepartments();
+    var title = h("input", { type: "text", id: "title", maxlength: "200", value: doc ? doc.title : prefillTitle });
+    var dept = h("select", { id: "dept" }, writable.map(function (d) {
+      var o = h("option", { value: d.id, text: d.name }); if (doc && doc.departmentId === d.id) o.selected = true; return o;
+    }));
+    var text = h("textarea", { id: "text", "aria-label": "Κείμενο" }); text.value = doc ? doc.fullText : "";
+    var note = h("p", { class: "note", role: "status", "aria-live": "polite" });
+    if (flash) { note.className = "note ok"; note.textContent = flash; flash = null; }
+    var save = h("button", { class: "btn", type: "submit", text: isNew ? "Δημοσίευση" : "Αποθήκευση" });
+
+    var form = h("form", { onsubmit: function (e) {
+      e.preventDefault();
+      save.disabled = true; note.className = "note"; note.textContent = "Αποθήκευση και δημιουργία αναζήτησης…";
+      var body = { title: title.value, departmentId: dept.value, text: text.value };
+      var req = isNew ? api("/team/documents", "POST", body) : api("/team/documents/" + encodeURIComponent(currentId), "PUT", body);
+      req.then(function (r) {
+        save.disabled = false;
+        if (r.status === 200 || r.status === 201) {
+          currentId = r.data.id; prefillTitle = "";
+          flash = "Αποθηκεύτηκε (έκδοση " + r.data.version + "). Ο έλεγχος αντιφάσεων τρέχει: δες τα Εισερχόμενα σε λίγα δευτερόλεπτα.";
+          return refreshDocs();
+        }
+        note.className = "note err"; note.textContent = errText(r);
+      }).catch(function () { save.disabled = false; note.className = "note err"; note.textContent = "Δεν ήταν δυνατή η αποθήκευση."; });
+    } }, [
+      h("label", { for: "title", text: "Τίτλος" }), title, h("label", { for: "dept", text: "Τμήμα" }), dept,
+      h("label", { for: "text", text: "Κείμενο" }), text,
+      h("div", { class: "actions" }, [save].concat(isNew ? [] : [
+        h("button", { class: "btn secondary", type: "button", text: "Έλεγχος αντιφάσεων τώρα", onclick: function () {
+          note.className = "note"; note.textContent = "Έλεγχος…";
+          api("/team/documents/" + encodeURIComponent(currentId) + "/check", "POST").then(function (r) {
+            if (r.status === 200) { note.className = "note ok"; note.textContent = "Ο έλεγχος τελείωσε: " + r.data.created + " νέες αντιφάσεις."; }
+            else { note.className = "note err"; note.textContent = errText(r); }
+          });
+        } }),
+        h("button", { class: "btn danger", type: "button", text: "Διαγραφή", onclick: function () {
+          if (!window.confirm("Να διαγραφεί οριστικά αυτό το έγγραφο;")) return;
+          api("/team/documents/" + encodeURIComponent(currentId), "DELETE").then(function (r) {
+            if (r.status === 200) { currentId = null; refreshDocs(); } else { note.className = "note err"; note.textContent = errText(r); }
+          });
+        } }),
+      ])), note,
+    ]);
+    if (writable.length === 0) { panel.appendChild(h("p", { class: "ro", text: "Δεν έχεις τμήμα στο οποίο να μπορείς να γράψεις. Ζήτησε από τον admin." })); return; }
+    var pb2 = doc ? pendingBlock(doc.pendingUpdates) : null; if (pb2) panel.appendChild(pb2);
+    panel.appendChild(form);
+
+    if (!isNew) {
+      // Προσθήκη update: ένα συμπλήρωμα που φαίνεται αμέσως στους υπαλλήλους και ενσωματώνεται αργότερα με έγκριση.
+      var utext = h("textarea", { class: "small", id: "update-text", "aria-label": "Κείμενο update" });
+      var unote = h("p", { class: "note", role: "status", "aria-live": "polite" });
+      var ubtn = h("button", { class: "btn secondary", type: "submit", text: "Δημοσίευση update" });
+      panel.appendChild(h("hr", { class: "sep" }));
+      panel.appendChild(h("h3", { text: "Προσθήκη update" }));
+      panel.appendChild(h("p", { class: "hint", text: "Για μια πρόσφατη αλλαγή που δεν θες να ξαναγράψεις ακόμα όλο το άρθρο. Ο βοηθός και οι υπάλληλοι την βλέπουν αμέσως, και την ενσωματώνεις αργότερα από τα Εισερχόμενα." }));
+      panel.appendChild(h("form", { id: "update-form", onsubmit: function (e) {
+        e.preventDefault();
+        ubtn.disabled = true; unote.className = "note"; unote.textContent = "Δημοσίευση…";
+        api("/team/updates", "POST", { documentId: currentId, text: utext.value }).then(function (r) {
+          ubtn.disabled = false;
+          if (r.status === 201) { flash = "Το update δημοσιεύτηκε και είναι ήδη αναζητήσιμο."; refreshDocs(); }
+          else { unote.className = "note err"; unote.textContent = errText(r); }
+        });
+      } }, [utext, h("div", { class: "actions" }, [ubtn]), unote]));
+    }
+  }
+
+  // ---------------------------------------------------------------- εκκίνηση
+  var params = new URLSearchParams(window.location.search);
+  api("/team/me").then(function (r) {
+    if (r.status !== 200) { window.location.replace("/portal.html"); return; }
+    me = r.data;
+    if (me.role === "employee") { window.location.replace("/portal.html"); return; }
+    return api("/team/departments").then(function (dr) {
+      departments = (dr.data && dr.data.departments) || [];
+      if (params.get("doc")) { currentId = params.get("doc"); view = "docs"; return refreshDocs(); }
+      return refreshInbox();
+    });
+  }).catch(function () { app.appendChild(h("p", { text: "Δεν ήταν δυνατή η φόρτωση." })); });
+})();
+</script>
+</body>
+</html>

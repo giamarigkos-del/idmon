@@ -8,6 +8,8 @@ import { argon2id, argon2Verify, setWASMModules } from "argon2-wasm-edge";
 import argon2WASM from "argon2-wasm-edge/wasm/argon2.wasm";
 import blake2bWASM from "argon2-wasm-edge/wasm/blake2b.wasm";
 setWASMModules({ argon2WASM, blake2bWASM });
+// Section W: "Idmon για ομάδες" (εσωτερικό portal). Όλος ο νέος κώδικας ζει στο src/team/.
+import { handleTeamRequest } from "./team/index.js";
 
 const CHUNK_SIZE = 300;
 const CHUNK_OVERLAP = 30;
@@ -325,7 +327,12 @@ async function createSession(env, userId, workspaceId) {
 async function resolveWorkspaceId(request, env) {
   const sessionToken = request.headers.get("X-Session-Token");
   if (!sessionToken) {
-    return request.headers.get("X-Workspace-Id");
+    const headerWorkspaceId = request.headers.get("X-Workspace-Id");
+    // Section W: το πρόθεμα "team-" είναι δεσμευμένο για τις ομάδες. Το παλιό μονοπάτι
+    // (απλό header, χωρίς session) δεν επιτρέπεται ΠΟΤΕ να φτάσει σε workspace ομάδας,
+    // ούτε αν κάποιος μάθει ή μαντέψει το id του.
+    if (headerWorkspaceId && headerWorkspaceId.startsWith("team-")) return null;
+    return headerWorkspaceId;
   }
   const row = await env.DB.prepare(
     "SELECT workspace_id, expires_at FROM sessions WHERE token = ?"
@@ -1518,13 +1525,17 @@ function buildRagPrompt(context, question, history) {
 // πετάει σφάλμα σε αυτή την περίπτωση, ΔΕΝ επιστρέφει απλά άδεια
 // αποτελέσματα. Το αντιμετωπίζουμε ακριβώς σαν "καμία σχετική
 // τεκμηρίωση" (άδειο array).
-async function searchWorkspace(env, workspaceId, embedding) {
+async function searchWorkspace(env, workspaceId, embedding, filter) {
   try {
-    const result = await env.VECTORIZE.query(embedding, {
+    const options = {
       topK: TOP_K,
       namespace: workspaceId,
       returnMetadata: "all",
-    });
+    };
+    // Section W: προαιρετικό φίλτρο metadata (χρησιμοποιείται ΜΟΝΟ από τις ομάδες, ανά
+    // τμήμα). Χωρίς φίλτρο το ερώτημα είναι ΑΚΡΙΒΩΣ το ίδιο με πριν: κανένα νέο κλειδί.
+    if (filter) options.filter = filter;
+    const result = await env.VECTORIZE.query(embedding, options);
     return (result && result.matches) || [];
   } catch (err) {
     return [];
@@ -1540,7 +1551,7 @@ async function searchWorkspace(env, workspaceId, embedding) {
 // τα TOP_K καλύτερα. Αν η δεύτερη αναζήτηση αποτύχει, συνεχίζουμε με την
 // πρώτη -- ποτέ δεν σπάει η ερώτηση εξαιτίας της. Επιστρέφει το ίδιο σχήμα
 // {matches: [...]} που περίμενε ήδη ο υπόλοιπος κώδικας.
-async function retrieveMatches(env, workspaceId, question, history) {
+async function retrieveMatches(env, workspaceId, question, history, filter) {
   const previousQuestion = lastUserQuestion(history);
 
   const primaryPromise = (async () => {
@@ -1551,7 +1562,7 @@ async function retrieveMatches(env, workspaceId, question, history) {
     // για σελίδα σφάλματος.
     try {
       const embedding = await getEmbedding(question, env.GEMINI_API_KEY);
-      return await searchWorkspace(env, workspaceId, embedding);
+      return await searchWorkspace(env, workspaceId, embedding, filter);
     } catch (err) {
       return [];
     }
@@ -1564,7 +1575,7 @@ async function retrieveMatches(env, workspaceId, question, history) {
   const combinedPromise = (async () => {
     try {
       const embedding = await getEmbedding(previousQuestion + "\n" + question, env.GEMINI_API_KEY);
-      return await searchWorkspace(env, workspaceId, embedding);
+      return await searchWorkspace(env, workspaceId, embedding, filter);
     } catch (err) {
       return [];
     }
@@ -4616,8 +4627,25 @@ async function handleBillingPortal(request, env) {
   });
 }
 
+// Section W: οι κοινές συναρτήσεις που χρειάζονται τα endpoints των ομάδων (src/team/).
+// Περνιούνται από εδώ ώστε ο φάκελος team/ να μην εισάγει ποτέ αυτό το αρχείο.
+const TEAM_DEPS = {
+  clientIp,
+  randomHex,
+  sendEmailViaResend,
+  getEmbedding,
+  chunkText,
+  retrieveMatches,
+  streamGeminiChunks,
+  askGemini,
+  askGeminiOnly,
+  sanitizeHistory,
+  encodeSSE,
+  MAX_UPLOAD_WORDS,
+};
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
@@ -4625,6 +4653,13 @@ export default {
         JSON.stringify({ status: "ok", message: "Idmon RAG is alive" }),
         { headers: JSON_HEADERS }
       );
+    }
+
+    // Section W: όλα τα /team/* ανήκουν στο "Idmon για ομάδες" (src/team/). Δεν αγγίζουν
+    // κανένα SMB endpoint, και ένα SMB request δεν περνά ποτέ από εδώ (άλλο πρόθεμα).
+    if (url.pathname.startsWith("/team/")) {
+      const teamResponse = await handleTeamRequest(request, env, url, TEAM_DEPS, ctx);
+      if (teamResponse) return teamResponse;
     }
 
     // Section R: μοναδικό μη-ευαίσθητο ρυθμιστικό στοιχείο που χρειάζεται

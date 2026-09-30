@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Idmon για ομάδες</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/shared.css">
+<style>
+  /* Section W (30 Σεπ 2026): πύλη υπαλλήλου του "Idmon για ομάδες". Ξεχωριστή σελίδα από το
+     home.html (απόφαση: δεν αγγίζουμε τη σελίδα των SMB). Αναζήτηση πρώτα, από κάτω τα
+     πρόσφατα updates και τα έγγραφα του τμήματος. Όλα τα δεδομένα μπαίνουν στη σελίδα με
+     textContent (ποτέ innerHTML), οπότε κανένα περιεχόμενο εγγράφου δεν εκτελείται ως HTML. */
+  :root{--accent:#D97757;--accent-soft:rgba(217,119,87,.16);}
+  body{min-height:100vh;}
+  .wrap{max-width:900px;margin:0 auto;padding:0 16px 48px;}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+    padding:14px 0;border-bottom:1px solid var(--border);margin-bottom:22px;}
+  .brand{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:15px;font-weight:600;}
+  .pill{font-size:11.5px;font-weight:500;padding:2px 9px;border-radius:999px;
+    background:var(--accent-soft);color:var(--accent);white-space:nowrap;}
+  .pill.muted{background:var(--surface-2);color:var(--text-soft);}
+  .userbox{display:flex;align-items:center;gap:12px;font-size:13px;color:var(--text-soft);}
+  .userbox a,.linkbtn{color:var(--text-soft);background:none;border:none;font-size:13px;cursor:pointer;
+    text-decoration:underline;padding:0;font-family:inherit;}
+  .avatar{width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent);
+    display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;}
+  .searchrow{display:flex;gap:8px;margin-bottom:14px;}
+  .searchrow input{flex:1;min-width:0;height:48px;font-size:16px;padding:0 14px;border-radius:8px;
+    border:1px solid var(--border);background:var(--surface);color:var(--text);}
+  .searchrow input:focus{outline:2px solid var(--accent);outline-offset:0;}
+  .btn{height:48px;padding:0 20px;border-radius:8px;border:none;background:var(--accent);
+    color:var(--on-accent);font-size:15px;font-weight:600;cursor:pointer;}
+  .btn:disabled{opacity:.55;cursor:default;}
+  .btn.secondary{background:var(--surface-2);color:var(--text);border:1px solid var(--border);}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;}
+  .answer{margin-bottom:22px;}
+  .answer .label{font-size:12px;color:var(--text-soft);margin:0 0 6px;}
+  .answer .body{font-size:15px;line-height:1.65;white-space:pre-wrap;word-wrap:break-word;margin:0 0 10px;}
+  .answer .source{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12.5px;
+    color:var(--text-soft);}
+  .answer .handoff{margin:10px 0 0;padding-top:8px;border-top:1px solid var(--border);
+    font-size:12.5px;color:var(--text-soft);}
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:22px;}
+  .cols h2{font-size:14px;margin:0 0 6px;font-weight:600;}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;
+    border-top:1px solid var(--border);font-size:14px;width:100%;background:none;border-left:none;
+    border-right:none;border-bottom:none;color:var(--text);text-align:left;cursor:pointer;}
+  .row:hover .title{text-decoration:underline;}
+  .row .meta{font-size:12px;color:var(--text-soft);white-space:nowrap;}
+  .empty{font-size:13px;color:var(--text-soft);padding:9px 0;border-top:1px solid var(--border);}
+  .badge{font-size:11px;padding:2px 8px;border-radius:999px;white-space:nowrap;
+    background:var(--warn-bg);color:var(--warn-border);}
+  .badge.new{background:rgba(79,174,124,.16);color:var(--ok);}
+  /* σύνδεση */
+  .loginbox{max-width:420px;margin:12vh auto 0;}
+  .loginbox h1{font-size:20px;margin:0 0 6px;}
+  .loginbox p{color:var(--text-soft);font-size:14px;line-height:1.55;margin:0 0 16px;}
+  .loginbox input{width:100%;height:46px;font-size:15px;padding:0 12px;border-radius:8px;
+    border:1px solid var(--border);background:var(--surface);color:var(--text);margin-bottom:12px;}
+  .loginbox .btn{width:100%;}
+  .note{font-size:13px;margin-top:12px;line-height:1.5;}
+  .note.ok{color:var(--ok);} .note.err{color:var(--danger);}
+  /* αναγνώστης εγγράφου */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;
+    justify-content:center;padding:5vh 16px;overflow:auto;z-index:20;}
+  .reader{background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:760px;
+    width:100%;padding:20px 22px;}
+  .reader h2{margin:0 0 6px;font-size:19px;}
+  .reader .text{font-size:15px;line-height:1.7;white-space:pre-wrap;word-wrap:break-word;margin:14px 0 18px;}
+  @media (max-width:560px){.searchrow{flex-direction:column;}.btn{width:100%;}}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ------------------------------------------------------------------ βοηθητικά
+  var app = document.getElementById("app");
+  var chatHistory = []; // τελευταία μηνύματα συζήτησης, για follow-up ερωτήσεις
+
+  function h(tag, props, children) {
+    var node = document.createElement(tag);
+    props = props || {};
+    Object.keys(props).forEach(function (k) {
+      if (k === "class") node.className = props[k];
+      else if (k === "text") node.textContent = props[k];
+      else if (k.slice(0, 2) === "on") node.addEventListener(k.slice(2), props[k]);
+      else node.setAttribute(k, props[k]);
+    });
+    (children || []).forEach(function (c) {
+      if (c) node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+    });
+    return node;
+  }
+  function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+
+  function api(path, method, body) {
+    var opts = { method: method || "GET", headers: {}, credentials: "same-origin" };
+    if (body !== undefined) {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(body);
+    }
+    return fetch(path, opts).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (data) {
+        return { status: res.status, data: data };
+      });
+    });
+  }
+
+  function initials(email) {
+    var name = String(email || "").split("@")[0].replace(/[^A-Za-zΑ-Ωα-ωΆ-Ώά-ώ]+/g, " ").trim();
+    var parts = name.split(/\s+/);
+    var s = (parts[0] || "?").charAt(0) + (parts[1] ? parts[1].charAt(0) : "");
+    return s.toUpperCase();
+  }
+  var ROLE_LABEL = { admin: "Admin", editor: "Editor", employee: "Υπάλληλος" };
+
+  function daysAgo(iso) {
+    var d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+    return d < 0 ? 0 : d;
+  }
+  function agoText(iso) {
+    var d = daysAgo(iso);
+    if (d === 0) return "σήμερα";
+    if (d === 1) return "χθες";
+    return "πριν " + d + " ημ.";
+  }
+
+  // ------------------------------------------------------------------ οθόνη σύνδεσης
+  function renderLogin(message, kind) {
+    clear(app);
+    var email = h("input", { type: "email", id: "email", autocomplete: "email", placeholder: "το email σου στην εταιρεία", "aria-label": "Email", required: "required" });
+    var note = h("p", { class: "note" + (kind ? " " + kind : ""), role: "status", "aria-live": "polite", text: message || "" });
+    var btn = h("button", { class: "btn", type: "submit", text: "Στείλε μου σύνδεσμο" });
+    var form = h("form", { onsubmit: function (e) {
+      e.preventDefault();
+      btn.disabled = true;
+      api("/team/login/start", "POST", { email: email.value }).then(function (r) {
+        btn.disabled = false;
+        if (r.status === 200) {
+          note.className = "note ok";
+          note.textContent = "Αν το email ανήκει σε εταιρεία, θα λάβεις σε λίγο έναν σύνδεσμο. Ισχύει για 15 λεπτά και ανοίγει μία φορά.";
+        } else if (r.status === 429) {
+          note.className = "note err";
+          note.textContent = "Πολλές προσπάθειες. Δοκίμασε ξανά σε λίγα λεπτά.";
+        } else {
+          note.className = "note err";
+          note.textContent = "Έλεγξε ότι το email είναι σωστά γραμμένο.";
+        }
+      }).catch(function () {
+        btn.disabled = false;
+        note.className = "note err";
+        note.textContent = "Δεν ήταν δυνατή η αποστολή. Δοκίμασε ξανά.";
+      });
+    } }, [email, btn]);
+    app.appendChild(h("div", { class: "loginbox card" }, [
+      h("h1", { text: "Σύνδεση" }),
+      h("p", { text: "Γράψε το email που έχεις στην εταιρεία και θα σου στείλουμε έναν σύνδεσμο. Δεν χρειάζεσαι κωδικό." }),
+      form, note,
+    ]));
+    email.focus();
+  }
+
+  // ------------------------------------------------------------------ αναγνώστης εγγράφου
+  // Ενημερώσεις που δεν έχουν μπει ακόμα στο βασικό κείμενο: φαίνονται ΠΑΝΩ από το άρθρο, γιατί
+  // υπερισχύουν του παλιού κειμένου σε περίπτωση διαφοράς.
+  function pendingUpdatesBlock(list) {
+    if (!list || !list.length) return null;
+    var box = h("div", { class: "card", style: "margin-top:12px;border-style:dashed;border-color:var(--warn-border);" }, [
+      h("p", { class: "label", style: "color:var(--warn-border);margin:0 0 4px;", text: "Πρόσφατες ενημερώσεις που δεν έχουν ενσωματωθεί ακόμα (υπερισχύουν του κειμένου παρακάτω)" }),
+    ]);
+    list.forEach(function (u) {
+      box.appendChild(h("div", { style: "font-size:14px;line-height:1.6;white-space:pre-wrap;margin-top:4px;", text: "• " + u.text + " (" + agoText(u.createdAt) + ")" }));
+    });
+    return box;
+  }
+  function openDocument(id) {
+    api("/team/documents/" + encodeURIComponent(id)).then(function (r) {
+      if (r.status !== 200) return;
+      var d = r.data;
+      var overlay = h("div", { class: "overlay", role: "dialog", "aria-modal": "true", "aria-label": d.title });
+      function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); document.removeEventListener("keydown", onKey); }
+      function onKey(e) { if (e.key === "Escape") close(); }
+      document.addEventListener("keydown", onKey);
+      overlay.addEventListener("click", function (e) { if (e.target === overlay) close(); });
+      overlay.appendChild(h("div", { class: "reader" }, [
+        h("h2", { text: d.title }),
+        h("span", { class: "pill", text: d.departmentName }),
+        pendingUpdatesBlock(d.pendingUpdates),
+        h("div", { class: "text", text: d.fullText }),
+        h("button", { class: "btn secondary", type: "button", onclick: close, text: "Κλείσιμο" }),
+      ]));
+      document.body.appendChild(overlay);
+    });
+  }
+
+  // ------------------------------------------------------------------ κύρια οθόνη
+  function renderApp(me) {
+    clear(app);
+    var deptPills = (me.departments || []).map(function (d) { return h("span", { class: "pill", text: d.name }); });
+    var rolePill = h("span", { class: "pill muted", text: ROLE_LABEL[me.role] || me.role });
+    var manage = me.role === "employee" ? null : h("a", { href: "/team-editor.html", id: "staff-link", text: "Εισερχόμενα και έγγραφα" });
+    var adminLink = me.role === "admin" ? h("a", { href: "/team-admin.html", id: "admin-link", text: "Διαχείριση" }) : null;
+    if (manage) {
+      api("/team/inbox").then(function (r) {
+        if (r.status !== 200) return;
+        var c = r.data.counts, total = c.contradictions + c.updates + c.questions;
+        if (total > 0) manage.textContent = "Εισερχόμενα και έγγραφα (" + total + ")";
+      });
+    }
+    var logout = h("button", { class: "linkbtn", type: "button", text: "Αποσύνδεση", onclick: function () {
+      api("/team/logout", "POST").then(function () { chatHistory = []; renderLogin(); });
+    } });
+
+    app.appendChild(h("div", { class: "topbar" }, [
+      h("div", { class: "brand" }, [h("span", { text: me.workspaceName || "Idmon" })].concat(deptPills, [rolePill])),
+      h("div", { class: "userbox" }, [manage, adminLink, h("span", { class: "avatar", "aria-hidden": "true", text: initials(me.email) }), logout]),
+    ]));
+
+    var input = h("input", { type: "text", id: "q", placeholder: "Ρώτα για μια διαδικασία…", "aria-label": "Ερώτηση", autocomplete: "off", maxlength: "1000" });
+    var ask = h("button", { class: "btn", type: "submit", text: "Ρώτα" });
+    var answerBox = h("div", { class: "answer card", style: "display:none;", "aria-live": "polite" });
+    app.appendChild(h("form", { class: "searchrow", onsubmit: function (e) { e.preventDefault(); askQuestion(input, ask, answerBox); } }, [input, ask]));
+    app.appendChild(answerBox);
+
+    var recent = h("div", null, [h("h2", { text: "Τι άλλαξε πρόσφατα" })]);
+    var docsCol = h("div", null, [h("h2", { text: "Έγγραφα του τμήματός σου" })]);
+    app.appendChild(h("div", { class: "cols" }, [recent, docsCol]));
+    input.focus();
+    loadDocuments(me, recent, docsCol);
+  }
+
+  function loadDocuments(me, recentCol, docsCol) {
+    api("/team/documents").then(function (r) {
+      var docs = (r.data && r.data.documents) || [];
+      // Ο υπάλληλος βλέπει ήδη μόνο τα δικά του + εταιρικά. Ο editor/admin βλέπει και άλλα
+      // τμήματα (μόνο ανάγνωση), οπότε τα ξεχωρίζουμε με την ετικέτα τμήματος.
+      // Ένα έγγραφο με εκκρεμές update μπαίνει πάντα εδώ (ακόμα κι αν το βασικό κείμενο είναι παλιό),
+      // γιατί είναι ακριβώς η πληροφορία που δεν θα έβρισκε κανείς αλλιώς.
+      function lastChange(d) { return d.pendingUpdates ? d.pendingUpdates.latestAt : d.updatedAt; }
+      var freshDocs = docs.filter(function (d) { return d.pendingUpdates || (d.updatedAt && daysAgo(d.updatedAt) <= 14); })
+        .sort(function (a, b) { return String(lastChange(b)).localeCompare(String(lastChange(a))); }).slice(0, 6);
+      if (!freshDocs.length) recentCol.appendChild(h("div", { class: "empty", text: "Καμία αλλαγή τις τελευταίες 14 ημέρες." }));
+      freshDocs.forEach(function (d) {
+        var label = d.pendingUpdates ? "update " + agoText(d.pendingUpdates.latestAt) : "ενημερώθηκε " + agoText(d.updatedAt);
+        recentCol.appendChild(h("button", { class: "row", type: "button", onclick: function () { openDocument(d.id); } }, [
+          h("span", { class: "title", text: d.title }),
+          h("span", { class: "badge", text: label }),
+        ]));
+      });
+      if (!docs.length) docsCol.appendChild(h("div", { class: "empty", text: "Δεν υπάρχουν έγγραφα ακόμα." }));
+      docs.forEach(function (d) {
+        docsCol.appendChild(h("button", { class: "row", type: "button", onclick: function () { openDocument(d.id); } }, [
+          h("span", { class: "title", text: d.title }),
+          h("span", { class: "meta", text: d.departmentName }),
+        ]));
+      });
+    });
+  }
+
+  // ------------------------------------------------------------------ ερώτηση προς τον βοηθό
+  function askQuestion(input, ask, box) {
+    var question = input.value.trim();
+    if (!question) return;
+    ask.disabled = true;
+    clear(box);
+    box.style.display = "";
+    var body = h("p", { class: "body", text: "Ψάχνω…" });
+    box.appendChild(h("p", { class: "label", text: "Απάντηση" }));
+    box.appendChild(body);
+    var text = "";
+
+    fetch("/team/query/stream", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: question, history: chatHistory.slice(-6) }),
+    }).then(function (res) {
+      if (res.status === 401) { renderLogin("Η σύνδεσή σου έληξε. Ζήτησε νέο σύνδεσμο.", "err"); return null; }
+      if (!res.ok || !res.body) throw new Error("bad response");
+      var reader = res.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = "";
+      function pump() {
+        return reader.read().then(function (chunk) {
+          if (chunk.done) return;
+          buffer += decoder.decode(chunk.value, { stream: true });
+          var idx;
+          while ((idx = buffer.indexOf("\n\n")) !== -1) {
+            var line = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 2);
+            if (line.indexOf("data:") !== 0) continue;
+            var ev;
+            try { ev = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
+            handleEvent(ev);
+          }
+          return pump();
+        });
+      }
+      function handleEvent(ev) {
+        if (ev.type === "chunk") { text += ev.text; body.textContent = text; }
+        else if (ev.type === "error") { body.textContent = "Κάτι πήγε στραβά. Δοκίμασε ξανά."; }
+        else if (ev.type === "done") {
+          if (ev.primarySource && !ev.isFallback) {
+            var s = ev.primarySource;
+            box.appendChild(h("div", { class: "source" }, [
+              h("span", { text: "Πηγή: " + (s.title || "έγγραφο") + " · " + s.departmentName + (s.isUpdate ? " (πρόσφατη ενημέρωση)" : "") }),
+              h("button", { class: "linkbtn", type: "button", text: "Άνοιγμα άρθρου", onclick: function () { openDocument(s.documentId); } }),
+            ]));
+          }
+          box.appendChild(h("p", { class: "handoff", text: "Δεν βρήκες αυτό που έψαχνες; Ρώτα τον υπεύθυνο του τμήματος." }));
+          chatHistory.push({ role: "user", text: question }, { role: "assistant", text: text });
+        }
+      }
+      return pump();
+    }).catch(function () {
+      body.textContent = "Δεν ήταν δυνατή η αναζήτηση. Δοκίμασε ξανά.";
+    }).then(function () { ask.disabled = false; });
+  }
+
+  // ------------------------------------------------------------------ εκκίνηση
+  function verifyToken(token) {
+    return api("/team/login/verify", "POST", { token: token }).then(function (r) {
+      // Καθαρίζουμε το token από τη γραμμή διευθύνσεων, ό,τι κι αν έγινε.
+      clearFragment();
+      if (r.status === 200) return boot();
+      renderLogin("Ο σύνδεσμος έληξε ή έχει ήδη χρησιμοποιηθεί. Ζήτησε νέο.", "err");
+    });
+  }
+  function clearFragment() {
+    try { window.history.replaceState(null, "", window.location.pathname + window.location.search); } catch (e) { /* ignore */ }
+  }
+  function boot() {
+    return api("/team/me").then(function (r) {
+      if (r.status === 200) renderApp(r.data); else renderLogin();
+    }).catch(function () { renderLogin("Δεν ήταν δυνατή η σύνδεση με τον server.", "err"); });
+  }
+
+  var m = /^#login=([a-f0-9]{64})$/.exec(window.location.hash || "");
+  if (m) verifyToken(m[1]); else boot();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Διαχείριση · Idmon για ομάδες</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/shared.css">
+<style>
+  /* Section W (30 Σεπ 2026): οθόνη διαχείρισης του admin ("Idmon για ομάδες"): τμήματα (και κρυφά),
+     μέλη και ρόλοι, ιστορικό ενεργειών. Κάθε αλλαγή ισχύει αμέσως. Ο έλεγχος πρόσβασης γίνεται
+     στον server, εδώ απλώς φαίνονται τα δεδομένα. Όλα μπαίνουν με textContent (ποτέ innerHTML). */
+  :root{--accent:#D97757;--accent-soft:rgba(217,119,87,.16);}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 16px 56px;}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+    padding:14px 0;border-bottom:1px solid var(--border);margin-bottom:18px;}
+  .topbar h1{font-size:16px;margin:0;font-weight:600;}
+  .topbar a{color:var(--text-soft);font-size:13px;margin-left:14px;}
+  .tabs{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap;}
+  .tab{background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:8px;
+    padding:8px 16px;font-size:14px;cursor:pointer;font-family:inherit;}
+  .tab.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600;}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:14px;}
+  .card h2{font-size:15px;margin:0 0 4px;font-weight:600;}
+  .hint{font-size:12.5px;color:var(--text-soft);margin:0 0 10px;}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--border);font-size:14px;}
+  .row .name{font-weight:600;} .row .meta{font-size:12px;color:var(--text-soft);}
+  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .pill{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--surface-2);color:var(--text-soft);white-space:nowrap;display:inline-block;}
+  .pill.hid{background:var(--warn-bg);color:var(--warn-border);}
+  .pill.off{background:rgba(229,100,107,.14);color:var(--danger);}
+  input[type=text],input[type=email],select{padding:9px 12px;border-radius:8px;border:1px solid var(--border);
+    background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;}
+  .btn{height:36px;padding:0 14px;border-radius:8px;border:none;background:var(--accent);color:var(--on-accent);font-size:13px;font-weight:600;cursor:pointer;}
+  .btn.secondary{background:var(--surface-2);color:var(--text);border:1px solid var(--border);}
+  .btn.danger{background:none;color:var(--danger);border:1px solid var(--danger);}
+  .btn:disabled{opacity:.55;cursor:default;}
+  .note{font-size:13px;margin-top:8px;min-height:16px;} .note.ok{color:var(--ok);} .note.err{color:var(--danger);}
+  .checks{display:flex;gap:10px;flex-wrap:wrap;font-size:13px;}
+  .checks label{display:inline-flex;align-items:center;gap:5px;cursor:pointer;}
+  form.add{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
+  form.add .grow{flex:1;min-width:200px;}
+  .log{font-size:12.5px;line-height:1.5;}
+  .log .a{font-weight:600;} .log .t{color:var(--text-soft);}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+(function () {
+  "use strict";
+  var app = document.getElementById("app");
+  var me = null;
+  var data = null; // overview
+  var audit = null;
+  var tab = "departments";
+  var flash = null;
+  var flashErr = null; // σφάλμα που πρέπει να επιβιώσει μετά την ανανέωση της οθόνης
+
+  function h(tag, props, children) {
+    var node = document.createElement(tag);
+    props = props || {};
+    Object.keys(props).forEach(function (k) {
+      if (k === "class") node.className = props[k];
+      else if (k === "text") node.textContent = props[k];
+      else if (k === "value") node.value = props[k];
+      else if (k === "checked") node.checked = !!props[k];
+      else if (k.slice(0, 2) === "on") node.addEventListener(k.slice(2), props[k]);
+      else node.setAttribute(k, props[k]);
+    });
+    (children || []).forEach(function (c) { if (c) node.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+    return node;
+  }
+  function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+  function api(path, method, body) {
+    var opts = { method: method || "GET", headers: {}, credentials: "same-origin" };
+    if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+    return fetch(path, opts).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (d) { return { status: res.status, data: d }; });
+    });
+  }
+  var ERRORS = {
+    invalid_name: "Το όνομα είναι κενό ή πολύ μεγάλο.", name_taken: "Υπάρχει ήδη τμήμα με αυτό το όνομα.", invalid_email: "Το email δεν είναι σωστό.",
+    invalid_role: "Μη έγκυρος ρόλος.", invalid_departments: "Μη έγκυρα τμήματα.", email_in_use: "Αυτό το email χρησιμοποιείται ήδη.",
+    last_admin: "Ο χώρος δεν μπορεί να μείνει χωρίς ενεργό admin. Όρισε πρώτα άλλον admin.", forbidden: "Δεν έχεις δικαίωμα.", not_found: "Δεν βρέθηκε."
+  };
+  function errText(r) { return ERRORS[r.data && r.data.error] || "Κάτι πήγε στραβά."; }
+  var ROLE_LABEL = { admin: "Admin", editor: "Editor", employee: "Υπάλληλος" };
+  var ACTION_LABEL = {
+    login: "σύνδεση", document_created: "νέο έγγραφο", document_updated: "αλλαγή εγγράφου", document_deleted: "διαγραφή εγγράφου",
+    update_created: "νέο update", update_applied: "ενσωμάτωση update", update_rejected: "απόρριψη update", update_proposal_generated: "πρόταση ενσωμάτωσης",
+    contradiction_dismissed: "«δεν είναι αντίφαση»", contradiction_reminder: "υπενθύμιση αντίφασης", contradiction_check: "έλεγχος αντιφάσεων",
+    contradiction_check_failed: "αποτυχία ελέγχου αντιφάσεων", department_created: "νέο τμήμα", department_renamed: "μετονομασία τμήματος",
+    department_hidden: "απόκρυψη τμήματος", department_unhidden: "εμφάνιση τμήματος", member_added: "νέο μέλος", member_role_changed: "αλλαγή ρόλου",
+    member_disabled: "απενεργοποίηση μέλους", member_enabled: "ενεργοποίηση μέλους", member_departments_changed: "αλλαγή τμημάτων μέλους", question_dismissed: "παράβλεψη ερώτησης"
+  };
+
+  function load() {
+    return api("/team/admin/overview").then(function (r) { if (r.status === 200) data = r.data; })
+      .then(function () { return api("/team/admin/audit"); }).then(function (r) { if (r.status === 200) audit = r.data; })
+      .then(render);
+  }
+
+  function shell(content) {
+    clear(app);
+    app.appendChild(h("div", { class: "topbar" }, [
+      h("h1", { text: (me.workspaceName || "") + " · Διαχείριση" }),
+      h("div", null, [h("a", { href: "/team-editor.html", text: "Εισερχόμενα και έγγραφα" }), h("a", { href: "/portal.html", text: "← Αναζήτηση" })]),
+    ]));
+    var tabs = [["departments", "Τμήματα"], ["members", "Μέλη"], ["audit", "Ιστορικό ενεργειών"]];
+    app.appendChild(h("div", { class: "tabs", role: "tablist" }, tabs.map(function (t) {
+      return h("button", { class: "tab" + (tab === t[0] ? " active" : ""), type: "button", role: "tab", id: "tab-" + t[0], text: t[1],
+        onclick: function () { tab = t[0]; render(); } });
+    })));
+    if (flash) { app.appendChild(h("p", { class: "note ok", role: "status", text: flash })); flash = null; }
+    if (flashErr) { app.appendChild(h("p", { class: "note err", role: "alert", text: flashErr })); flashErr = null; }
+    app.appendChild(content);
+  }
+
+  // ---------------------------------------------------------------- τμήματα
+  function departmentsView() {
+    var box = h("div", { class: "card" }, [
+      h("h2", { text: "Τμήματα" }),
+      h("p", { class: "hint", text: "Ένα κρυφό τμήμα το βλέπουν μόνο τα μέλη του και οι admins. Οι editors των άλλων τμημάτων δεν διαβάζουν τα έγγραφά του, και μια αντίφαση μαζί του τους εμφανίζεται χωρίς περιεχόμενο." }),
+    ]);
+    var msg = h("p", { class: "note", role: "status", "aria-live": "polite" });
+    box.appendChild(h("div", { class: "row" }, [
+      h("div", null, [h("span", { class: "name", text: "Όλη η εταιρεία" }), h("div", { class: "meta", text: data.companyWideDocumentCount + " έγγραφα · ορατά σε όλους" })]),
+    ]));
+    data.departments.forEach(function (d) {
+      var name = h("input", { type: "text", value: d.name, maxlength: "80", "aria-label": "Όνομα τμήματος " + d.name });
+      var rename = h("button", { class: "btn secondary", type: "button", text: "Αποθήκευση ονόματος", onclick: function () {
+        api("/team/admin/departments/" + encodeURIComponent(d.id), "PATCH", { name: name.value }).then(function (r) {
+          if (r.status === 200) { flash = "Το όνομα άλλαξε."; load(); } else { msg.className = "note err"; msg.textContent = errText(r); }
+        });
+      } });
+      var toggle = h("button", { class: "btn secondary hide-toggle", type: "button", text: d.hidden ? "Εμφάνιση τμήματος" : "Απόκρυψη τμήματος", onclick: function () {
+        api("/team/admin/departments/" + encodeURIComponent(d.id), "PATCH", { hidden: !d.hidden }).then(function (r) {
+          if (r.status === 200) { flash = d.hidden ? "Το τμήμα είναι πλέον ορατό." : "Το τμήμα είναι πλέον κρυφό."; load(); }
+          else { msg.className = "note err"; msg.textContent = errText(r); }
+        });
+      } });
+      box.appendChild(h("div", { class: "row dept-row" }, [
+        h("div", null, [
+          h("span", { class: "name", text: d.name }), d.hidden ? h("span", { class: "pill hid", text: " κρυφό" }) : null,
+          h("div", { class: "meta", text: d.memberCount + " μέλη · " + d.documentCount + " έγγραφα" }),
+        ]),
+        h("div", { class: "controls" }, [name, rename, toggle]),
+      ]));
+    });
+    var newName = h("input", { type: "text", class: "grow", id: "new-dept", maxlength: "80", placeholder: "Όνομα νέου τμήματος", "aria-label": "Όνομα νέου τμήματος" });
+    box.appendChild(h("form", { class: "add", id: "add-dept", onsubmit: function (e) {
+      e.preventDefault();
+      api("/team/admin/departments", "POST", { name: newName.value }).then(function (r) {
+        if (r.status === 201) { flash = "Το τμήμα δημιουργήθηκε."; load(); } else { msg.className = "note err"; msg.textContent = errText(r); }
+      });
+    } }, [newName, h("button", { class: "btn", type: "submit", text: "Προσθήκη τμήματος" })]));
+    box.appendChild(msg);
+    return box;
+  }
+
+  // ---------------------------------------------------------------- μέλη
+  function deptChecks(selected, onChange) {
+    var wrap = h("div", { class: "checks" });
+    data.departments.forEach(function (d) {
+      var cb = h("input", { type: "checkbox", value: d.id, checked: selected.indexOf(d.id) >= 0, "aria-label": d.name });
+      cb.addEventListener("change", onChange);
+      wrap.appendChild(h("label", null, [cb, document.createTextNode(d.name)]));
+    });
+    return wrap;
+  }
+  function checked(wrap) { return Array.prototype.map.call(wrap.querySelectorAll("input:checked"), function (i) { return i.value; }); }
+
+  function membersView() {
+    var box = h("div", { class: "card" }, [
+      h("h2", { text: "Μέλη" }),
+      h("p", { class: "hint", text: "Οι αλλαγές ισχύουν αμέσως, ακόμα και για όσους είναι ήδη συνδεδεμένοι. Δεν υπάρχουν κωδικοί: κάθε μέλος συνδέεται με σύνδεσμο στο email του." }),
+    ]);
+    var msg = h("p", { class: "note", role: "status", "aria-live": "polite" });
+    data.members.forEach(function (m) {
+      var role = h("select", { "aria-label": "Ρόλος " + m.email }, ["admin", "editor", "employee"].map(function (r) {
+        var o = h("option", { value: r, text: ROLE_LABEL[r] }); if (m.role === r) o.selected = true; return o;
+      }));
+      var patch = function (body, okMsg) {
+        api("/team/admin/members/" + m.id, "PATCH", body).then(function (r) {
+          if (r.status === 200) { flash = okMsg; load(); } else { flashErr = errText(r); load(); }
+        });
+      };
+      role.addEventListener("change", function () { patch({ role: role.value }, "Ο ρόλος άλλαξε."); });
+      var depts = deptChecks(m.departmentIds, function () { patch({ departmentIds: checked(depts) }, "Τα τμήματα άλλαξαν."); });
+      var toggle = h("button", { class: "btn " + (m.status === "active" ? "danger" : "secondary") + " status-toggle", type: "button",
+        text: m.status === "active" ? "Απενεργοποίηση" : "Ενεργοποίηση", onclick: function () {
+          patch({ status: m.status === "active" ? "disabled" : "active" }, m.status === "active" ? "Το μέλος απενεργοποιήθηκε." : "Το μέλος ενεργοποιήθηκε.");
+        } });
+      box.appendChild(h("div", { class: "row member-row" }, [
+        h("div", null, [h("span", { class: "name", text: m.email }), m.status === "disabled" ? h("span", { class: "pill off", text: " απενεργοποιημένο" }) : null]),
+        h("div", { class: "controls" }, [role, depts, toggle]),
+      ]));
+    });
+
+    var email = h("input", { type: "email", class: "grow", id: "new-email", placeholder: "email νέου μέλους", "aria-label": "Email νέου μέλους" });
+    var role = h("select", { id: "new-role", "aria-label": "Ρόλος νέου μέλους" }, ["employee", "editor", "admin"].map(function (r) { return h("option", { value: r, text: ROLE_LABEL[r] }); }));
+    var depts = deptChecks([], function () {});
+    var invite = h("input", { type: "checkbox", id: "new-invite", checked: true, "aria-label": "Στείλε πρόσκληση με email" });
+    box.appendChild(h("form", { class: "add", id: "add-member", onsubmit: function (e) {
+      e.preventDefault();
+      api("/team/admin/members", "POST", { email: email.value, role: role.value, departmentIds: checked(depts), sendInvite: invite.checked }).then(function (r) {
+        if (r.status === 201) { flash = "Το μέλος προστέθηκε."; load(); } else { msg.className = "note err"; msg.textContent = errText(r); }
+      });
+    } }, [email, role, depts, h("label", { class: "checks" }, [invite, document.createTextNode("Στείλε πρόσκληση")]), h("button", { class: "btn", type: "submit", text: "Προσθήκη μέλους" })]));
+    box.appendChild(msg);
+    return box;
+  }
+
+  // ---------------------------------------------------------------- ιστορικό
+  function auditView() {
+    var box = h("div", { class: "card" }, [
+      h("h2", { text: "Ιστορικό ενεργειών" }),
+      h("p", { class: "hint", text: "Οι τελευταίες 100 διαχειριστικές ενέργειες. Δεν καταγράφονται οι ερωτήσεις των υπαλλήλων ούτε το τι διάβασαν. Διατήρηση: " + (audit ? audit.retentionDays : 365) + " ημέρες." }),
+    ]);
+    var entries = (audit && audit.entries) || [];
+    if (!entries.length) box.appendChild(h("div", { class: "hint", text: "Καμία ενέργεια ακόμα." }));
+    entries.forEach(function (e) {
+      box.appendChild(h("div", { class: "row log" }, [
+        h("span", null, [h("span", { class: "a", text: e.actor }), document.createTextNode(" · " + (ACTION_LABEL[e.action] || e.action) + (e.target ? " · " + e.target : ""))]),
+        h("span", { class: "t", text: new Date(e.at).toLocaleString("el-GR") }),
+      ]));
+    });
+    return box;
+  }
+
+  function render() {
+    if (!data) return;
+    shell(tab === "departments" ? departmentsView() : tab === "members" ? membersView() : auditView());
+  }
+
+  api("/team/me").then(function (r) {
+    if (r.status !== 200) { window.location.replace("/portal.html"); return; }
+    me = r.data;
+    if (me.role !== "admin") { window.location.replace(me.role === "editor" ? "/team-editor.html" : "/portal.html"); return; }
+    return load();
+  }).catch(function () { app.appendChild(h("p", { text: "Δεν ήταν δυνατή η φόρτωση." })); });
+})();
+</script>
+</body>
+</html>
