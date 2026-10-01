@@ -1282,28 +1282,34 @@ section("16. team-editor (εισερχόμενα), team-admin και portal: π�
   check("νέο τμήμα από τη σελίδα", !!(await waitFor(() => byText(ad, ".dept-row", /Marketing/))));
   setVal(ad, $(ad, "#new-dept"), "marketing");
   submit(ad, "#add-dept");
-  check("διπλό όνομα: εμφανίζεται μήνυμα λάθους", !!(await waitFor(() => /Υπάρχει ήδη τμήμα/.test(ad.window.document.body.textContent))));
+  check("διπλό όνομα: εμφανίζεται μήνυμα λάθους", !!(await waitFor(() => /Υπάρχει ήδη project/.test(ad.window.document.body.textContent))));
 
   click(ad, $(ad, "#tab-members"));
-  check("μέλη: λίστα με επιλογή ρόλου και τμημάτων ανά μέλος", !!(await waitFor(() => $$(ad, ".member-row").length >= 7)) && byText(ad, ".member-row", /ed_cc@demo\.gr/).querySelectorAll(".proj-role select").length >= 3);
+  const ccNameAd = db.prepare("select name from departments where id = 'cc'").get().name;
+  check("άνθρωποι: λίστα με γραμμές και περίληψη projects, ΧΩΡΙΣ dropdown ανά project", !!(await waitFor(() => $$(ad, ".member-row").length >= 7)) && $$(ad, "#people-list select").length === 0 && byText(ad, ".member-row", /ed_cc@demo\.gr/).textContent.includes(ccNameAd));
   setVal(ad, $(ad, "#new-email"), "pg@demo.gr");
   $(ad, "#new-role").value = "member";
-  const newSel = $(ad, "#add-member .proj-roles select[data-project=cc]"); newSel.value = "editor";
+  $(ad, "#new-project").value = "cc"; $(ad, "#new-project-role").value = "editor";
   submit(ad, "#add-member");
+  setVal(ad, $(ad, "#people-q"), "pg@demo");
   check("προσθήκη μέλους από τη σελίδα (editor στο cc)", !!(await waitFor(() => byText(ad, ".member-row", /pg@demo\.gr/))) && db.prepare("select role from team_members where email='pg@demo.gr'").get().role === "editor" && !!db.prepare("select 1 from team_project_editors e join team_members m on m.id=e.member_id where m.email='pg@demo.gr' and e.project_id='cc'").get());
-  const sel = byText(ad, ".member-row", /pg@demo\.gr/).querySelector(".proj-roles select[data-project=cc]");
-  sel.value = "member"; sel.dispatchEvent(new ad.window.Event("change", { bubbles: true }));
-  check("αλλαγή ρόλου από τη σελίδα ισχύει αμέσως", !!(await waitFor(() => db.prepare("select role from team_members where email='pg@demo.gr'").get().role === "employee")));
-  await waitFor(() => $(ad, ".member-row") && !$(ad, ".busy")); // η γραμμή ξεκλειδώνει όταν ανανεωθεί η λίστα
-  click(ad, byText(ad, ".member-row", /pg@demo\.gr/).querySelector(".status-toggle"));
+  click(ad, byText(ad, ".member-row", /pg@demo\.gr/).querySelector(".open-member"));
+  await waitFor(() => $(ad, "#member-detail"));
+  click(ad, $(ad, "#member-detail .prow[data-project=cc] .seg-member"));
+  check("αλλαγή ρόλου από την καρτέλα ισχύει αμέσως", !!(await waitFor(() => db.prepare("select role from team_members where email='pg@demo.gr'").get().role === "employee")));
+  await waitFor(() => $(ad, "#member-detail") && !$(ad, ".busy")); // η καρτέλα ξεκλειδώνει όταν ανανεωθεί η λίστα
+  click(ad, $(ad, "#member-detail .status-toggle"));
   click(ad, await waitFor(() => $(ad, ".confirm-yes"))); // η απενεργοποίηση ζητά πρώτα «Σίγουρα;»
   check("απενεργοποίηση από τη σελίδα (μετά το «Ναι»)", !!(await waitFor(() => db.prepare("select status from team_members where email='pg@demo.gr'").get().status === "disabled")) && !!(await waitFor(() => /απενεργοποιημένο/.test((byText(ad, ".member-row", /pg@demo\.gr/) || {}).textContent || ""))));
-  const own = byText(ad, ".member-row", /admin@demo\.gr/).querySelector("select");
+  setVal(ad, $(ad, "#people-q"), "admin@demo");
+  await waitFor(() => $$(ad, ".member-row").length === 1);
+  click(ad, $(ad, ".member-row .open-member"));
+  const own = await waitFor(() => $(ad, "#detail-org-role"));
   own.value = "member"; own.dispatchEvent(new ad.window.Event("change", { bubbles: true }));
   check("ο τελευταίος admin δεν υποβαθμίζεται: το λάθος μένει ορατό μετά την ανανέωση", !!(await waitFor(() => /χωρίς ενεργό admin/.test(ad.window.document.body.textContent))) && db.prepare("select role from team_members where email='admin@demo.gr'").get().role === "admin");
 
   click(ad, $(ad, "#tab-audit"));
-  check("ιστορικό: εμφανίζονται ενέργειες με email και περιγραφή", !!(await waitFor(() => $$(ad, ".log").length > 5)) && /νέο τμήμα|σύνδεση|νέο μέλος/.test(ad.window.document.body.textContent));
+  check("ιστορικό: εμφανίζονται ενέργειες με email και περιγραφή", !!(await waitFor(() => $$(ad, ".log").length > 5)) && /νέο project|σύνδεση|νέο μέλος/.test(ad.window.document.body.textContent));
   check("ιστορικό: δεν περιέχει ερωτήσεις υπαλλήλων", !/υπερωρίες|εκδρομή/.test(ad.window.document.body.textContent));
 
   // οι υπόλοιποι ρόλοι δεν "βλέπουν" τη σελίδα admin
@@ -1444,7 +1450,7 @@ section("18. Βελτιώσεις: τίτλος πρότασης, μήνυμα �
   check("ιστορικό: πάντα μόνο για admin και όχι διαρροή σε άλλον οργανισμό", (await call("ed_cc@demo.gr", "GET", "/team/admin/audit")).status === 403 && !JSON.stringify((await readJson(await call("other@other.gr", "GET", "/team/admin/audit"))).entries).includes("Δόσεις"));
   const adDom = browserFor("admin@demo.gr")("team-admin.html");
   click(adDom, await waitFor(() => $(adDom, "#tab-audit")));
-  check("σελίδα ιστορικού: δείχνει «Finance» και τίτλους αντί για id", !!(await waitFor(() => /απόκρυψη τμήματος · Finance/.test(adDom.window.document.body.textContent) && /νέο έγγραφο · Δόσεις/.test(adDom.window.document.body.textContent))) && !/· fin\b/.test(adDom.window.document.body.textContent));
+  check("σελίδα ιστορικού: δείχνει «Finance» και τίτλους αντί για id", !!(await waitFor(() => /απόκρυψη project · Finance/.test(adDom.window.document.body.textContent) && /νέο έγγραφο · Δόσεις/.test(adDom.window.document.body.textContent))) && !/· fin\b/.test(adDom.window.document.body.textContent));
 }
 
 // ============================================================================ 19-23. Πακέτο 2
@@ -1888,7 +1894,7 @@ section("25. Ρόλος ανά project: μέλος σε ένα project, editor �
 }
 
 // ============================================================================ 26. Διαχείριση (UX)
-section("26. Διαχείριση (UX): μηνύματα με όνομα και ώρα, επιβεβαίωση στη γραμμή, κλείδωμα γραμμής");
+section("26. Διαχείριση (UX): μηνύματα με όνομα και ώρα, επιβεβαίωση, κλείδωμα, καρτέλα ατόμου");
 {
   // Οι συνεδρίες των δύο admin πρέπει να ισχύουν (αν έληξαν από προηγούμενη ενότητα, ξανασυνδέονται).
   for (const e of ["admin@demo.gr", "other@other.gr"]) {
@@ -1930,11 +1936,23 @@ section("26. Διαχείριση (UX): μηνύματα με όνομα και 
   }
   const rowOf = (dom, email) => $$u(dom, ".member-row").find((r) => r.textContent.includes(email));
   const pick = (dom, sel, value) => { sel.value = value; sel.dispatchEvent(new dom.window.Event("change", { bubbles: true })); };
+  const typeInto = (dom, sel, value) => { const el = $u(dom, sel); el.value = value; el.dispatchEvent(new dom.window.Event("input", { bubbles: true })); };
   const toastText = (dom) => { const t = $u(dom, ".toast"); return t ? t.textContent : null; };
-  const settle = (dom) => uiWait(() => $u(dom, ".member-row, .dept-row, .doc-row") && !$u(dom, ".busy")); // η λίστα ξαναχτίστηκε και καμία γραμμή δεν είναι κλειδωμένη
+  const settle = (dom) => uiWait(() => $u(dom, ".member-row, .dept-row, .doc-row") && !$u(dom, ".busy")); // η λίστα ξαναχτίστηκε και τίποτα δεν είναι κλειδωμένο
   const roleOf = (id) => db.prepare("select role from team_members where id = ?").get(id).role;
   const statusOf = (id) => db.prepare("select status from team_members where id = ?").get(id).status;
-  const allEnabled = (row) => [...row.querySelectorAll("select, button, input")].every((x) => !x.disabled);
+  const allEnabled = (el) => [...el.querySelectorAll("select, button, input")].every((x) => !x.disabled);
+  // Η καρτέλα ατόμου ανοίγει με αναζήτηση και κλικ στο email της γραμμής (η λίστα δείχνει 25 ανά σελίδα).
+  const openPerson = async (dom, email) => {
+    if (!$u(dom, "#people-q")) clickU(dom, await uiWait(() => $u(dom, "#tab-members")));
+    await uiWait(() => $u(dom, "#people-q"));
+    typeInto(dom, "#people-q", email);
+    const row = await uiWait(() => { const rs = $$u(dom, ".member-row"); return rs.length === 1 && rs[0].textContent.includes(email) ? rs[0] : null; });
+    clickU(dom, row.querySelector(".open-member"));
+    return uiWait(() => { const d = $u(dom, "#member-detail"); return d && d.textContent.includes(email) ? d : null; });
+  };
+  const detailOf = (dom) => $u(dom, "#member-detail");
+  const segBtn = (dom, project, kind) => $u(dom, `#member-detail .prow[data-project=${project}] .seg-${kind}`);
 
   const ccName = db.prepare("select name from departments where id = 'cc'").get().name;
   const finName = db.prepare("select name from departments where id = 'fin'").get().name;
@@ -1944,9 +1962,8 @@ section("26. Διαχείριση (UX): μηνύματα με όνομα και 
 
   // ------------------------------------------------------------ (α) μήνυμα επιβεβαίωσης: ποιος, τι, πότε
   const A = adminPage("admin@demo.gr");
-  clickU(A.dom, await uiWait(() => $u(A.dom, "#tab-members")));
-  await uiWait(() => rowOf(A.dom, "ux.agent@demo.gr"));
-  pick(A.dom, rowOf(A.dom, "ux.agent@demo.gr").querySelector(".proj-roles select[data-project=cc]"), "editor");
+  await openPerson(A.dom, "ux.agent@demo.gr");
+  clickU(A.dom, segBtn(A.dom, "cc", "editor"));
   const t1 = await uiWait(() => $u(A.dom, ".toast.ok"));
   check("μήνυμα: λέει ποιος, τι και πότε (email: project → ρόλος (ώρα))", !!t1 && t1.textContent === `ux.agent@demo.gr: ${ccName} → Editor (12:51:28)`);
   check("μήνυμα: σταθερή περιοχή aria-live=polite, το μήνυμα επιτυχίας έχει role=status", !!t1 && $u(A.dom, "#notice").getAttribute("aria-live") === "polite" && t1.getAttribute("role") === "status");
@@ -1957,11 +1974,11 @@ section("26. Διαχείριση (UX): μηνύματα με όνομα και 
     A.live(5000).length === 1 && !!$u(A.dom, ".toast") && (A.fire(5000), !$u(A.dom, ".toast")));
 
   // ------------------------------------------------------------ (β) δύο διαδοχικές ενέργειες: νέο μήνυμα, το χρονόμετρο ξεκινά από την αρχή
-  pick(A.dom, rowOf(A.dom, "ux.agent@demo.gr").querySelector(".proj-roles select[data-project=cc]"), "member");
+  clickU(A.dom, segBtn(A.dom, "cc", "member"));
   await uiWait(() => $u(A.dom, ".member-row.changed"));
   A.fire(1000);
   const first = toastText(A.dom);
-  pick(A.dom, rowOf(A.dom, "ux.agent@demo.gr").querySelector(".proj-roles select[data-project=fin]"), "member");
+  pick(A.dom, $u(A.dom, "#detail-add-project"), "fin");
   await uiWait(() => (toastText(A.dom) || "").includes(finName));
   await uiWait(() => $u(A.dom, ".member-row.changed"));
   check("δεύτερη ενέργεια: ένα μόνο μήνυμα, με νέο κείμενο (άλλο project), όχι το παλιό", $$u(A.dom, ".toast").length === 1 && toastText(A.dom) !== first && (toastText(A.dom) || "").includes(`${finName} → Μέλος`));
@@ -1981,63 +1998,58 @@ section("26. Διαχείριση (UX): μηνύματα με όνομα και 
 
   // ------------------------------------------------------------ (δ) το σφάλμα ΜΕΝΕΙ μέχρι την επόμενη ενέργεια
   const B = adminPage("other@other.gr");
-  clickU(B.dom, await uiWait(() => $u(B.dom, "#tab-members")));
-  await uiWait(() => rowOf(B.dom, "other@other.gr"));
+  await openPerson(B.dom, "other@other.gr");
   const onlyAdmin = db.prepare("select count(*) c from team_members where workspace_id = (select workspace_id from team_members where email = 'other@other.gr') and role = 'admin' and status = 'active'").get().c === 1;
-  pick(B.dom, rowOf(B.dom, "other@other.gr").querySelector("select"), "member");
+  pick(B.dom, $u(B.dom, "#detail-org-role"), "member");
   const te = await uiWait(() => $u(B.dom, ".toast.err"));
   await settle(B.dom);
   check("σφάλμα (τελευταίος admin): μένει ορατό ΜΕΤΑ την ανανέωση, role=alert, χωρίς χρονόμετρο εξαφάνισης", onlyAdmin && !!te && /χωρίς ενεργό admin/.test(te.textContent) && te.getAttribute("role") === "alert" && B.live(5000).length === 0 && !!$u(B.dom, ".toast.err"));
   clickU(B.dom, $u(B.dom, ".toast.err .x"));
   check("σφάλμα: το κουμπί κλεισίματος το αφαιρεί", !$u(B.dom, ".toast"));
-  pick(B.dom, rowOf(B.dom, "other@other.gr").querySelector("select"), "member");
+  pick(B.dom, $u(B.dom, "#detail-org-role"), "member");
   await uiWait(() => $u(B.dom, ".toast.err"));
   await settle(B.dom);
   clickU(B.dom, $u(B.dom, "#tab-departments"));
   check("σφάλμα: φεύγει με την επόμενη ενέργεια (αλλαγή καρτέλας)", !$u(B.dom, ".toast"));
   check("σφάλμα: ο τελευταίος admin παραμένει admin", roleOf(db.prepare("select id from team_members where email = 'other@other.gr'").get().id) === "admin");
 
-  // ------------------------------------------------------------ (ε) σφάλμα δικτύου: η γραμμή ΞΕΚΛΕΙΔΩΝΕΙ
+  // ------------------------------------------------------------ (ε) σφάλμα δικτύου: η καρτέλα ΞΕΚΛΕΙΔΩΝΕΙ
   clickU(A.dom, $u(A.dom, "#tab-members"));
-  await uiWait(() => rowOf(A.dom, "ux.agent@demo.gr"));
+  await uiWait(() => detailOf(A.dom));
   ctl.fail = true;
-  pick(A.dom, rowOf(A.dom, "ux.agent@demo.gr").querySelector(".proj-roles select[data-project=cc]"), "editor");
+  clickU(A.dom, segBtn(A.dom, "cc", "editor"));
   const tn = await uiWait(() => $u(A.dom, ".toast.err"));
   await settle(A.dom);
   ctl.fail = false;
-  check("σφάλμα δικτύου: μήνυμα, καμία αλλαγή στη βάση, και η γραμμή ξεκλειδώνει", !!tn && /Δεν υπάρχει σύνδεση/.test(tn.textContent) && allEnabled(rowOf(A.dom, "ux.agent@demo.gr")) && db.prepare("select count(*) c from team_project_editors where member_id = ?").get(uxId).c === 0);
+  check("σφάλμα δικτύου: μήνυμα, καμία αλλαγή στη βάση, και η καρτέλα ξεκλειδώνει", !!tn && /Δεν υπάρχει σύνδεση/.test(tn.textContent) && allEnabled(detailOf(A.dom)) && db.prepare("select count(*) c from team_project_editors where member_id = ?").get(uxId).c === 0);
 
-  // ------------------------------------------------------------ (στ) κλείδωμα γραμμής όσο τρέχει το αίτημα
-  clickU(A.dom, $u(A.dom, "#tab-departments"));
-  clickU(A.dom, $u(A.dom, "#tab-members"));
-  await uiWait(() => rowOf(A.dom, "ux.agent@demo.gr"));
+  // ------------------------------------------------------------ (στ) κλείδωμα καρτέλας όσο τρέχει το αίτημα
   let release; ctl.hold = new Promise((r) => { release = r; }); ctl.patches = 0;
-  pick(A.dom, rowOf(A.dom, "ux.agent@demo.gr").querySelector(".proj-roles select[data-project=cc]"), "editor");
-  const busyRow = $u(A.dom, ".member-row.busy");
-  check("κλείδωμα: όσο τρέχει το αίτημα η γραμμή είναι busy, aria-busy και ΟΛΑ τα χειριστήρια σβηστά", !!busyRow && busyRow.getAttribute("aria-busy") === "true" && [...busyRow.querySelectorAll("select, button")].every((x) => x.disabled));
-  pick(A.dom, busyRow.querySelector(".proj-roles select[data-project=fin]"), "editor"); // δεύτερη αλλαγή προγραμματιστικά (παρακάμπτει το disabled)
+  clickU(A.dom, segBtn(A.dom, "cc", "editor"));
+  const busyCard = $u(A.dom, "#member-detail.busy");
+  check("κλείδωμα: όσο τρέχει το αίτημα η καρτέλα είναι busy, aria-busy και ΟΛΑ τα χειριστήρια σβηστά", !!busyCard && busyCard.getAttribute("aria-busy") === "true" && [...busyCard.querySelectorAll("select, button")].every((x) => x.disabled));
+  pick(A.dom, $u(A.dom, "#detail-add-project"), "hr"); // δεύτερη αλλαγή προγραμματιστικά (παρακάμπτει το disabled)
   await new Promise((r) => setTimeout(r, 50));
-  check("κλείδωμα: δεύτερη αλλαγή στην ίδια γραμμή ΔΕΝ στέλνεται (ένα μόνο αίτημα)", ctl.patches === 1);
+  check("κλείδωμα: δεύτερη αλλαγή στο ίδιο άτομο ΔΕΝ στέλνεται (ένα μόνο αίτημα)", ctl.patches === 1);
   ctl.hold = null; release();
   await uiWait(() => $u(A.dom, ".toast.ok") && !$u(A.dom, ".busy"));
-  check("κλείδωμα: μετά την απάντηση η γραμμή ξεκλειδώνει και η αλλαγή έγινε", allEnabled(rowOf(A.dom, "ux.agent@demo.gr")) && roleOf(uxId) === "editor");
+  check("κλείδωμα: μετά την απάντηση ξεκλειδώνει, έγινε το cc και ΔΕΝ μπήκε το hr", allEnabled(detailOf(A.dom)) && roleOf(uxId) === "editor" && db.prepare("select count(*) c from member_departments where member_id = ? and department_id = 'hr'").get(uxId).c === 0);
   A.fire(1000); A.fire(5000);
 
   // ------------------------------------------------------------ (ζ) επιβεβαίωση ΜΟΝΟ για μεγάλο αντίκτυπο
   await call("admin@demo.gr", "PATCH", `/team/admin/members/${uxId}`, { projectRoles: { cc: "member" } });
   const C = adminPage("admin@demo.gr");
-  clickU(C.dom, await uiWait(() => $u(C.dom, "#tab-members")));
-  await uiWait(() => rowOf(C.dom, "ux.agent@demo.gr"));
-  const orgSel = () => rowOf(C.dom, "ux.agent@demo.gr").querySelector("select"); // το πρώτο select είναι ο ρόλος οργανισμού
-  const toggleOf = () => rowOf(C.dom, "ux.agent@demo.gr").querySelector(".status-toggle");
+  await openPerson(C.dom, "ux.agent@demo.gr");
+  const orgSel = () => $u(C.dom, "#detail-org-role");
+  const toggleOf = () => $u(C.dom, "#member-detail .status-toggle");
   ctl.patches = 0;
   pick(C.dom, orgSel(), "admin");
   await uiWait(() => $u(C.dom, ".confirm"));
   const cf = $u(C.dom, ".confirm");
   check("προαγωγή σε Admin: ζητά «Σίγουρα;», δεν στέλνεται τίποτα και ο ρόλος δεν αλλάζει", !!cf && /Σίγουρα;/.test(cf.textContent) && ctl.patches === 0 && roleOf(uxId) !== "admin");
-  check("προαγωγή σε Admin: τα υπόλοιπα χειριστήρια σβήνουν, τα «Ναι»/«Όχι» μένουν ενεργά", [...rowOf(C.dom, "ux.agent@demo.gr").querySelectorAll("select, .status-toggle")].every((x) => x.disabled) && [...cf.querySelectorAll("button")].every((b) => !b.disabled));
+  check("προαγωγή σε Admin: τα υπόλοιπα χειριστήρια σβήνουν, τα «Ναι»/«Όχι» μένουν ενεργά", [...detailOf(C.dom).querySelectorAll("select, .status-toggle")].every((x) => x.disabled) && [...cf.querySelectorAll("button")].every((b) => !b.disabled));
   clickU(C.dom, $u(C.dom, ".confirm-no"));
-  check("«Όχι»: επαναφέρει την επιλογή, κλείνει την ερώτηση, ξεκλειδώνει και δεν αλλάζει τίποτα", orgSel().value === "member" && !$u(C.dom, ".confirm") && ctl.patches === 0 && allEnabled(rowOf(C.dom, "ux.agent@demo.gr")) && roleOf(uxId) !== "admin");
+  check("«Όχι»: επαναφέρει την επιλογή, κλείνει την ερώτηση, ξεκλειδώνει και δεν αλλάζει τίποτα", orgSel().value === "member" && !$u(C.dom, ".confirm") && ctl.patches === 0 && allEnabled(detailOf(C.dom)) && roleOf(uxId) !== "admin");
   pick(C.dom, orgSel(), "admin");
   await uiWait(() => $u(C.dom, ".confirm"));
   $u(C.dom, ".confirm-no").dispatchEvent(new C.dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -2048,6 +2060,7 @@ section("26. Διαχείριση (UX): μηνύματα με όνομα και 
   await uiWait(() => roleOf(uxId) === "admin");
   await settle(C.dom);
   check("«Ναι»: ο ρόλος γίνεται Admin με ένα αίτημα και μήνυμα με όνομα", ctl.patches === 1 && /ux\.agent@demo\.gr: ρόλος Admin \(12:51:28\)/.test(toastText(C.dom) || ""));
+  check("ο admin δεν έχει γραμμές projects στην καρτέλα (έχει πρόσβαση παντού)", /πρόσβαση σε όλα τα projects/.test(detailOf(C.dom).textContent) && !$u(C.dom, "#member-detail .prow"));
   ctl.patches = 0;
   pick(C.dom, orgSel(), "member");
   await uiWait(() => roleOf(uxId) !== "admin");
@@ -2058,13 +2071,13 @@ section("26. Διαχείριση (UX): μηνύματα με όνομα και 
   await uiWait(() => $u(C.dom, ".confirm"));
   check("απενεργοποίηση μέλους: ζητά «Σίγουρα;», δεν στέλνεται τίποτα και το μέλος μένει ενεργό", /Σίγουρα;/.test(($u(C.dom, ".confirm") || {}).textContent || "") && ctl.patches === 0 && statusOf(uxId) === "active");
   clickU(C.dom, $u(C.dom, ".confirm-no"));
-  check("«Όχι» στην απενεργοποίηση: μένει ενεργό και η γραμμή ξεκλειδώνει", statusOf(uxId) === "active" && !$u(C.dom, ".confirm") && allEnabled(rowOf(C.dom, "ux.agent@demo.gr")));
+  check("«Όχι» στην απενεργοποίηση: μένει ενεργό και η καρτέλα ξεκλειδώνει", statusOf(uxId) === "active" && !$u(C.dom, ".confirm") && allEnabled(detailOf(C.dom)));
   clickU(C.dom, toggleOf());
   await uiWait(() => $u(C.dom, ".confirm"));
   clickU(C.dom, $u(C.dom, ".confirm-yes"));
   await uiWait(() => statusOf(uxId) === "disabled");
   await settle(C.dom);
-  check("«Ναι» στην απενεργοποίηση: το μέλος απενεργοποιείται και φαίνεται ως τέτοιο", statusOf(uxId) === "disabled" && /απενεργοποιημένο/.test(rowOf(C.dom, "ux.agent@demo.gr").textContent) && /ux\.agent@demo\.gr: απενεργοποιήθηκε/.test(toastText(C.dom) || ""));
+  check("«Ναι» στην απενεργοποίηση: το μέλος απενεργοποιείται και φαίνεται ως τέτοιο στη λίστα", statusOf(uxId) === "disabled" && /απενεργοποιημένο/.test(rowOf(C.dom, "ux.agent@demo.gr").textContent) && /ux\.agent@demo\.gr: απενεργοποιήθηκε/.test(toastText(C.dom) || ""));
   ctl.patches = 0;
   clickU(C.dom, toggleOf());
   await uiWait(() => statusOf(uxId) === "active");
@@ -2078,15 +2091,15 @@ section("26. Διαχείριση (UX): μηνύματα με όνομα και 
   const wasHidden = db.prepare("select hidden from departments where id = 'fin'").get().hidden === 1;
   clickU(C.dom, cDept(finName).querySelector(".hide-toggle"));
   await uiWait(() => $u(C.dom, ".dept-row.changed"));
-  check("τμήμα: μήνυμα με όνομα, κατάσταση και ώρα", toastText(C.dom) === `${finName}: ${wasHidden ? "ορατό" : "κρυφό"} τμήμα (12:51:28)`);
+  check("project: μήνυμα με όνομα, κατάσταση και ώρα", toastText(C.dom) === `${finName}: ${wasHidden ? "ορατό" : "κρυφό"} project (12:51:28)`);
   C.fire(1000);
   clickU(C.dom, cDept(finName).querySelector(".hide-toggle")); // επαναφορά
   await uiWait(() => $u(C.dom, ".dept-row.changed") && db.prepare("select hidden from departments where id = 'fin'").get().hidden === (wasHidden ? 1 : 0));
   C.fire(1000);
-  $u(C.dom, "#new-dept").value = "UX Τμήμα";
+  $u(C.dom, "#new-dept").value = "UX Project";
   $u(C.dom, "#add-dept").dispatchEvent(new C.dom.window.Event("submit", { bubbles: true, cancelable: true }));
   await uiWait(() => $u(C.dom, ".dept-row.changed"));
-  check("νέο τμήμα: μήνυμα «όνομα: νέο τμήμα (ώρα)» και επισημασμένη γραμμή", toastText(C.dom) === "UX Τμήμα: νέο τμήμα (12:51:28)" && !!cDept("UX Τμήμα"));
+  check("νέο project: μήνυμα «όνομα: νέο project (ώρα)» και επισημασμένη γραμμή", toastText(C.dom) === "UX Project: νέο project (12:51:28)" && !!cDept("UX Project"));
   C.fire(1000);
   clickU(C.dom, $u(C.dom, "#tab-documents"));
   const docRow = await uiWait(() => $$u(C.dom, ".doc-row").find((r) => /UX έγγραφο/.test(r.textContent)));
@@ -2099,16 +2112,326 @@ section("26. Διαχείριση (UX): μηνύματα με όνομα και 
   check("έγγραφο: άρση: «τίτλος: δεν είναι πια εμπιστευτικό»", toastText(C.dom) === "UX έγγραφο: δεν είναι πια εμπιστευτικό (12:51:28)");
   C.fire(1000);
   clickU(C.dom, $u(C.dom, "#tab-members"));
-  await uiWait(() => rowOf(C.dom, "ux.agent@demo.gr"));
+  await uiWait(() => $u(C.dom, "#people-q"));
+  typeInto(C.dom, "#people-q", "ux.nea");
   $u(C.dom, "#new-email").value = "ux.nea@demo.gr";
+  $u(C.dom, "#new-project").value = "cc";
+  $u(C.dom, "#new-project-role").value = "editor";
   $u(C.dom, "#add-member").dispatchEvent(new C.dom.window.Event("submit", { bubbles: true, cancelable: true }));
   await uiWait(() => $u(C.dom, ".member-row.changed"));
-  check("νέο μέλος: μήνυμα «email: νέο μέλος (ώρα)» και επισημασμένη γραμμή", toastText(C.dom) === "ux.nea@demo.gr: νέο μέλος (12:51:28)" && !!rowOf(C.dom, "ux.nea@demo.gr"));
+  check("νέο άτομο: μήνυμα «email: νέο μέλος (ώρα)», επισημασμένη γραμμή", toastText(C.dom) === "ux.nea@demo.gr: νέο μέλος (12:51:28)" && !!rowOf(C.dom, "ux.nea@demo.gr"));
+  check("νέο άτομο: το project και ο ρόλος από τη φόρμα ισχύουν", db.prepare("select count(*) c from team_project_editors where member_id = (select id from team_members where email = 'ux.nea@demo.gr') and project_id = 'cc'").get().c === 1);
 
   // ------------------------------------------------------------ (θ) το ιστορικό δείχνει ελληνική ετικέτα για τις αλλαγές ρόλων ανά project
   clickU(C.dom, $u(C.dom, "#tab-audit"));
   const auditText = await uiWait(() => { const x = $u(C.dom, "#app").textContent; return /Ιστορικό ενεργειών/.test(x) && x; });
   check("ιστορικό: οι αλλαγές ρόλων ανά project έχουν ελληνική ετικέτα και όχι το τεχνικό όνομα", !!auditText && /αλλαγή ρόλων ανά project/.test(auditText) && !/member_project_roles_changed/.test(auditText));
+}
+
+// ============================================================================ 27. Άνθρωποι και projects: μαζικές ενέργειες (API)
+section("27. Μαζικές ενέργειες: αλλαγές projects ανά πολλά μέλη και μαζική απενεργοποίηση (API)");
+// Το ψεύτικο D1 δεν είχε batch. Εδώ το προσθέτουμε όπως λειτουργεί στην πραγματική βάση: ατομικά, όλα ή τίποτα.
+env.DB.batch = async (statements) => {
+  db.exec("BEGIN");
+  try { for (const s of statements) await s.run(); db.exec("COMMIT"); } catch (e) { db.exec("ROLLBACK"); throw e; }
+};
+const bulk = async (body, who = "admin@demo.gr") => { const res = await call(who, "POST", "/team/admin/memberships", body); return { status: res.status, data: await readJson(res) }; };
+const bstatus = async (body, who = "admin@demo.gr") => { const res = await call(who, "POST", "/team/admin/members/bulk-status", body); return { status: res.status, data: await readJson(res) }; };
+const mkMember = (email, ws = "team-demo") => Number(db.prepare("insert into team_members (workspace_id,email,role,status,created_at) values (?,?,?,?,?)").run(ws, email, "employee", "active", new Date().toISOString()).lastInsertRowid);
+const projectsOf = (id) => Object.fromEntries(db.prepare("select d.department_id d, case when e.member_id is null then 'member' else 'editor' end r from member_departments d left join team_project_editors e on e.member_id = d.member_id and e.project_id = d.department_id where d.member_id = ?").all(id).map((r) => [r.d, r.r]));
+const storedRoleOf = (id) => db.prepare("select role from team_members where id = ?").get(id).role;
+const auditN = (a) => db.prepare("select count(*) c from team_audit_log where action = ?").get(a).c;
+const snapMembership = () => JSON.stringify(db.prepare("select * from member_departments order by member_id, department_id").all());
+{
+  check("bulk: editor (όχι admin) 403", (await bulk({ memberIds: [1], changes: [{ projectId: "cc", role: "member" }] }, "ed_cc@demo.gr")).status === 403);
+  check("bulk-status: editor 403", (await bstatus({ memberIds: [1], status: "disabled" }, "ed_cc@demo.gr")).status === 403);
+
+  const m1 = mkMember("bk1@demo.gr"), m2 = mkMember("bk2@demo.gr"), m3 = mkMember("bk3@demo.gr");
+  let r = await bulk({ memberIds: [m1, m2, m3], changes: [{ projectId: "cc", role: "member" }] });
+  check("προσθήκη 3 μελών στο cc ως Μέλος σε ΕΝΑ αίτημα", r.status === 200 && r.data.updated === 3 && r.data.created === 0 && r.data.skippedAdmins === 0 && [m1, m2, m3].every((id) => JSON.stringify(projectsOf(id)) === '{"cc":"member"}'), r);
+  await bulk({ memberIds: [m1, m2], changes: [{ projectId: "cc", role: "editor" }] });
+  check("ανάθεση Editor στους 2: ρόλοι στο cc και αποθηκευμένος ρόλος editor μόνο γι' αυτούς", projectsOf(m1).cc === "editor" && projectsOf(m2).cc === "editor" && projectsOf(m3).cc === "member" && storedRoleOf(m1) === "editor" && storedRoleOf(m3) === "employee");
+  await bulk({ memberIds: [m1], changes: [{ projectId: "cc", role: "member" }] });
+  check("υποβάθμιση σε Μέλος: φεύγει ο editor, μένει η συμμετοχή, ο αποθηκευμένος ρόλος γίνεται employee", projectsOf(m1).cc === "member" && storedRoleOf(m1) === "employee");
+  await bulk({ memberIds: [m1, m2, m3], changes: [{ projectId: "cc", role: null }] });
+  check("αφαίρεση από το cc: καμία συμμετοχή ή ανάθεση editor", [m1, m2, m3].every((id) => Object.keys(projectsOf(id)).length === 0) && storedRoleOf(m2) === "employee");
+  await bulk({ memberIds: [m1], changes: [{ projectId: "cc", role: "editor" }, { projectId: "fin", role: "member" }, { projectId: "hr", role: "member" }] });
+  check("πολλά projects σε ένα αίτημα: editor στο cc, μέλος σε fin και hr", projectsOf(m1).cc === "editor" && projectsOf(m1).fin === "member" && projectsOf(m1).hr === "member");
+  await bulk({ memberIds: [m1], changes: [{ projectId: "cc", role: "member" }, { projectId: "hr", role: null }] });
+  check("μικτές αλλαγές στο ίδιο αίτημα: υποβάθμιση cc και αφαίρεση hr, το fin μένει", projectsOf(m1).cc === "member" && projectsOf(m1).hr === undefined && projectsOf(m1).fin === "member");
+  await bulk({ memberIds: [m1], changes: [{ projectId: "cc", role: "member" }] });
+  check("ξανά η ίδια αλλαγή: ασφαλές (καμία διπλή γραμμή)", db.prepare("select count(*) c from member_departments where member_id = ? and department_id = 'cc'").get(m1).c === 1);
+
+  // ο admin παραλείπεται
+  const adminId = memberId("admin@demo.gr");
+  const adminBefore = JSON.stringify(projectsOf(adminId));
+  r = await bulk({ memberIds: [adminId, m3], changes: [{ projectId: "fin", role: "editor" }] });
+  check("ο admin παραλείπεται (skippedAdmins=1), ο άλλος ενημερώνεται", r.data.skippedAdmins === 1 && r.data.updated === 1 && JSON.stringify(projectsOf(adminId)) === adminBefore && storedRoleOf(adminId) === "admin" && projectsOf(m3).fin === "editor", r);
+  r = await bulk({ memberIds: [adminId], changes: [{ projectId: "fin", role: "editor" }] });
+  check("μόνο admin στην επιλογή: updated=0 και καμία αλλαγή", r.status === 200 && r.data.updated === 0 && r.data.skippedAdmins === 1);
+
+  // απομόνωση οργανισμών και έλεγχοι εισόδου
+  const foreign = mkMember("bk-other@other.gr", "team-other");
+  const s0 = snapMembership();
+  r = await bulk({ memberIds: [m1, foreign], changes: [{ projectId: "cc", role: "editor" }] });
+  check("id μέλους άλλου οργανισμού: 404 και ΤΙΠΟΤΑ δεν αλλάζει ούτε για τους έγκυρους", r.status === 404 && snapMembership() === s0 && projectsOf(m1).cc === "member");
+  check("project άλλου οργανισμού: 400 invalid_projects", (await bulk({ memberIds: [m1], changes: [{ projectId: "cc2", role: "member" }] })).data.error === "invalid_projects");
+  check("άκυρος ρόλος: 400", (await bulk({ memberIds: [m1], changes: [{ projectId: "cc", role: "admin" }] })).data.error === "invalid_role");
+  check("λείπει ο ρόλος: 400 και ΟΧΙ σιωπηλή αφαίρεση", (await bulk({ memberIds: [m1], changes: [{ projectId: "cc" }] })).data.error === "invalid_role" && projectsOf(m1).cc === "member");
+  check("το ίδιο project δύο φορές: 400", (await bulk({ memberIds: [m1], changes: [{ projectId: "cc", role: "member" }, { projectId: "cc", role: "editor" }] })).data.error === "invalid_changes");
+  check("χωρίς αλλαγές: 400", (await bulk({ memberIds: [m1], changes: [] })).data.error === "invalid_changes");
+  check("πάνω από 10 αλλαγές: 400", (await bulk({ memberIds: [m1], changes: Array.from({ length: 11 }, () => ({ projectId: "cc", role: "member" })) })).status === 400);
+  check("χωρίς μέλη: 400 no_targets", (await bulk({ changes: [{ projectId: "cc", role: "member" }] })).data.error === "no_targets");
+  check("id ως κείμενο (προσπάθεια SQL): 400 invalid_members και ο πίνακας υπάρχει", (await bulk({ memberIds: ["1; DROP TABLE team_members"], changes: [{ projectId: "cc", role: "member" }] })).data.error === "invalid_members" && db.prepare("select count(*) c from team_members").get().c > 5);
+  check("πάνω από 100 μέλη: 400 too_many", (await bulk({ memberIds: Array.from({ length: 101 }, (_, i) => i + 1), changes: [{ projectId: "cc", role: "member" }] })).data.error === "too_many");
+  check("άκυρο email: 400 invalid_emails", (await bulk({ emails: ["όχι email"], changes: [{ projectId: "cc", role: "member" }] })).data.error === "invalid_emails");
+
+  // emails: υπάρχοντα, άγνωστα, δημιουργία, προσκλήσεις
+  mkMember("bk-existing@demo.gr");
+  r = await bulk({ emails: ["BK-EXISTING@demo.gr", "bk-new1@demo.gr", "bk-new2@demo.gr"], changes: [{ projectId: "fin", role: "member" }] });
+  check("emails: ο υπάρχων (με κεφαλαία) ενημερώνεται, οι άγνωστοι ΔΕΝ δημιουργούνται χωρίς createMissing", r.data.updated === 1 && r.data.created === 0 && r.data.notAdded.length === 2 && !db.prepare("select 1 from team_members where email = 'bk-new1@demo.gr'").get(), r);
+  const mailsBefore = state.emails.length;
+  r = await bulk({ emails: ["bk-new1@demo.gr", "bk-new2@demo.gr", "bk-existing@demo.gr"], createMissing: true, sendInvite: true, changes: [{ projectId: "cc", role: "member" }] });
+  const created1 = db.prepare("select id, role, status, workspace_id from team_members where email = 'bk-new1@demo.gr'").get();
+  check("createMissing: 2 νέα μέλη (employee, ενεργά, σωστός οργανισμός) μπαίνουν στο project", r.status === 200 && r.data.created === 2 && r.data.updated === 3 && !!created1 && created1.role === "employee" && created1.status === "active" && created1.workspace_id === "team-demo" && projectsOf(created1.id).cc === "member", r);
+  const invites = state.emails.slice(mailsBefore);
+  check("προσκλήσεις ΜΟΝΟ στους 2 νέους, με σύνδεσμο προς το portal", r.data.invited === 2 && invites.length === 2 && invites.every((m) => /^bk-new[12]@demo\.gr$/.test(m.to)) && invites[0].text.includes(BASE + "/portal.html"), invites.map((m) => m.to));
+  r = await bulk({ emails: ["bk-other@other.gr"], createMissing: true, changes: [{ projectId: "cc", role: "member" }] });
+  check("email που ανήκει σε ΑΛΛΟΝ οργανισμό: δεν δημιουργείται ούτε αλλάζει, και δεν αποκαλύπτεται", r.status === 200 && r.data.created === 0 && r.data.notAdded.includes("bk-other@other.gr") && db.prepare("select workspace_id from team_members where email = 'bk-other@other.gr'").get().workspace_id === "team-other" && Object.keys(projectsOf(foreign)).length === 0);
+  const countMembers = () => db.prepare("select count(*) c from team_members").get().c;
+  const c0 = countMembers();
+  r = await bulk({ emails: Array.from({ length: 41 }, (_, i) => `bk-inv${i}@demo.gr`), createMissing: true, sendInvite: true, changes: [{ projectId: "cc", role: "member" }] });
+  check("πάνω από 40 νέα μέλη με πρόσκληση: 400 too_many_invites και ΤΙΠΟΤΑ δεν δημιουργείται", r.data.error === "too_many_invites" && countMembers() === c0);
+  r = await bulk({ emails: Array.from({ length: 60 }, (_, i) => `bkbulk${i}@demo.gr`), createMissing: true, sendInvite: false, changes: [{ projectId: "cc", role: "member" }] });
+  check("60 νέα μέλη χωρίς πρόσκληση σε ένα αίτημα", r.data.created === 60 && r.data.updated === 60 && countMembers() === c0 + 60);
+
+  // ατομικότητα: σπασμένο migration στη μέση
+  const x1 = mkMember("bk-atomic@demo.gr");
+  db.exec("ALTER TABLE team_project_editors RENAME TO team_project_editors_x");
+  const snapBefore = snapMembership();
+  r = await bulk({ memberIds: [x1], changes: [{ projectId: "cc", role: "member" }] });
+  check("λείπει πίνακας στη μέση: καθαρό 503 migration_required", r.status === 503 && r.data.error === "migration_required", r);
+  check("... και οι αλλαγές ΔΕΝ μένουν μισές (rollback)", snapMembership() === snapBefore && db.prepare("select count(*) c from member_departments where member_id = ?").get(x1).c === 0);
+  db.exec("ALTER TABLE team_project_editors_x RENAME TO team_project_editors");
+  const nb = env.DB.batch; delete env.DB.batch;
+  r = await bulk({ memberIds: [x1], changes: [{ projectId: "cc", role: "member" }] });
+  check("χωρίς διαθέσιμο batch: δουλεύει διαδοχικά", r.status === 200 && projectsOf(x1).cc === "member");
+  env.DB.batch = nb;
+
+  // ιστορικό
+  const a0 = auditN("members_bulk_changed");
+  await bulk({ memberIds: [m1, m2, m3], changes: [{ projectId: "fin", role: "member" }] });
+  check("ΜΙΑ γραμμή ιστορικού ανά μαζική ενέργεια", auditN("members_bulk_changed") === a0 + 1);
+  const lastAudit = db.prepare("select target, detail from team_audit_log where action = 'members_bulk_changed' order by id desc limit 1").get();
+  check("... με αριθμούς και projects, ΧΩΡΙΣ emails και χωρίς στόχο", JSON.parse(lastAudit.detail).count === 3 && JSON.parse(lastAudit.detail).projects[0] === "fin:member" && !/@/.test(lastAudit.detail) && lastAudit.target === null, lastAudit);
+  const a1 = auditN("members_bulk_changed");
+  await bulk({ memberIds: [adminId], changes: [{ projectId: "fin", role: "member" }] });
+  check("ενέργεια χωρίς καμία αλλαγή (μόνο admin): δεν γράφεται ιστορικό", auditN("members_bulk_changed") === a1);
+
+  // overview
+  const ov = await readJson(await call("admin@demo.gr", "GET", "/team/admin/overview"));
+  const m3view = ov.members.find((x) => x.id === m3);
+  check("overview: projectRoles ταιριάζουν με τη βάση", JSON.stringify(m3view.projectRoles) === JSON.stringify(projectsOf(m3)));
+
+  // ο ρόλος ισχύει ΑΜΕΣΑ στο session
+  const edEmail = "bk-ed@demo.gr"; const edId = mkMember(edEmail); S[edEmail] = (await login(edEmail)).cookie;
+  check("πριν: ο νέος υπάλληλος δεν έχει εισερχόμενα (403)", (await call(edEmail, "GET", "/team/inbox")).status === 403);
+  await bulk({ memberIds: [edId], changes: [{ projectId: "cc", role: "editor" }] });
+  check("μετά το bulk: ο ρόλος ισχύει ΑΜΕΣΑ χωρίς νέα σύνδεση (εισερχόμενα 200)", (await call(edEmail, "GET", "/team/inbox")).status === 200);
+  await bulk({ memberIds: [edId], changes: [{ projectId: "cc", role: "member" }] });
+  check("υποβάθμιση: χάνει την πρόσβαση ΑΜΕΣΑ (403)", (await call(edEmail, "GET", "/team/inbox")).status === 403);
+
+  // μαζική απενεργοποίηση
+  const s1 = mkMember("bk-s1@demo.gr"), s2 = mkMember("bk-s2@demo.gr"), s3 = mkMember("bk-s3@demo.gr");
+  S["bk-s1@demo.gr"] = (await login("bk-s1@demo.gr")).cookie;
+  check("πριν την απενεργοποίηση: το s1 έχει ενεργή σύνδεση", (await call("bk-s1@demo.gr", "GET", "/team/me")).status === 200);
+  r = await bstatus({ memberIds: [s1, s2, adminId], status: "disabled" });
+  check("bulk-status: απενεργοποιούνται 2, ο admin παραλείπεται", r.status === 200 && r.data.updated === 2 && r.data.skippedAdmins === 1, r);
+  const statusOf27 = (id) => db.prepare("select status from team_members where id = ?").get(id).status;
+  check("... κατάσταση στη βάση: s1, s2 disabled, ο admin active", statusOf27(s1) === "disabled" && statusOf27(s2) === "disabled" && statusOf27(adminId) === "active");
+  check("... η σύνδεση του s1 κλείνει ΑΜΕΣΑ (401) και τα sessions σβήνονται", (await call("bk-s1@demo.gr", "GET", "/team/me")).status === 401 && db.prepare("select count(*) c from team_sessions where member_id in (?, ?)").get(s1, s2).c === 0);
+  const b0 = auditN("members_bulk_status");
+  r = await bstatus({ memberIds: [s1, s2], status: "disabled" });
+  check("ξανά απενεργοποίηση των ίδιων: updated=0 και καμία νέα γραμμή ιστορικού", r.data.updated === 0 && auditN("members_bulk_status") === b0);
+  r = await bstatus({ memberIds: [s1, s2, s3], status: "active" });
+  check("ενεργοποίηση: επανέρχονται οι 2 (το s3 ήταν ήδη ενεργό)", r.data.updated === 2 && [s1, s2, s3].every((id) => statusOf27(id) === "active"));
+  check("ΜΙΑ γραμμή ιστορικού ανά ενέργεια κατάστασης, καμία για ενέργεια χωρίς αλλαγή", auditN("members_bulk_status") === b0 + 1);
+  check("bulk-status: id άλλου οργανισμού 404 και τίποτα δεν αλλάζει", (await bstatus({ memberIds: [s1, foreign], status: "disabled" })).status === 404 && statusOf27(s1) === "active");
+  check("bulk-status: άκυρη κατάσταση 400", (await bstatus({ memberIds: [s1], status: "deleted" })).data.error === "invalid_status");
+  check("bulk-status: άδεια λίστα 400", (await bstatus({ memberIds: [], status: "disabled" })).data.error === "invalid_members");
+  check("ο τελευταίος admin δεν απενεργοποιείται ποτέ από εδώ", (await bstatus({ memberIds: [adminId], status: "disabled" })).data.updated === 0 && statusOf27(adminId) === "active");
+  check("ο άλλος οργανισμός δεν επηρεάστηκε από καμία ενέργεια", statusOf27(foreign) === "active" && Object.keys(projectsOf(foreign)).length === 0);
+}
+
+
+const allEnabledU = (el) => [...el.querySelectorAll("select, button, input")].every((x) => !x.disabled);
+const statusOf27b = (id) => db.prepare("select status from team_members where id = ?").get(id).status;
+section("27b. Οθόνη διαχείρισης: λίστα ανθρώπων, μαζικές ενέργειες και σελίδα project");
+{
+  const typeU = (dom, sel, value) => { const el = $u(dom, sel); el.value = value; el.dispatchEvent(new dom.window.Event("input", { bubbles: true })); };
+  const pickU = (dom, el, value) => { el.value = value; el.dispatchEvent(new dom.window.Event("change", { bubbles: true })); };
+  const checkBox = (dom, el, on) => { el.checked = on; el.dispatchEvent(new dom.window.Event("change", { bubbles: true })); };
+  const toastU = (dom) => { const t = $u(dom, ".toast"); return t ? t.textContent : ""; };
+  const idle = (dom) => uiWait(() => !$u(dom, ".busy") && $u(dom, ".member-row, .dept-row, .proj-member-row, #project-page"));
+  const U = (n) => `bulkui${String(n).padStart(2, "0")}@bulk.gr`;
+  const pl = (n, one, many) => n + " " + (n === 1 ? one : many);
+  const finName = db.prepare("select name from departments where id = 'fin'").get().name;
+  const ccName = db.prepare("select name from departments where id = 'cc'").get().name;
+
+  // 30 νέα άτομα με ένα αίτημα (έτσι θα μπαίνουν σε BPO): όλα μέλη του fin
+  const created = await bulk({ emails: Array.from({ length: 30 }, (_, i) => U(i)), createMissing: true, sendInvite: false, changes: [{ projectId: "fin", role: "member" }] });
+  check("προετοιμασία: 30 νέα άτομα σε ένα αίτημα", created.status === 200 && created.data.created === 30, created);
+
+  const dom = uiFor("admin@demo.gr")("team-admin.html");
+  clickU(dom, await uiWait(() => $u(dom, "#tab-members")));
+  await uiWait(() => $$u(dom, ".member-row").length > 0);
+  const total = db.prepare("select count(*) c from team_members where workspace_id = 'team-demo'").get().c;
+  check("Άνθρωποι: 25 γραμμές ανά σελίδα και ΚΑΝΕΝΑ dropdown ανά project μέσα στη λίστα", $$u(dom, ".member-row").length === 25 && $$u(dom, "#people-list select").length === 0, $$u(dom, ".member-row").length);
+  check("σελιδοποίηση: «Δείχνει 1-25 από N»", new RegExp(`Δείχνει 1-25 από ${total} `).test($u(dom, "#people-info").textContent), $u(dom, "#people-info").textContent);
+  clickU(dom, $u(dom, "#people-next"));
+  check("επόμενη σελίδα: ξεκινά από το 26", /Δείχνει 26-/.test($u(dom, "#people-info").textContent));
+  typeU(dom, "#people-q", U(7));
+  await uiWait(() => $$u(dom, ".member-row").length === 1);
+  check("αναζήτηση: γυρίζει στη σελίδα 1 και δείχνει μόνο το άτομο", $$u(dom, ".member-row").length === 1 && /Δείχνει 1-1 από 1/.test($u(dom, "#people-info").textContent));
+  typeU(dom, "#people-q", "");
+  await uiWait(() => $$u(dom, ".member-row").length === 25);
+  pickU(dom, $u(dom, "#people-project"), "fin");
+  const finCount = db.prepare("select count(*) c from member_departments md join team_members m on m.id = md.member_id where md.department_id = 'fin' and m.workspace_id = 'team-demo'").get().c;
+  await uiWait(() => $$u(dom, ".member-row").length === Math.min(25, finCount));
+  check("φίλτρο project: δείχνει μόνο τα μέλη του fin", $$u(dom, ".member-row").length === Math.min(25, finCount) && new RegExp(`από ${finCount} `).test($u(dom, "#people-info").textContent));
+  pickU(dom, $u(dom, "#people-project"), "");
+  await uiWait(() => $$u(dom, ".member-row").length === 25);
+  checkBox(dom, $u(dom, "#sel-page"), true);
+  check("«Επιλογή σελίδας»: επιλέγει ΜΟΝΟ τη σελίδα (25 από το σύνολο)", $u(dom, "#bulk-count").textContent === "25 επιλεγμένοι");
+  clickU(dom, $u(dom, "#bulk-clear"));
+  check("«Καθαρισμός επιλογής»: καθαρίζει την επιλογή", $$u(dom, ".member-row .sel:checked").length === 0 && /Επίλεξε ανθρώπους/.test($u(dom, "#people-bulk").textContent));
+
+  // ------------------------------------------------------------ μαζική προσθήκη σε project
+  typeU(dom, "#people-q", "bulkui1");
+  await uiWait(() => $$u(dom, ".member-row").length === 10);
+  checkBox(dom, $u(dom, "#sel-page"), true);
+  check("επιλογή 10 ατόμων: μετρητής «10 επιλεγμένοι»", $u(dom, "#bulk-count").textContent === "10 επιλεγμένοι");
+  clickU(dom, $u(dom, "#bulk-add"));
+  check("«Προσθήκη σε project»: ανοίγει πάνελ με project και ρόλο", !!$u(dom, "#bulk-project") && !!$u(dom, "#bulk-role"));
+  clickU(dom, $u(dom, "#bulk-apply"));
+  check("χωρίς project: μήνυμα λάθους και τίποτα δεν στέλνεται", /Διάλεξε project/.test(toastU(dom)) && projectsOf(memberId(U(10))).cc === undefined);
+  pickU(dom, $u(dom, "#bulk-project"), "cc");
+  pickU(dom, $u(dom, "#bulk-role"), "editor");
+  const bulkAudit0 = auditN("members_bulk_changed");
+  clickU(dom, $u(dom, "#bulk-apply"));
+  await uiWait(() => projectsOf(memberId(U(19))).cc === "editor");
+  await idle(dom);
+  check("μαζική προσθήκη ως Editor: και τα 10 άτομα σε ΜΙΑ ενέργεια, με μήνυμα", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19].every((i) => projectsOf(memberId(U(i))).cc === "editor" && storedRoleOf(memberId(U(i))) === "editor") && new RegExp(`10 μέλη: ${ccName} → Editor`).test(toastU(dom)), toastU(dom));
+  check("... η επιλογή καθαρίζει και το πάνελ κλείνει", $$u(dom, ".member-row .sel:checked").length === 0 && !$u(dom, "#bulk-panel"));
+  check("... ΜΙΑ γραμμή ιστορικού για όλη την ενέργεια", auditN("members_bulk_changed") === bulkAudit0 + 1);
+
+  // ------------------------------------------------------------ μαζική αφαίρεση με επιβεβαίωση
+  checkBox(dom, $u(dom, `.member-row .sel[data-id="${memberId(U(10))}"]`), true);
+  checkBox(dom, $u(dom, `.member-row .sel[data-id="${memberId(U(11))}"]`), true);
+  check("επιλογή με checkbox: «2 επιλεγμένοι»", $u(dom, "#bulk-count").textContent === "2 επιλεγμένοι");
+  clickU(dom, $u(dom, "#bulk-remove"));
+  pickU(dom, $u(dom, "#bulk-project"), "cc");
+  clickU(dom, $u(dom, "#bulk-apply"));
+  await uiWait(() => $u(dom, ".confirm"));
+  check("αφαίρεση από project ζητά «Σίγουρα;» και ΔΕΝ στέλνεται τίποτα πριν την επιβεβαίωση", new RegExp(`Θα αφαιρεθούν 2 μέλη από το ${ccName}`).test($u(dom, ".confirm").textContent) && projectsOf(memberId(U(10))).cc === "editor");
+  clickU(dom, $u(dom, ".confirm-no"));
+  check("«Όχι»: τίποτα δεν αλλάζει, η επιλογή μένει και το πάνελ ξεκλειδώνει", projectsOf(memberId(U(10))).cc === "editor" && $$u(dom, ".member-row .sel:checked").length === 2 && !$u(dom, ".confirm") && !!$u(dom, "#bulk-panel") && allEnabledU($u(dom, "#bulk-panel")));
+  clickU(dom, $u(dom, "#bulk-apply"));
+  await uiWait(() => $u(dom, ".confirm"));
+  clickU(dom, $u(dom, ".confirm-yes"));
+  await uiWait(() => projectsOf(memberId(U(10))).cc === undefined);
+  await idle(dom);
+  check("«Ναι»: αφαιρούνται και οι 2, οι υπόλοιποι 8 μένουν editors", projectsOf(memberId(U(10))).cc === undefined && projectsOf(memberId(U(11))).cc === undefined && projectsOf(memberId(U(12))).cc === "editor" && /2 μέλη/.test(toastU(dom)));
+
+  // ------------------------------------------------------------ μαζική απενεργοποίηση με επιβεβαίωση
+  typeU(dom, "#people-q", "bulkui2");
+  await uiWait(() => $$u(dom, ".member-row").length === 10);
+  checkBox(dom, $u(dom, "#sel-page"), true);
+  clickU(dom, $u(dom, "#bulk-disable"));
+  clickU(dom, $u(dom, "#bulk-apply"));
+  await uiWait(() => $u(dom, ".confirm"));
+  check("μαζική απενεργοποίηση ζητά «Σίγουρα;» και ενημερώνει ότι οι admins δεν επηρεάζονται", /οι admins δεν επηρεάζονται/.test($u(dom, ".confirm").textContent) && statusOf27b(memberId(U(20))) === "active");
+  clickU(dom, $u(dom, ".confirm-yes"));
+  await uiWait(() => statusOf27b(memberId(U(29))) === "disabled");
+  await idle(dom);
+  check("«Ναι»: και τα 10 απενεργοποιούνται, μήνυμα «10 μέλη απενεργοποιήθηκαν»", [20, 21, 22, 23, 24, 25, 26, 27, 28, 29].every((i) => statusOf27b(memberId(U(i))) === "disabled") && /10 μέλη απενεργοποιήθηκαν/.test(toastU(dom)), toastU(dom));
+
+  // ------------------------------------------------------------ επιλογή που διατηρείται ανάμεσα σε αναζητήσεις, και ο admin παραλείπεται
+  typeU(dom, "#people-q", "admin@demo");
+  await uiWait(() => $$u(dom, ".member-row").length === 1);
+  checkBox(dom, $u(dom, ".member-row .sel"), true);
+  typeU(dom, "#people-q", U(5));
+  await uiWait(() => $$u(dom, ".member-row").length === 1 && $$u(dom, ".member-row")[0].textContent.includes(U(5)));
+  checkBox(dom, $u(dom, ".member-row .sel"), true);
+  check("η επιλογή διατηρείται ανάμεσα σε διαφορετικές αναζητήσεις («2 επιλεγμένοι»)", $u(dom, "#bulk-count").textContent === "2 επιλεγμένοι");
+  clickU(dom, $u(dom, "#bulk-add"));
+  pickU(dom, $u(dom, "#bulk-project"), "fin");
+  clickU(dom, $u(dom, "#bulk-apply"));
+  await uiWait(() => /admin παραλείφθηκε/.test(toastU(dom)));
+  await idle(dom);
+  check("ο admin στην επιλογή παραλείπεται και το μήνυμα το λέει", /1 admin παραλείφθηκε/.test(toastU(dom)) && storedRoleOf(memberId("admin@demo.gr")) === "admin", toastU(dom));
+
+  // ------------------------------------------------------------ καρτέλα ατόμου μέσα από τη λίστα
+  typeU(dom, "#people-q", U(5));
+  const row5 = await uiWait(() => { const rs = $$u(dom, ".member-row"); return rs.length === 1 && rs[0]; });
+  clickU(dom, row5.querySelector(".open-member"));
+  await uiWait(() => $u(dom, "#member-detail"));
+  clickU(dom, $u(dom, "#member-detail .prow[data-project=fin] .seg-editor"));
+  await uiWait(() => projectsOf(memberId(U(5))).fin === "editor");
+  await idle(dom);
+  check("καρτέλα ατόμου: αλλαγή σε Editor, και η καρτέλα με την αναζήτηση ΜΕΝΟΥΝ ανοιχτές μετά την ανανέωση", !!$u(dom, "#member-detail") && $u(dom, "#people-q").value === U(5) && !!$u(dom, "#member-detail .prow[data-project=fin] .seg-editor.on"));
+
+  // ------------------------------------------------------------ σελίδα project
+  clickU(dom, $u(dom, "#tab-departments"));
+  const finRow = await uiWait(() => $$u(dom, ".dept-row").find((r) => r.querySelector("input[type=text]").value === finName));
+  clickU(dom, finRow.querySelector(".open-project"));
+  await uiWait(() => $u(dom, "#project-page"));
+  const finMembers = db.prepare("select count(*) c from member_departments md join team_members m on m.id = md.member_id where md.department_id = 'fin' and m.workspace_id = 'team-demo'").get().c;
+  const finEditors = db.prepare("select count(*) c from team_project_editors e join team_members m on m.id = e.member_id where e.project_id = 'fin' and m.workspace_id = 'team-demo'").get().c;
+  const finDocs = db.prepare("select count(*) c from team_documents where workspace_id = 'team-demo' and department_id = 'fin'").get().c;
+  check("σελίδα project: τίτλος και μετρητές μελών, editors και εγγράφων", new RegExp(finName).test($u(dom, "#project-page h2").textContent) && $u(dom, "#project-meta").textContent === `${pl(finMembers, "μέλος", "μέλη")} · ${pl(finEditors, "editor", "editors")} · ${pl(finDocs, "έγγραφο", "έγγραφα")}`, $u(dom, "#project-meta").textContent);
+  check("σελίδα project: το πολύ 25 μέλη ανά σελίδα, με σελιδοποίηση", $$u(dom, ".proj-member-row").length === Math.min(25, finMembers) && new RegExp(`από ${finMembers} `).test($u(dom, "#proj-info").textContent));
+  typeU(dom, "#proj-q", U(8));
+  await uiWait(() => $$u(dom, ".proj-member-row").length === 1);
+  clickU(dom, $u(dom, ".proj-member-row .seg-editor"));
+  await uiWait(() => projectsOf(memberId(U(8))).fin === "editor");
+  await idle(dom);
+  check("σελίδα project: ρόλος Editor με ένα κλικ, και η αναζήτηση ΜΕΝΕΙ μετά την ανανέωση", $u(dom, "#proj-q").value === U(8) && !!$u(dom, "#project-page") && $$u(dom, ".proj-member-row").length === 1);
+  clickU(dom, $u(dom, ".proj-member-row .remove-project"));
+  await uiWait(() => projectsOf(memberId(U(8))).fin === undefined);
+  await idle(dom);
+  check("σελίδα project: αφαίρεση μέλους", projectsOf(memberId(U(8))).fin === undefined);
+  typeU(dom, "#proj-q", "");
+
+  // επικόλληση emails: χωρίς «Δημιουργία νέων μελών» οι άγνωστοι ΔΕΝ δημιουργούνται
+  $u(dom, "#paste-emails").value = `${U(9)}, pastea@bulk.gr\npasteb@bulk.gr`;
+  pickU(dom, $u(dom, "#paste-role"), "editor");
+  clickU(dom, $u(dom, "#paste-add"));
+  await uiWait(() => projectsOf(memberId(U(9))).fin === "editor");
+  await idle(dom);
+  check("επικόλληση χωρίς δημιουργία: ο υπάρχων μπαίνει ως Editor, οι άγνωστοι ΔΕΝ δημιουργούνται", projectsOf(memberId(U(9))).fin === "editor" && !db.prepare("select 1 from team_members where email = 'pastea@bulk.gr'").get());
+  check("... η λίστα «δεν προστέθηκαν» μένει ορατή και λέει τι να κάνεις", /Δεν προστέθηκαν: pastea@bulk\.gr, pasteb@bulk\.gr/.test($u(dom, "#paste-result").textContent) && /Δημιουργία νέων μελών/.test($u(dom, "#paste-result").textContent), $u(dom, "#paste-result").textContent);
+  // με «Δημιουργία νέων μελών» και πρόσκληση
+  $u(dom, "#paste-emails").value = "pastea@bulk.gr\npasteb@bulk.gr";
+  checkBox(dom, $u(dom, "#paste-create"), true);
+  pickU(dom, $u(dom, "#paste-role"), "member");
+  const mailsBefore = state.emails.length;
+  clickU(dom, $u(dom, "#paste-add"));
+  await uiWait(() => db.prepare("select 1 from team_members where email = 'pasteb@bulk.gr'").get());
+  await idle(dom);
+  const invitesSent = state.emails.slice(mailsBefore).map((m) => m.to).sort();
+  check("με «Δημιουργία νέων μελών»: δημιουργούνται 2 νέα άτομα, ενεργά, μέλη του project", ["pastea", "pasteb"].every((n) => { const m = db.prepare("select id, status from team_members where email = ?").get(n + "@bulk.gr"); return m && m.status === "active" && projectsOf(m.id).fin === "member"; }) && /2 νέα μέλη δημιουργήθηκαν/.test(toastU(dom)), toastU(dom));
+  check("... στάλθηκαν προσκλήσεις ΜΟΝΟ στους 2 νέους, και το πεδίο καθαρίζει", JSON.stringify(invitesSent) === JSON.stringify(["pastea@bulk.gr", "pasteb@bulk.gr"]) && $u(dom, "#paste-emails").value === "" && $u(dom, "#paste-result").textContent === "", invitesSent);
+  $u(dom, "#paste-emails").value = "όχι email";
+  clickU(dom, $u(dom, "#paste-add"));
+  check("άκυρο email: μήνυμα λάθους και τίποτα δεν δημιουργείται", /Δεν είναι σωστά emails/.test(toastU(dom)));
+  clickU(dom, $u(dom, "#project-back"));
+  check("«← Όλα τα projects»: επιστροφή στη λίστα projects", $$u(dom, ".dept-row").length >= 3 && !$u(dom, "#project-page"));
+
+  // ------------------------------------------------------------ ιστορικό
+  clickU(dom, $u(dom, "#tab-audit"));
+  const auditTxt = await uiWait(() => { const x = $u(dom, "#app").textContent; return /Ιστορικό ενεργειών/.test(x) && x; });
+  check("ιστορικό: ελληνικές ετικέτες για τις μαζικές ενέργειες, όχι τεχνικά ονόματα", /μαζική αλλαγή projects/.test(auditTxt) && /μαζική αλλαγή κατάστασης/.test(auditTxt) && !/members_bulk_/.test(auditTxt));
 }
 
 // ============================================================================ Σύνοψη

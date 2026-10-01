@@ -32,6 +32,8 @@ import {
   handleAdminAudit,
   handleAdminDocuments,
   handleAdminOverview,
+  handleBulkMemberships,
+  handleBulkStatus,
   handleCreateDepartment,
   handleCreateMember,
   handleHideDocument,
@@ -157,6 +159,8 @@ async function routeTeamRequest(request, env, url, deps, ctx) {
     const dMatch = path.match(ADMIN_DEPT_RE);
     if (dMatch && method === "PATCH") return handleUpdateDepartment(request, rc, decodeURIComponent(dMatch[1]));
     if (path === "/team/admin/members" && method === "POST") return handleCreateMember(request, rc);
+    if (path === "/team/admin/memberships" && method === "POST") return handleBulkMemberships(request, rc);
+    if (path === "/team/admin/members/bulk-status" && method === "POST") return handleBulkStatus(request, rc);
     const mMatch = path.match(ADMIN_MEMBER_RE);
     if (mMatch && method === "PATCH") return handleUpdateMember(request, rc, decodeURIComponent(mMatch[1]));
     if (path === "/team/admin/audit" && method === "GET") return handleAdminAudit(env, member);

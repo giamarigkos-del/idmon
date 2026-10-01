@@ -3,6 +3,8 @@
 // μέλη (πρόσκληση, ρόλος, τμήματα, απενεργοποίηση) και ιστορικό ενεργειών.
 // ΟΛΑ τα endpoints είναι μόνο για admin και δουλεύουν πάντα μέσα στο workspace του admin.
 // Οι αλλαγές ισχύουν ΑΜΕΣΩΣ: ο ρόλος και η κατάσταση διαβάζονται από τη βάση σε κάθε request.
+// Μαζικές ενέργειες (1 Οκτ 2026): αλλαγές συμμετοχής σε projects και κατάστασης για ΠΟΛΛΑ μέλη με ένα αίτημα, ατομικά (όλα ή τίποτα) και
+// με ΜΙΑ γραμμή ιστορικού ανά ενέργεια: handleBulkMemberships και handleBulkStatus (στο τέλος του αρχείου).
 
 import { json, loadWorkspaceDepartments, normalizeEmail } from "./auth.js";
 import { AUDIT_RETENTION_DAYS, recordAudit } from "./audit.js";
@@ -377,4 +379,221 @@ export async function handleRunRechecks(rc) {
   const out = await runDueRechecks(env, deps, { force: true, workspaceId: member.workspaceId });
   await recordAudit(env, member, "rechecks_run", null, { processed: out.processed, created: out.created });
   return json(200, out);
+}
+
+
+// ------------------------------------------------------------------ ΜΑΖΙΚΕΣ ΕΝΕΡΓΕΙΕΣ
+// Γιατί: σε BPO μπαίνουν και φεύγουν δεκάδες πράκτορες. Ένα αίτημα ανά άνθρωπο θα ήταν αργό, και θα άφηνε μισές αλλαγές αν
+// κοβόταν στη μέση. Εδώ όλα τα μέλη και όλα τα projects μιας ενέργειας πάνε σε ΕΝΑ αίτημα, και οι αλλαγές στη βάση τρέχουν
+// ατομικά (D1 batch: ή γίνονται όλες ή καμία). Οι εντολές SQL δουλεύουν σε σύνολα με json_each(?): μία παράμετρος-λίστα αντί
+// για εκατό ξεχωριστές (το D1 δέχεται το πολύ 100 παραμέτρους ανά εντολή) και λίγα ερωτήματα συνολικά.
+// Ο admin δεν αλλάζει ποτέ από εδώ: έχει ήδη πρόσβαση παντού, και η αλλαγή του γίνεται μόνο ατομικά (προστασία "τελευταίου admin").
+const MAX_BULK_MEMBERS = 100;
+const MAX_BULK_CHANGES = 10;
+const MAX_BULK_INVITES = 40;
+
+// D1: env.DB.batch(...) είναι ατομικό. Αν δεν υπάρχει (π.χ. απλό περιβάλλον δοκιμών), τρέχουν διαδοχικά.
+async function runStatements(env, statements) {
+  if (!statements.length) return;
+  if (typeof env.DB.batch === "function") await env.DB.batch(statements);
+  else for (const s of statements) await s.run();
+}
+
+const sqlIn = "member_id IN (SELECT value FROM json_each(?))";
+
+// Ο αποθηκευμένος ρόλος κάθε μέλους ξαναυπολογίζεται από τις αναθέσεις (όπως στο handleUpdateMember): αντιστοιχεί στους
+// παραλήπτες ειδοποιήσεων αντιφάσεων, που διαβάζουν τη στήλη role.
+const RECOMPUTE_ROLE_SQL = `UPDATE team_members SET role = CASE
+    WHEN role = 'admin' THEN 'admin'
+    WHEN EXISTS (SELECT 1 FROM team_project_editors e JOIN member_departments md
+                   ON md.member_id = e.member_id AND md.department_id = e.project_id
+                  WHERE e.member_id = team_members.id) THEN 'editor'
+    ELSE 'employee' END
+  WHERE id IN (SELECT value FROM json_each(?))`;
+
+async function membersByIds(env, workspaceId, ids) {
+  const res = await env.DB.prepare(
+    "SELECT id, email, role, status FROM team_members WHERE workspace_id = ? AND id IN (SELECT value FROM json_each(?))"
+  ).bind(workspaceId, JSON.stringify(ids)).all();
+  return (res && res.results) || [];
+}
+
+async function membersByEmails(env, workspaceId, emails) {
+  const res = await env.DB.prepare(
+    "SELECT id, email, role, status FROM team_members WHERE workspace_id = ? AND email IN (SELECT value FROM json_each(?))"
+  ).bind(workspaceId, JSON.stringify(emails)).all();
+  return (res && res.results) || [];
+}
+
+// ------------------------------------------------------------------ POST /team/admin/memberships
+// Σώμα: { memberIds?: number[], emails?: string[], createMissing?: boolean, sendInvite?: boolean,
+//         changes: [{ projectId, role: "member" | "editor" | null }] }   (null = αφαίρεση από το project)
+// Μέλη του οργανισμού: από id ή από email. Email που δεν υπάρχει δημιουργείται ΜΟΝΟ με createMissing: true.
+export async function handleBulkMemberships(request, rc) {
+  const { env, deps, member, origin } = rc;
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json(400, { error: "invalid_json" });
+  }
+  if (!body || typeof body !== "object") return json(400, { error: "invalid_request" });
+
+  // 1) αλλαγές: έγκυρα projects του οργανισμού, γνωστοί ρόλοι, κάθε project μία φορά
+  if (!Array.isArray(body.changes) || body.changes.length < 1 || body.changes.length > MAX_BULK_CHANGES) {
+    return json(400, { error: "invalid_changes" });
+  }
+  const departments = await loadWorkspaceDepartments(env, member.workspaceId);
+  const knownProjects = new Set(departments.map((d) => d.id));
+  const changes = [];
+  const seenProjects = new Set();
+  for (const c of body.changes) {
+    if (!c || typeof c.projectId !== "string" || !knownProjects.has(c.projectId)) return json(400, { error: "invalid_projects" });
+    if (seenProjects.has(c.projectId)) return json(400, { error: "invalid_changes" });
+    if (!(c.role === null || c.role === "member" || c.role === "editor")) return json(400, { error: "invalid_role" });
+    seenProjects.add(c.projectId);
+    changes.push({ projectId: c.projectId, role: c.role });
+  }
+
+  // 2) ποιους αφορά
+  const rawIds = body.memberIds === undefined ? [] : body.memberIds;
+  const rawEmails = body.emails === undefined ? [] : body.emails;
+  if (!Array.isArray(rawIds) || !Array.isArray(rawEmails)) return json(400, { error: "invalid_request" });
+  if (rawIds.some((x) => !Number.isInteger(x) || x <= 0)) return json(400, { error: "invalid_members" });
+  const ids = [...new Set(rawIds)];
+  const emails = [];
+  for (const e of rawEmails) {
+    const clean = normalizeEmail(e);
+    if (!clean) return json(400, { error: "invalid_emails" });
+    if (!emails.includes(clean)) emails.push(clean);
+  }
+  if (ids.length + emails.length === 0) return json(400, { error: "no_targets" });
+  if (ids.length + emails.length > MAX_BULK_MEMBERS) return json(400, { error: "too_many" });
+
+  const targets = new Map(); // id -> { id, email, role, status }
+  if (ids.length) {
+    const rows = await membersByIds(env, member.workspaceId, ids);
+    // Αν έστω ένα id δεν ανήκει σε αυτόν τον οργανισμό: δεν γίνεται τίποτα και δεν αποκαλύπτεται ποιο.
+    if (rows.length !== ids.length) return json(404, { error: "not_found" });
+    for (const r of rows) targets.set(r.id, r);
+  }
+
+  const notAdded = [];
+  const createdEmails = [];
+  if (emails.length) {
+    const found = await membersByEmails(env, member.workspaceId, emails);
+    const foundEmails = new Set(found.map((r) => r.email));
+    for (const r of found) targets.set(r.id, r);
+    const missing = emails.filter((e) => !foundEmails.has(e));
+    if (missing.length) {
+      if (body.createMissing !== true) {
+        notAdded.push(...missing);
+      } else {
+        if (body.sendInvite === true && missing.length > MAX_BULK_INVITES) return json(400, { error: "too_many_invites" });
+        // Το email είναι μοναδικό σε όλο το σύστημα: όσα ανήκουν ήδη αλλού δεν δημιουργούνται (και δεν λέμε σε ποιον οργανισμό).
+        const usedRes = await env.DB.prepare(
+          "SELECT email FROM team_members WHERE email IN (SELECT value FROM json_each(?))"
+        ).bind(JSON.stringify(missing)).all();
+        const used = new Set(((usedRes && usedRes.results) || []).map((r) => r.email));
+        const creatable = missing.filter((e) => !used.has(e));
+        notAdded.push(...missing.filter((e) => used.has(e)));
+        if (creatable.length) {
+          await env.DB.prepare(
+            "INSERT OR IGNORE INTO team_members (workspace_id, email, role, status, created_at) SELECT ?, value, 'employee', 'active', ? FROM json_each(?)"
+          ).bind(member.workspaceId, new Date().toISOString(), JSON.stringify(creatable)).run();
+          const created = await membersByEmails(env, member.workspaceId, creatable);
+          for (const r of created) { targets.set(r.id, r); createdEmails.push(r.email); }
+        }
+      }
+    }
+  }
+
+  // 3) ο admin δεν αλλάζει από εδώ
+  const all = [...targets.values()];
+  const skippedAdmins = all.filter((t) => t.role === "admin").length;
+  const editable = all.filter((t) => t.role !== "admin");
+  if (!editable.length) {
+    return json(200, { updated: 0, created: createdEmails.length, skippedAdmins, notAdded, invited: 0 });
+  }
+
+  // 4) οι αλλαγές, ατομικά
+  const idsJson = JSON.stringify(editable.map((t) => t.id));
+  const now = new Date().toISOString();
+  const statements = [];
+  for (const c of changes) {
+    if (c.role === null) {
+      statements.push(env.DB.prepare(`DELETE FROM team_project_editors WHERE project_id = ? AND ${sqlIn}`).bind(c.projectId, idsJson));
+      statements.push(env.DB.prepare(`DELETE FROM member_departments WHERE department_id = ? AND ${sqlIn}`).bind(c.projectId, idsJson));
+      continue;
+    }
+    statements.push(env.DB.prepare("INSERT OR IGNORE INTO member_departments (member_id, department_id) SELECT value, ? FROM json_each(?)").bind(c.projectId, idsJson));
+    if (c.role === "editor") {
+      statements.push(env.DB.prepare("INSERT OR IGNORE INTO team_project_editors (member_id, project_id, created_at) SELECT value, ?, ? FROM json_each(?)").bind(c.projectId, now, idsJson));
+    } else {
+      statements.push(env.DB.prepare(`DELETE FROM team_project_editors WHERE project_id = ? AND ${sqlIn}`).bind(c.projectId, idsJson));
+    }
+  }
+  statements.push(env.DB.prepare(RECOMPUTE_ROLE_SQL).bind(idsJson));
+  await runStatements(env, statements);
+
+  // 5) ΜΙΑ γραμμή ιστορικού (μόνο αριθμοί και ids projects, ποτέ emails: το ιστορικό δεν γίνεται λίστα προσώπων)
+  await recordAudit(env, member, "members_bulk_changed", null, {
+    count: editable.length, created: createdEmails.length,
+    projects: changes.map((c) => `${c.projectId}:${c.role === null ? "-" : c.role}`),
+  });
+
+  // 6) προσκλήσεις μόνο σε όσους δημιουργήθηκαν τώρα
+  let invited = 0;
+  if (body.sendInvite === true) {
+    for (const email of createdEmails) {
+      try {
+        await deps.sendEmailViaResend(
+          env, email, "Πρόσκληση στο Idmon",
+          `Έχεις προστεθεί στον χώρο γνώσης της ομάδας σου. Για να μπεις, γράψε το email σου εδώ και θα σου στείλουμε σύνδεσμο (δεν χρειάζεσαι κωδικό):\n\n${origin}/portal.html`
+        );
+        invited++;
+      } catch {
+        /* μια αποτυχημένη πρόσκληση δεν ακυρώνει τις αλλαγές: ο admin μπορεί να τη στείλει ξανά */
+      }
+    }
+  }
+  return json(200, { updated: editable.length, created: createdEmails.length, skippedAdmins, notAdded, invited });
+}
+
+// ------------------------------------------------------------------ POST /team/admin/members/bulk-status
+// Σώμα: { memberIds: number[], status: "active" | "disabled" }. Η απενεργοποίηση κλείνει αμέσως και τις συνδέσεις τους.
+// Οι admins παραλείπονται πάντα (προστασία "τελευταίου admin": η αλλαγή τους γίνεται ατομικά, από την καρτέλα τους).
+export async function handleBulkStatus(request, rc) {
+  const { env, member } = rc;
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json(400, { error: "invalid_json" });
+  }
+  if (!body || typeof body !== "object") return json(400, { error: "invalid_request" });
+  if (!["active", "disabled"].includes(body.status)) return json(400, { error: "invalid_status" });
+  if (!Array.isArray(body.memberIds) || body.memberIds.length < 1 || body.memberIds.length > MAX_BULK_MEMBERS
+      || body.memberIds.some((x) => !Number.isInteger(x) || x <= 0)) {
+    return json(400, { error: "invalid_members" });
+  }
+  const ids = [...new Set(body.memberIds)];
+  const rows = await membersByIds(env, member.workspaceId, ids);
+  if (rows.length !== ids.length) return json(404, { error: "not_found" });
+
+  const skippedAdmins = rows.filter((r) => r.role === "admin").length;
+  const changing = rows.filter((r) => r.role !== "admin" && r.status !== body.status);
+  if (!changing.length) return json(200, { updated: 0, skippedAdmins });
+
+  const idsJson = JSON.stringify(changing.map((r) => r.id));
+  const statements = [
+    env.DB.prepare(`UPDATE team_members SET status = ? WHERE workspace_id = ? AND role <> 'admin' AND id IN (SELECT value FROM json_each(?))`)
+      .bind(body.status, member.workspaceId, idsJson),
+  ];
+  if (body.status === "disabled") {
+    statements.push(env.DB.prepare(`DELETE FROM team_sessions WHERE ${sqlIn}`).bind(idsJson));
+  }
+  await runStatements(env, statements);
+  await recordAudit(env, member, "members_bulk_status", null, { status: body.status, count: changing.length });
+  return json(200, { updated: changing.length, skippedAdmins });
 }
