@@ -1,3 +1,4 @@
+# wrangler.lab.toml
 # Lab Worker: πειραματικό περιβάλλον για το "Idmon για ομάδες" (branch team-experiment).
 # Ίδιος κώδικας με το production, αλλά ΕΝΤΕΛΩΣ δικοί του πόροι (βάση, KV, index),
 # ώστε τίποτα να μην αγγίζει το live προϊόν ή τους πραγματικούς πελάτες.
@@ -34,6 +35,10 @@ binding = "AI"
 [assets]
 directory = "./public"
 not_found_handling = "none"
+
+# Επανέλεγχος αντιφάσεων (και συντήρηση) κάθε 5 λεπτά, μόνο στο lab.
+[triggers]
+crons = ["*/5 * * * *"]
 
 [vars]
 NOTIFY_FROM_EMAIL = "notifications@idmon.app"

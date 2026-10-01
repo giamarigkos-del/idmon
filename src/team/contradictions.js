@@ -1,3 +1,4 @@
+// src\team\contradictions.js
 // Section W (Φέτα 2): αυτόματος έλεγχος αντιφάσεων όταν δημοσιεύεται ή αλλάζει ένα έγγραφο.
 //
 // Πώς δουλεύει (συντηρητικά, όπως αποφασίστηκε: μόνο ΣΑΦΕΙΣ αντιφάσεις, όπως διαφορετικοί
@@ -15,7 +16,7 @@
 // υπάρχει αντίφαση, χωρίς τίτλο ή κείμενο, και ειδοποιείται ο admin.
 
 import { json, loadWorkspaceDepartments, sha256Hex } from "./auth.js";
-import { COMPANY_WIDE, canReadDepartment, canWriteDepartment } from "./access.js";
+import { COMPANY_WIDE, canReadDocument, canWriteDepartment } from "./access.js";
 import { departmentName, listDocIndex, normalizeText, readDoc } from "./store.js";
 import { SYSTEM_ACTOR, recordAudit } from "./audit.js";
 
@@ -270,7 +271,7 @@ function viewFor(member, departments, docIndex, row) {
   for (const [docId, quote] of [[row.doc_a, row.quote_a], [row.doc_b, row.quote_b]]) {
     const entry = docIndex.get(docId);
     if (!entry) return null; // το έγγραφο δεν υπάρχει πια
-    const readable = canReadDepartment(member, departments, entry.departmentId);
+    const readable = canReadDocument(member, departments, entry.departmentId, entry.hidden);
     const editable = canWriteDepartment(member, departments, entry.departmentId);
     sides.push({ docId, quote, entry, readable, editable });
   }
@@ -373,6 +374,7 @@ export async function handleRemindContradiction(env, deps, member, id, origin) {
 export async function afterDocumentSaved(rc, { docId, title, text, vectors }) {
   const { env, deps, member, ctx, origin } = rc;
   await resolveStaleContradictions(env, member.workspaceId, docId, text, member.id);
+  await scheduleRecheck(env, member.workspaceId, docId, origin);
   const job = checkContradictions(env, deps, {
     workspaceId: member.workspaceId, docId, title, text, vectors, origin, actorEmail: member.email,
   });
@@ -404,4 +406,62 @@ export async function handleCheckDocument(rc, id) {
     "SELECT COUNT(*) AS c FROM team_contradictions WHERE workspace_id = ? AND status = 'open' AND (doc_a = ? OR doc_b = ?)"
   ).bind(member.workspaceId, id, id).first();
   return json(200, { ...result, open: openRow ? openRow.c : 0 });
+}
+
+// ------------------------------------------------------------------ αυτόματος επανέλεγχος
+// Το Vectorize χρειάζεται λίγο χρόνο μέχρι να "δει" ένα νέο έγγραφο. Ένα έγγραφο που ανεβαίνει αμέσως μετά από άλλο μπορεί
+// λοιπόν να μη βρει υποψήφια στον άμεσο έλεγχο. Γι' αυτό κάθε αποθήκευση προγραμματίζει και έναν δεύτερο έλεγχο λίγα
+// λεπτά αργότερα, που τρέχει από το cron (src/team/maintenance.js). Αν ο πίνακας δεν υπάρχει ακόμα, αγνοείται σιωπηλά.
+export const RECHECK_DELAY_MS = 3 * 60 * 1000;
+const RECHECK_BATCH = 10;
+
+export async function scheduleRecheck(env, workspaceId, docId, origin) {
+  try {
+    await env.DB.prepare("DELETE FROM team_rechecks WHERE workspace_id = ? AND document_id = ? AND done_at IS NULL").bind(workspaceId, docId).run();
+    await env.DB.prepare("INSERT INTO team_rechecks (workspace_id, document_id, origin, due_at) VALUES (?, ?, ?, ?)")
+      .bind(workspaceId, docId, origin || "", new Date(Date.now() + RECHECK_DELAY_MS).toISOString()).run();
+  } catch {
+    /* πίνακας που λείπει: ο επανέλεγχος δεν είναι διαθέσιμος, όλα τα υπόλοιπα δουλεύουν */
+  }
+}
+
+// opts: { force: τρέχει όλους τους εκκρεμείς ανεξάρτητα από την ώρα, workspaceId: μόνο αυτού του οργανισμού }
+export async function runDueRechecks(env, deps, opts = {}) {
+  const out = { processed: 0, created: 0, failed: 0 };
+  try {
+    const where = [];
+    const binds = [];
+    where.push("done_at IS NULL");
+    if (!opts.force) { where.push("due_at <= ?"); binds.push(new Date().toISOString()); }
+    if (opts.workspaceId) { where.push("workspace_id = ?"); binds.push(opts.workspaceId); }
+    const rows = await env.DB.prepare(`SELECT id, workspace_id, document_id, origin FROM team_rechecks WHERE ${where.join(" AND ")} ORDER BY id LIMIT ${RECHECK_BATCH}`)
+      .bind(...binds).all();
+    for (const row of (rows && rows.results) || []) {
+      // Σημαίνεται ως "έγινε" ΠΡΙΝ τον έλεγχο: αν κάτι αποτύχει, δεν ξαναδοκιμάζεται σε κύκλο.
+      await env.DB.prepare("UPDATE team_rechecks SET done_at = ? WHERE id = ?").bind(new Date().toISOString(), row.id).run();
+      const doc = await readDoc(env, row.workspace_id, row.document_id);
+      if (!doc) continue;
+      const vectors = [];
+      try {
+        for (const chunk of deps.chunkText(doc.fullText).slice(0, MAX_QUERY_CHUNKS)) {
+          vectors.push({ values: await deps.getEmbedding(chunk, env.GEMINI_API_KEY) });
+        }
+      } catch {
+        out.failed++;
+        continue;
+      }
+      const result = await checkContradictions(env, deps, {
+        workspaceId: row.workspace_id, docId: row.document_id, title: doc.title, text: doc.fullText, vectors,
+        origin: row.origin || "", actorEmail: "system",
+      });
+      out.processed++;
+      out.created += result.created;
+      out.failed += result.failed;
+    }
+    await env.DB.prepare("DELETE FROM team_rechecks WHERE done_at IS NOT NULL AND done_at < ?")
+      .bind(new Date(Date.now() - 7 * 86400000).toISOString()).run();
+  } catch {
+    out.error = true;
+  }
+  return out;
 }

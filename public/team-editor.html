@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- public\team-editor.html -->
 <html lang="el">
 <head>
 <meta charset="UTF-8">
@@ -152,7 +153,7 @@
   // ---------------------------------------------------------------- κορυφή
   function renderShell(content) {
     clear(app);
-    var total = inbox ? inbox.counts.contradictions + inbox.counts.updates + inbox.counts.questions : 0;
+    var total = inbox ? inbox.counts.contradictions + inbox.counts.updates + inbox.counts.questions + (inbox.counts.feedback || 0) : 0;
     var links = [h("a", { href: "/portal.html", text: "← Πίσω στην αναζήτηση" })];
     if (me.role === "admin") links.push(h("a", { href: "/team-admin.html", text: "Διαχείριση" }));
     app.appendChild(h("div", { class: "topbar" }, [h("h1", { text: (me.workspaceName || "") + " · Editor" }), h("div", null, links)]));
@@ -268,14 +269,36 @@
     ]);
   }
 
+  var KIND_LABEL = { wrong: "δήλωσαν ότι η απάντηση είναι λάθος", outdated: "δήλωσαν ότι η πληροφορία είναι ξεπερασμένη", unclear: "δήλωσαν ότι δεν είναι σαφής" };
+  function feedbackCard(f) {
+    var msg = h("p", { class: "note", role: "status", "aria-live": "polite" });
+    var kids = [
+      h("h3", { text: "«" + f.documentTitle + "»" }),
+      h("p", { class: "status", text: f.departmentName + " · " + f.count + (f.count === 1 ? " υπάλληλος " : " υπάλληλοι ") + KIND_LABEL[f.kind] }),
+    ];
+    f.questions.forEach(function (q) { kids.push(h("div", { style: "font-size:13px;color:var(--text-soft);margin-top:4px;", text: "Ερώτηση: " + q })); });
+    f.notes.forEach(function (n) { kids.push(h("div", { style: "font-size:13.5px;margin-top:4px;", text: "• " + n })); });
+    kids.push(h("div", { class: "actions" }, [
+      h("button", { class: "btn secondary", type: "button", text: "Άνοιγμα εγγράφου", onclick: function () { openDoc(f.documentId); } }),
+      h("button", { class: "btn secondary", type: "button", text: "Κλείσιμο αναφορών", onclick: function () {
+        api("/team/inbox/feedback/close", "POST", { documentId: f.documentId, kind: f.kind }).then(function (r) {
+          if (r.status === 200) refreshInbox(); else { msg.className = "note err"; msg.textContent = errText(r); }
+        });
+      } }),
+    ]));
+    kids.push(msg);
+    return h("div", { class: "card feedback" }, kids);
+  }
+
   function renderInbox() {
-    var c = inbox ? inbox.counts : { contradictions: 0, updates: 0, questions: 0 };
+    var c = inbox ? inbox.counts : { contradictions: 0, updates: 0, questions: 0, feedback: 0 };
     var root = h("div", null);
     if (flash) { root.appendChild(h("p", { class: "note ok", role: "status", text: flash })); flash = null; }
     root.appendChild(h("div", { class: "counts" }, [
       h("div", { class: "count danger" }, [h("div", { class: "l", text: "Αντιφάσεις" }), h("div", { class: "n", text: String(c.contradictions) })]),
       h("div", { class: "count warn" }, [h("div", { class: "l", text: "Updates προς ενσωμάτωση" }), h("div", { class: "n", text: String(c.updates) })]),
       h("div", { class: "count" }, [h("div", { class: "l", text: "Αναπάντητες ερωτήσεις" }), h("div", { class: "n", text: String(c.questions) })]),
+      h("div", { class: "count warn" }, [h("div", { class: "l", text: "Αναφορές υπαλλήλων" }), h("div", { class: "n", text: String(c.feedback || 0) })]),
     ]));
 
     root.appendChild(h("h2", { class: "sec", text: "Αντιφάσεις" }));
@@ -294,6 +317,11 @@
     if (!inbox || !inbox.questions.length) qbox.appendChild(h("div", { class: "empty", text: "Καμία αναπάντητη ερώτηση." }));
     else inbox.questions.forEach(function (q) { qbox.appendChild(questionRow(q)); });
     root.appendChild(qbox);
+
+    root.appendChild(h("h2", { class: "sec", text: "Αναφορές υπαλλήλων" }));
+    root.appendChild(h("p", { class: "hint", text: "Υπάλληλοι που δήλωσαν ότι μια απάντηση βασισμένη σε έγγραφο του τμήματός σου ήταν λάθος ή ξεπερασμένη. Δεν φαίνεται ποιος." }));
+    if (!inbox || !(inbox.feedback || []).length) root.appendChild(h("div", { class: "empty", text: "Καμία αναφορά." }));
+    else inbox.feedback.forEach(function (f) { root.appendChild(feedbackCard(f)); });
     renderShell(root);
   }
 
@@ -315,7 +343,7 @@
       h("span", { class: "t", text: "+ Νέο έγγραφο" }),
     ]));
     docs.forEach(function (d) {
-      var extra = (d.editable ? "" : " · μόνο ανάγνωση") + (d.pendingUpdates ? " · " + d.pendingUpdates.count + " update" : "");
+      var extra = (d.editable ? "" : " · μόνο ανάγνωση") + (d.hidden ? " · εμπιστευτικό" : "") + (d.pendingUpdates ? " · " + d.pendingUpdates.count + " update" : "");
       list.appendChild(h("button", { class: "item" + (currentId === d.id ? " active" : ""), type: "button", onclick: function () { currentId = d.id; renderDocs(); } }, [
         h("span", { class: "t", text: d.title }), h("span", { class: "m", text: d.departmentName + extra }),
       ]));

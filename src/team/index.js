@@ -1,3 +1,4 @@
+// src\team\index.js
 // Section W: είσοδος (router) για όλα τα /team/* endpoints του "Idmon για ομάδες".
 // Καλείται από το src/index.js, στο οποίο περνάμε (deps) τις υπάρχουσες κοινές συναρτήσεις,
 // ώστε αυτός ο φάκελος να μην εισάγει ποτέ το index.js (κανένας κυκλικός δεσμός) και το
@@ -29,12 +30,16 @@ import {
 import { handleApplyUpdate, handleCreateUpdate, handleProposeMerge, handleRejectUpdate } from "./updates.js";
 import {
   handleAdminAudit,
+  handleAdminDocuments,
   handleAdminOverview,
   handleCreateDepartment,
   handleCreateMember,
+  handleHideDocument,
+  handleRunRechecks,
   handleUpdateDepartment,
   handleUpdateMember,
 } from "./admin.js";
+import { handleCloseFeedback, handleCreateFeedback } from "./feedback.js";
 
 const DOC_PATH_RE = /^\/team\/documents\/([^/]+)$/;
 const DOC_CHECK_RE = /^\/team\/documents\/([^/]+)\/check$/;
@@ -42,6 +47,7 @@ const CONTRADICTION_RE = /^\/team\/contradictions\/(\d+)\/(dismiss|remind)$/;
 const UPDATE_RE = /^\/team\/updates\/(\d+)\/(propose|apply|reject)$/;
 const ADMIN_DEPT_RE = /^\/team\/admin\/departments\/([^/]+)$/;
 const ADMIN_MEMBER_RE = /^\/team\/admin\/members\/([^/]+)$/;
+const ADMIN_DOC_RE = /^\/team\/admin\/documents\/([^/]+)$/;
 
 // Προστασία από cross-site αιτήματα: ένα αίτημα που αλλάζει κάτι πρέπει να έρχεται από
 // την ίδια προέλευση. (Το cookie είναι επιπλέον SameSite=Strict.)
@@ -114,6 +120,7 @@ export async function handleTeamRequest(request, env, url, deps, ctx) {
   }
 
   if (path === "/team/query/stream" && method === "POST") return handleTeamQuery(request, env, member, deps);
+  if (path === "/team/feedback" && method === "POST") return handleCreateFeedback(request, rc);
 
   // --- εισερχόμενα, αντιφάσεις, updates: μόνο editors και admins
   const staffPaths = path === "/team/inbox" || path.startsWith("/team/inbox/") || path.startsWith("/team/contradictions") || path.startsWith("/team/updates");
@@ -121,6 +128,7 @@ export async function handleTeamRequest(request, env, url, deps, ctx) {
 
   if (path === "/team/inbox" && method === "GET") return handleInbox(env, member);
   if (path === "/team/inbox/questions/dismiss" && method === "POST") return handleDismissQuestion(request, env, member);
+  if (path === "/team/inbox/feedback/close" && method === "POST") return handleCloseFeedback(request, rc);
 
   if (path === "/team/contradictions" && method === "GET") return handleListContradictions(env, member, url);
   const cMatch = path.match(CONTRADICTION_RE);
@@ -151,6 +159,10 @@ export async function handleTeamRequest(request, env, url, deps, ctx) {
     const mMatch = path.match(ADMIN_MEMBER_RE);
     if (mMatch && method === "PATCH") return handleUpdateMember(request, rc, decodeURIComponent(mMatch[1]));
     if (path === "/team/admin/audit" && method === "GET") return handleAdminAudit(env, member);
+    if (path === "/team/admin/documents" && method === "GET") return handleAdminDocuments(env, member);
+    const docAdminMatch = path.match(ADMIN_DOC_RE);
+    if (docAdminMatch && method === "PATCH") return handleHideDocument(request, rc, decodeURIComponent(docAdminMatch[1]));
+    if (path === "/team/admin/rechecks/run" && method === "POST") return handleRunRechecks(rc);
   }
 
   return json(404, { error: "not_found" });

@@ -1,3 +1,4 @@
+// src\team\store.js
 // Section W: κοινός κώδικας αποθήκευσης εγγράφων ομάδων (KV + Vectorize). Το έχουν όλα τα
 // υπόλοιπα αρχεία του src/team/ (έγγραφα, updates, αντιφάσεις), ώστε να μην εισάγουν το ένα το άλλο.
 //
@@ -48,8 +49,16 @@ export async function listDocIndex(env, workspaceId) {
       title: meta.title || "",
       departmentId: meta.departmentId,
       updatedAt: meta.updatedAt || null,
+      hidden: !!meta.hidden,
     };
   });
+}
+
+// Γράφει την εγγραφή ενός εγγράφου και τα metadata του KV key (τίτλος, τμήμα, ημερομηνία, εμπιστευτικό).
+export async function writeDocRecord(env, workspaceId, doc) {
+  const meta = { title: String(doc.title).slice(0, KV_META_TITLE_CHARS), departmentId: doc.departmentId, updatedAt: doc.updatedAt };
+  if (doc.hidden) meta.hidden = true;
+  await env.DOCUMENT_REGISTRY.put(docKey(workspaceId, doc.id), JSON.stringify(doc), { metadata: meta });
 }
 
 export async function readDoc(env, workspaceId, id) {
@@ -95,6 +104,7 @@ export async function persistDocument(env, deps, member, { id, title, text, depa
   const doc = {
     id,
     title,
+    hidden: existing ? !!existing.hidden : false,
     fullText: text,
     departmentId,
     status: "published",
@@ -105,9 +115,7 @@ export async function persistDocument(env, deps, member, { id, title, text, depa
     updatedBy: member.id,
     updatedAt: now,
   };
-  await env.DOCUMENT_REGISTRY.put(docKey(workspaceId, id), JSON.stringify(doc), {
-    metadata: { title: title.slice(0, KV_META_TITLE_CHARS), departmentId, updatedAt: now },
-  });
+  await writeDocRecord(env, workspaceId, doc);
   return { ok: true, id, version: doc.version, chunkCount: chunks.length, vectors, doc, textChanged };
 }
 

@@ -1,3 +1,4 @@
+// src\team\access.js
 // Section W (30 Σεπ 2026): κανόνες πρόσβασης των ομάδων ("Idmon για ομάδες").
 //
 // ΚΑΘΑΡΕΣ συναρτήσεις: καμία βάση, KV ή δίκτυο εδώ, ώστε να δοκιμάζονται εύκολα και να
@@ -62,4 +63,13 @@ export function canWriteDepartment(member, workspaceDepartments, departmentId) {
 export function vectorFilterFor(member) {
   const ids = searchDepartmentIds(member);
   return ids === null ? undefined : { department_id: { $in: [...ids] } };
+}
+
+// Ανάγνωση συγκεκριμένου εγγράφου. Ένα "εμπιστευτικό" έγγραφο (σήμανση από τον admin) το διαβάζουν μόνο ο admin και τα
+// μέλη του ΙΔΙΟΥ τμήματος, ακόμα κι αν το τμήμα είναι κανονικά ορατό σε άλλους editors. Εταιρικά έγγραφα (_all) δεν
+// μπορούν να γίνουν εμπιστευτικά (θα διέρρεαν μέσω της αναζήτησης), γι' αυτό το API δεν το επιτρέπει.
+export function canReadDocument(member, workspaceDepartments, departmentId, hidden) {
+  if (!canReadDepartment(member, workspaceDepartments, departmentId)) return false;
+  if (!hidden) return true;
+  return member.role === "admin" || (departmentId !== COMPANY_WIDE && (member.departmentIds || []).includes(departmentId));
 }

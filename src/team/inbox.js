@@ -1,3 +1,4 @@
+// src\team\inbox.js
 // Section W: εισερχόμενα του editor: (1) αντιφάσεις, (2) updates προς ενσωμάτωση, (3) αναπάντητες
 // ερωτήσεις. Οι αναπάντητες ερωτήσεις καταγράφονται από τον βοηθό ΧΩΡΙΣ ταυτότητα υπαλλήλου, μόνο
 // με τα τμήματα του ερωτώντος, ώστε ο editor κάθε τμήματος να βλέπει τις δικές του.
@@ -6,6 +7,7 @@
 import { json, sha256Hex } from "./auth.js";
 import { listUpdatesForInbox } from "./updates.js";
 import { listContradictionsFor } from "./contradictions.js";
+import { listFeedbackFor } from "./feedback.js";
 import { listAllKvKeys, normalizeText } from "./store.js";
 import { recordAudit } from "./audit.js";
 
@@ -48,16 +50,18 @@ async function listQuestionsFor(env, member) {
 }
 
 export async function handleInbox(env, member) {
-  const [contradictions, updates, questions] = await Promise.all([
+  const [contradictions, updates, questions, feedback] = await Promise.all([
     listContradictionsFor(env, member, "open"),
     listUpdatesForInbox(env, member),
     listQuestionsFor(env, member),
+    listFeedbackFor(env, member),
   ]);
   return json(200, {
-    counts: { contradictions: contradictions.length, updates: updates.length, questions: questions.length },
+    counts: { contradictions: contradictions.length, updates: updates.length, questions: questions.length, feedback: feedback.length },
     contradictions,
     updates,
     questions,
+    feedback,
   });
 }
 

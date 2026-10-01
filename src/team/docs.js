@@ -1,3 +1,4 @@
+// src\team\docs.js
 // Section W: έγγραφα ομάδων (λίστα, ανάγνωση, δημιουργία/επεξεργασία, διαγραφή), με δικαιώματα ανά ρόλο και
 // τμήμα (βλ. access.js). Η αποθήκευση εγγράφου (KV + Vectorize) ζει στο store.js.
 //
@@ -5,13 +6,14 @@
 // Το Vectorize επιτρέπει μία τιμή string ανά metadata πεδίο.
 
 import { json, loadWorkspaceDepartments } from "./auth.js";
-import { canReadDepartment, canWriteDepartment } from "./access.js";
+import { COMPANY_WIDE, canReadDocument, canWriteDepartment } from "./access.js";
 import {
   DOC_ID_RE, departmentName, docKey, listDocIndex, pendingUpdateSummary, persistDocument, readDoc,
 } from "./store.js";
 import { recordAudit } from "./audit.js";
 import { afterDocumentSaved, resolveContradictionsForDeletedDoc } from "./contradictions.js";
 import { pendingUpdatesForDocument, rejectUpdatesOfDeletedDocument } from "./updates.js";
+import { closeFeedbackForDeletedDoc } from "./feedback.js";
 
 const MAX_TITLE_CHARS = 200;
 
@@ -22,7 +24,7 @@ export async function handleListDocuments(env, member) {
   const pending = await pendingUpdateSummary(env, member.workspaceId);
   const docs = [];
   for (const d of index) {
-    if (!canReadDepartment(member, departments, d.departmentId)) continue;
+    if (!canReadDocument(member, departments, d.departmentId, d.hidden)) continue;
     const p = pending.get(d.id);
     docs.push({
       id: d.id,
@@ -31,6 +33,7 @@ export async function handleListDocuments(env, member) {
       departmentName: departmentName(departments, d.departmentId),
       updatedAt: d.updatedAt,
       editable: canWriteDepartment(member, departments, d.departmentId),
+      hidden: d.hidden,
       pendingUpdates: p ? { count: p.count, latestAt: p.latestAt } : null,
     });
   }
@@ -44,7 +47,7 @@ export async function handleGetDocument(env, member, id) {
   if (!doc) return json(404, { error: "not_found" });
   const departments = await loadWorkspaceDepartments(env, member.workspaceId);
   // Ίδια απάντηση με το "δεν υπάρχει": δεν αποκαλύπτουμε ότι ένα έγγραφο υπάρχει αν δεν το βλέπεις.
-  if (!canReadDepartment(member, departments, doc.departmentId)) return json(404, { error: "not_found" });
+  if (!canReadDocument(member, departments, doc.departmentId, doc.hidden)) return json(404, { error: "not_found" });
   const pending = await pendingUpdatesForDocument(env, member.workspaceId, id);
   return json(200, {
     id,
@@ -55,6 +58,7 @@ export async function handleGetDocument(env, member, id) {
     version: doc.version,
     updatedAt: doc.updatedAt,
     editable: canWriteDepartment(member, departments, doc.departmentId),
+    hidden: !!doc.hidden,
     pendingUpdates: pending.map((u) => ({ id: u.id, text: u.text, createdAt: u.created_at })),
   });
 }
@@ -88,6 +92,8 @@ export async function handleSaveDocument(request, rc, existingId) {
     if (!existing) return json(404, { error: "not_found" });
     // Και το ΥΠΑΡΧΟΝ τμήμα του εγγράφου πρέπει να είναι εγγράψιμο για τον χρήστη.
     if (!canWriteDepartment(member, departments, existing.departmentId)) return json(403, { error: "forbidden" });
+    // Ένα εμπιστευτικό έγγραφο δεν μεταφέρεται σε "όλη την εταιρεία" (θα γινόταν ορατό σε όλους μέσω αναζήτησης).
+    if (existing.hidden && departmentId === COMPANY_WIDE) return json(409, { error: "hidden_cannot_be_company_wide" });
     // Τα εκκρεμή updates ενός εγγράφου ακολουθούν το τμήμα του. Για να μη μείνουν vectors με λάθος
     // τμήμα (διαρροή), δεν αλλάζει τμήμα όσο υπάρχουν εκκρεμή updates.
     if (existing.departmentId !== departmentId) {
@@ -122,9 +128,9 @@ export async function handleDeleteDocument(rc, id) {
   for (let i = 0; i < (doc.chunkCount || 0); i++) ids.push(`${id}-chunk-${i}`);
   if (ids.length) await env.VECTORIZE.deleteByIds(ids);
   await rejectUpdatesOfDeletedDocument(env, member.workspaceId, id, member.id);
+  await closeFeedbackForDeletedDoc(env, member.workspaceId, id, member.id);
   await resolveContradictionsForDeletedDoc(env, member.workspaceId, id, member.id);
   await env.DOCUMENT_REGISTRY.delete(docKey(member.workspaceId, id));
   await recordAudit(env, member, "document_deleted", id, { title: String(doc.title).slice(0, 80) });
   return json(200, { ok: true });
 }
-

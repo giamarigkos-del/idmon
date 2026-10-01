@@ -1,3 +1,4 @@
+<!-- lab\README-team.md -->
 # Idmon για ομάδες: τι έχει χτιστεί (Φέτες 1-4)
 
 Πειραματικός κλάδος `team-experiment`. Ο κώδικας ζει στο `src/team/`, στις σελίδες `portal.html`, `team-editor.html`, `team-admin.html` και στα migrations 0010 και 0011. Το SMB προϊόν δεν αλλάζει (μόνο πρόσθετες αλλαγές στο `src/index.js`).
@@ -24,6 +25,13 @@
 - Έγγραφα (editor/admin): `POST /documents`, `PUT|DELETE /documents/{id}`, `POST /documents/{id}/check`
 - Εισερχόμενα (editor/admin): `GET /inbox`, `POST /inbox/questions/dismiss`, `GET /contradictions`, `POST /contradictions/{id}/dismiss|remind`, `POST /updates`, `POST /updates/{id}/propose|apply|reject`
 - Admin: `GET /admin/overview|audit`, `POST /admin/departments|members`, `PATCH /admin/departments/{id}|members/{id}`
+
+## Πακέτο 2 (1 Οκτ 2026)
+- **Αυτόματος επανέλεγχος αντιφάσεων:** κάθε αποθήκευση προγραμματίζει δεύτερο έλεγχο μετά από 3 λεπτά (cron κάθε 5 λεπτά στο lab, `[triggers]` στο `wrangler.lab.toml`). Λύνει το πρόβλημα της καθυστέρησης του Vectorize. Ο admin μπορεί να τον τρέξει αμέσως από τη καρτέλα «Έγγραφα».
+- **Ημερήσιο όριο ερωτήσεων** ανά μέλος: μεταβλητή `TEAM_DAILY_QUESTION_LIMIT` (προεπιλογή 100) και `TEAM_DAILY_FEEDBACK_LIMIT` (30). Μετράει μόνο πόσες φορές, όχι τι. Fail open αν ο μετρητής λείπει.
+- **Εμπιστευτικά έγγραφα:** ο admin σημαίνει ένα έγγραφο ως εμπιστευτικό (καρτέλα «Έγγραφα» στη διαχείριση). Το διαβάζουν μόνο admin και μέλη του ίδιου τμήματος. Έγγραφα «όλης της εταιρείας» δεν μπορούν.
+- **Αναφορές υπαλλήλων:** κάτω από κάθε απάντηση, «Είναι λάθος» / «Είναι ξεπερασμένη». Πάνε στον editor του τμήματος, ομαδοποιημένες ανά έγγραφο, χωρίς ταυτότητα.
+- Migration `0012_team_extras.sql`: ο κώδικας δουλεύει και χωρίς αυτό (τα νέα χαρακτηριστικά απλώς δεν είναι διαθέσιμα).
 
 ## Γνωστά κενά
 - Ο έλεγχος αντιφάσεων τρέχει στο publish και στο apply, ΟΧΙ πάνω σε εκκρεμή updates.

@@ -1,3 +1,4 @@
+// tests\team.test.mjs
 // Section W: αυτόματα τεστ για το "Idmon για ομάδες" + έλεγχος ότι το SMB δεν άλλαξε.
 //
 // Τρέχει τον ΠΡΑΓΜΑΤΙΚΟ Worker (src/index.js + src/team/) μέσα σε Node, με ψεύτικα (in-memory):
@@ -1199,7 +1200,7 @@ section("16. team-editor (εισερχόμενα), team-admin και portal: π�
   await readSse(await call("emp_cc@demo.gr", "POST", "/team/query/stream", { question: "Πώς δηλώνω υπερωρίες;" }));
   state.unknown = [];
   let ed = openEd("team-editor.html");
-  check("εισερχόμενα: φορτώνουν με τρεις μετρητές", !!(await waitFor(() => $$(ed, ".count").length === 3)));
+  check("εισερχόμενα: φορτώνουν με τέσσερις μετρητές", !!(await waitFor(() => $$(ed, ".count").length === 4)));
   const c0 = num(ed, ".count.danger .n");
   check("εισερχόμενα: εμφανίζονται κάρτες αντιφάσεων με επισημασμένη πρόταση", c0 > 0 && $$(ed, ".card.contradiction mark").length >= 1);
   const hiddenCard = $$(ed, ".hidden-side")[0];
@@ -1231,7 +1232,7 @@ section("16. team-editor (εισερχόμενα), team-admin και portal: π�
   click(ed, byText(ed, ".qrow", /υπερωρίες/).querySelectorAll("button")[0]); // Γράψε άρθρο
   check("«Γράψε άρθρο»: ανοίγει νέο έγγραφο με προσυμπληρωμένο τίτλο την ερώτηση", !!(await waitFor(() => $(ed, "#title") && /υπερωρίες/.test($(ed, "#title").value))));
   click(ed, $(ed, "#tab-inbox"));
-  await waitFor(() => $$(ed, ".count").length === 3);
+  await waitFor(() => $$(ed, ".count").length === 4);
   click(ed, byText(ed, ".qrow", /υπερωρίες/).querySelectorAll("button")[1]); // Παράβλεψη
   check("«Παράβλεψη»: η ερώτηση φεύγει", !!(await waitFor(() => !byText(ed, ".qrow", /υπερωρίες/))));
 
@@ -1437,6 +1438,256 @@ section("18. Βελτιώσεις: τίτλος πρότασης, μήνυμα �
   const adDom = browserFor("admin@demo.gr")("team-admin.html");
   click(adDom, await waitFor(() => $(adDom, "#tab-audit")));
   check("σελίδα ιστορικού: δείχνει «Finance» και τίτλους αντί για id", !!(await waitFor(() => /απόκρυψη τμήματος · Finance/.test(adDom.window.document.body.textContent) && /νέο έγγραφο · Δόσεις/.test(adDom.window.document.body.textContent))) && !/· fin\b/.test(adDom.window.document.body.textContent));
+}
+
+// ============================================================================ 19-23. Πακέτο 2
+const { JSDOM: JSDOMu, VirtualConsole: VCu } = await import("jsdom");
+const uiWait = async (fn, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { const v = fn(); if (v) return v; } catch { /* ξανά */ } await new Promise((r) => setTimeout(r, 15)); } return null; };
+function uiFor(email) {
+  const jar = { value: S[email] };
+  const bridge = async (input, init = {}) => {
+    const url = new URL(input, BASE); const method = init.method || "GET";
+    const headers = { "CF-Connecting-IP": `198.51.100.${(ipCounter++ % 250) + 1}`, ...(init.headers || {}) };
+    if (jar.value && url.pathname.startsWith("/team")) headers.Cookie = jar.value;
+    if (method !== "GET") headers.Origin = BASE;
+    return workerNew.fetch(new Request(url, { method, headers, body: init.body }), env);
+  };
+  return (file, query = "") => new JSDOMu(readFileSync(join(REPO, "public", file), "utf8"), { url: BASE + "/" + file + query, runScripts: "dangerously", pretendToBeVisual: true, virtualConsole: new VCu(),
+    beforeParse(w) { w.fetch = bridge; w.TextDecoder = TextDecoder; w.confirm = () => true; } });
+}
+const $u = (dom, sel) => dom.window.document.querySelector(sel);
+const $$u = (dom, sel) => [...dom.window.document.querySelectorAll(sel)];
+const clickU = (dom, el) => el.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+const byTextU = (dom, sel, re) => $$u(dom, sel).find((e) => re.test(e.textContent));
+const newDocU = async (email, title, dept, text) => (await readJson(await call(email, "POST", "/team/documents", { title, departmentId: dept, text }))).id;
+const tick = async (fn) => { const pending = []; await fn({ waitUntil: (p) => pending.push(p) }); await Promise.all(pending); };
+
+section("19. Αυτόματος επανέλεγχος αντιφάσεων (cron) και ανοχή σε ελλιπές migration");
+{
+  db.prepare("update team_rechecks set done_at = ? where done_at is null").run(new Date().toISOString()); // καθαρή ουρά: μόνο τα νέα έγγραφα
+  state.judge = null; // προσομοίωση: ο άμεσος έλεγχος δεν βρίσκει τίποτα (π.χ. το Vectorize δεν έχει προλάβει)
+  const a = await newDocU("ed_cc@demo.gr", "Παράδοση Α", "cc", "Η παράδοση γίνεται σε δύο ημέρες. PA-X");
+  const b = await newDocU("ed_cc@demo.gr", "Παράδοση Β", "cc", "Η παράδοση γίνεται σε πέντε ημέρες. PB-X");
+  const rows = db.prepare("select due_at from team_rechecks where document_id in (?, ?) and done_at is null").all(a, b);
+  check("κάθε αποθήκευση προγραμματίζει επανέλεγχο (2 έγγραφα, 2 εγγραφές)", rows.length === 2);
+  check("... λίγα λεπτά αργότερα (όχι άμεσα)", rows.every((r) => new Date(r.due_at).getTime() > Date.now() + 2 * 60 * 1000 && new Date(r.due_at).getTime() < Date.now() + 5 * 60 * 1000));
+  const topicExists = async () => (await cList("admin@demo.gr")).some((c) => c.topic === "Παράδοση");
+  check("ο άμεσος έλεγχος δεν βρήκε τίποτα", !(await topicExists()));
+  state.judge = [{ x: "δύο ημέρες", y: "πέντε ημέρες", topic: "Παράδοση" }];
+  await tick((ctx) => workerNew.scheduled({}, env, ctx));
+  check("το cron ΠΡΙΝ από την ώρα του δεν τρέχει τον επανέλεγχο", !(await topicExists()) && db.prepare("select count(*) c from team_rechecks where document_id = ? and done_at is null").get(a).c === 1);
+  db.prepare("update team_rechecks set due_at = ? where done_at is null").run(new Date(Date.now() - 1000).toISOString());
+  const mailsBefore = state.emails.length;
+  await tick((ctx) => workerNew.scheduled({}, env, ctx));
+  check("το cron όταν έρθει η ώρα: ο επανέλεγχος ΒΡΗΚΕ την αντίφαση που ο άμεσος έλεγχος έχασε", await topicExists());
+  check("... και οι εγγραφές επανελέγχου σημάνθηκαν ως ολοκληρωμένες", db.prepare("select count(*) c from team_rechecks where document_id in (?, ?) and done_at is null").get(a, b).c === 0);
+  check("... με email ειδοποίησης που έχει σύνδεσμο προς τον editor (το origin κρατήθηκε από το αρχικό request)", state.emails.slice(mailsBefore).some((e) => e.to === "ed_cc@demo.gr" && e.text.includes(`${BASE}/team-editor.html`)));
+  const countBefore = (await cList("admin@demo.gr")).filter((c) => c.topic === "Παράδοση").length;
+  await call("ed_cc@demo.gr", "PUT", `/team/documents/${b}`, { title: "Παράδοση Β", departmentId: "cc", text: "Η παράδοση γίνεται σε πέντε ημέρες. PB-X" });
+  db.prepare("update team_rechecks set due_at = ? where done_at is null").run(new Date(Date.now() - 1000).toISOString());
+  await tick((ctx) => workerNew.scheduled({}, env, ctx));
+  check("δεύτερος επανέλεγχος της ίδιας αντίφασης: ΔΕΝ δημιουργεί διπλότυπο", (await cList("admin@demo.gr")).filter((c) => c.topic === "Παράδοση").length === countBefore);
+
+  // έγγραφο που διαγράφεται πριν τον επανέλεγχο
+  const gone = await newDocU("ed_cc@demo.gr", "Προσωρινό Ε", "cc", "Κείμενο που θα φύγει. EE-X");
+  await call("ed_cc@demo.gr", "DELETE", `/team/documents/${gone}`);
+  db.prepare("update team_rechecks set due_at = ? where done_at is null").run(new Date(Date.now() - 1000).toISOString());
+  let threw = false;
+  try { await tick((ctx) => workerNew.scheduled({}, env, ctx)); } catch { threw = true; }
+  check("διαγραμμένο έγγραφο: ο επανέλεγχος το προσπερνά χωρίς σφάλμα", !threw && db.prepare("select count(*) c from team_rechecks where document_id = ? and done_at is null").get(gone).c === 0);
+
+  // χειροκίνητη εκτέλεση από τον admin
+  state.judge = null;
+  const d = await newDocU("ed_cc@demo.gr", "Ωράριο ΣΚ", "cc", "Το κατάστημα ανοίγει στις δέκα το Σάββατο. WK-X");
+  const e = await newDocU("ed_cc@demo.gr", "Ωράριο ΣΚ 2", "cc", "Το κατάστημα ανοίγει στις έντεκα το Σάββατο. WK-Y");
+  state.judge = [{ x: "στις δέκα", y: "στις έντεκα", topic: "Ωράριο ΣΚ" }];
+  check("επανέλεγχος χειροκίνητα: editor δεν έχει δικαίωμα (403)", (await call("ed_cc@demo.gr", "POST", "/team/admin/rechecks/run")).status === 403);
+  const run = await readJson(await call("admin@demo.gr", "POST", "/team/admin/rechecks/run"));
+  check("επανέλεγχος χειροκίνητα από admin: τρέχει ΤΩΡΑ και βρίσκει την αντίφαση", run.processed >= 2 && run.created >= 1 && (await cList("admin@demo.gr")).some((c) => c.topic === "Ωράριο ΣΚ"));
+  const pendingDoc = await newDocU("ed_cc@demo.gr", "Εκκρεμεί επανέλεγχος", "cc", "Έγγραφο που περιμένει τον επανέλεγχό του. PD-X");
+  const otherRun = await readJson(await call("other@other.gr", "POST", "/team/admin/rechecks/run"));
+  check("... ο admin άλλου οργανισμού ΔΕΝ τρέχει ούτε αγγίζει επανελέγχους του demo", otherRun.processed === 0 && db.prepare("select count(*) c from team_rechecks where document_id = ? and done_at is null").get(pendingDoc).c === 1);
+  await call("admin@demo.gr", "POST", "/team/admin/rechecks/run");
+  state.judge = null;
+
+  // ελλιπές migration: ο κώδικας δεν χαλά τίποτα
+  db.exec("ALTER TABLE team_rechecks RENAME TO team_rechecks_x");
+  const rOk = await call("ed_cc@demo.gr", "POST", "/team/documents", { title: "Χωρίς πίνακα", departmentId: "cc", text: "Δοκιμή χωρίς το migration 0012. NM-X" });
+  let cronThrew = false;
+  try { await tick((ctx) => workerNew.scheduled({}, env, ctx)); } catch { cronThrew = true; }
+  const runNoTable = await call("admin@demo.gr", "POST", "/team/admin/rechecks/run");
+  db.exec("ALTER TABLE team_rechecks_x RENAME TO team_rechecks");
+  check("χωρίς τον πίνακα επανελέγχων: η δημοσίευση δουλεύει κανονικά (201)", rOk.status === 201);
+  check("... το cron δεν σκάει και το admin endpoint απαντά (200)", !cronThrew && runNoTable.status === 200);
+}
+
+section("20. Ημερήσιο όριο ερωτήσεων ανά μέλος");
+{
+  env.TEAM_DAILY_QUESTION_LIMIT = "3";
+  db.prepare("delete from team_usage").run();
+  const ask = async (email) => { const r = await call(email, "POST", "/team/query/stream", { question: "Πού βρίσκεται το γραφείο;" }); const status = r.status; await r.text(); return status; };
+  const codes = [await ask("emp_cc@demo.gr"), await ask("emp_cc@demo.gr"), await ask("emp_cc@demo.gr")];
+  check("οι 3 πρώτες ερωτήσεις (όριο 3) περνούν", codes.every((c) => c === 200));
+  const over = await call("emp_cc@demo.gr", "POST", "/team/query/stream", { question: "Πού βρίσκεται το γραφείο;" });
+  const overBody = await readJson(over);
+  check("η 4η ερώτηση απορρίπτεται: 429 daily_limit με το όριο", over.status === 429 && overBody.error === "daily_limit" && overBody.limit === 3);
+  check("άλλο μέλος δεν επηρεάζεται από το όριο του πρώτου", (await ask("emp_fin@demo.gr")) === 200);
+  check("ο μετρητής κρατά ΜΟΝΟ αριθμούς (κανένα κείμενο ερώτησης)", !JSON.stringify(db.prepare("select * from team_usage").all()).includes("γραφείο"));
+  db.prepare("update team_usage set day = '2020-01-01'").run();
+  check("νέα ημέρα: το όριο μηδενίζεται", (await ask("emp_cc@demo.gr")) === 200);
+  await tick((ctx) => workerNew.scheduled({}, env, ctx));
+  check("το cron σβήνει παλιούς μετρητές (πάνω από 7 ημέρες)", db.prepare("select count(*) c from team_usage where day = '2020-01-01'").get().c === 0);
+  db.exec("ALTER TABLE team_usage RENAME TO team_usage_x");
+  const free = [await ask("emp_cc@demo.gr"), await ask("emp_cc@demo.gr"), await ask("emp_cc@demo.gr"), await ask("emp_cc@demo.gr")];
+  db.exec("ALTER TABLE team_usage_x RENAME TO team_usage");
+  check("χωρίς τον πίνακα μετρητών: το όριο ΔΕΝ εφαρμόζεται (fail open), το προϊόν δουλεύει", free.every((c) => c === 200));
+
+  // σελίδα: μήνυμα όταν φτάσεις το όριο
+  env.TEAM_DAILY_QUESTION_LIMIT = "1";
+  db.prepare("delete from team_usage").run();
+  const pe = uiFor("emp_cc@demo.gr")("portal.html");
+  const askUi = async (q) => { $u(pe, "#q").value = q; $u(pe, "form").dispatchEvent(new pe.window.Event("submit", { bubbles: true, cancelable: true })); };
+  await uiWait(() => $u(pe, "#q"));
+  await askUi("Σε πόσες ημέρες γίνεται η επιστροφή;");
+  await uiWait(() => $u(pe, ".answer .body") && $u(pe, ".answer .body").textContent.length > 5);
+  await askUi("Άλλη ερώτηση;");
+  check("σελίδα: όταν φτάσεις το όριο βλέπεις καθαρό μήνυμα για το ημερήσιο όριο", !!(await uiWait(() => $$u(pe, ".answer .body").some((b) => /ημερήσιο όριο ερωτήσεων/.test(b.textContent)))));
+  delete env.TEAM_DAILY_QUESTION_LIMIT;
+  db.prepare("delete from team_usage").run();
+}
+
+section("21. Εμπιστευτικά έγγραφα (σήμανση από τον admin)");
+{
+  state.judge = [{ x: "στις 25", y: "στις 30", topic: "Ημέρα πληρωμής" }];
+  const hid = await newDocU("ed_cc@demo.gr", "Μισθοδοσία ομάδας", "cc", "Οι μισθοί πληρώνονται στις 25 του μήνα. MS-X");
+  const titlesOf = async (email) => (await readJson(await call(email, "GET", "/team/documents"))).documents.map((x) => x.title);
+  check("πριν τη σήμανση: ο editor Finance βλέπει το έγγραφο του CC (ανάγνωση)", (await titlesOf("ed_fin@demo.gr")).includes("Μισθοδοσία ομάδας"));
+  check("σήμανση από editor: 403, από υπάλληλο: 403", (await call("ed_cc@demo.gr", "PATCH", `/team/admin/documents/${hid}`, { hidden: true })).status === 403 && (await call("emp_cc@demo.gr", "PATCH", `/team/admin/documents/${hid}`, { hidden: true })).status === 403);
+  check("άκυρο σώμα: 400, ανύπαρκτο έγγραφο: 404, άκυρο id: 404", (await call("admin@demo.gr", "PATCH", `/team/admin/documents/${hid}`, { hidden: "ναι" })).status === 400 && (await call("admin@demo.gr", "PATCH", "/team/admin/documents/doc-0000000000000000", { hidden: true })).status === 404 && (await call("admin@demo.gr", "PATCH", "/team/admin/documents/xyz", { hidden: true })).status === 404);
+  check("έγγραφο άλλου οργανισμού: 404", (await call("other@other.gr", "PATCH", `/team/admin/documents/${hid}`, { hidden: true })).status === 404);
+  const dAll = (await readJson(await call("admin@demo.gr", "GET", "/team/documents"))).documents.find((x) => x.departmentId === "_all");
+  check("εταιρικό έγγραφο (_all) δεν γίνεται εμπιστευτικό: 400", !dAll || (await call("admin@demo.gr", "PATCH", `/team/admin/documents/${dAll.id}`, { hidden: true })).status === 400);
+  check("σήμανση από admin: 200", (await call("admin@demo.gr", "PATCH", `/team/admin/documents/${hid}`, { hidden: true })).status === 200);
+  check("ΑΜΕΣΑ: ο editor Finance δεν το βλέπει ούτε στη λίστα ούτε με άμεσο id (404)", !(await titlesOf("ed_fin@demo.gr")).includes("Μισθοδοσία ομάδας") && (await call("ed_fin@demo.gr", "GET", `/team/documents/${hid}`)).status === 404);
+  const own = (await readJson(await call("ed_cc@demo.gr", "GET", "/team/documents"))).documents.find((x) => x.id === hid);
+  check("ο editor του ίδιου τμήματος το βλέπει και το επεξεργάζεται, με σήμανση", own && own.hidden === true && own.editable === true);
+  check("ο υπάλληλος του ίδιου τμήματος το βλέπει", (await titlesOf("emp_cc@demo.gr")).includes("Μισθοδοσία ομάδας"));
+  check("ο υπάλληλος του Finance και ο admin: ο admin το βλέπει, ο υπάλληλος Finance όχι", (await titlesOf("admin@demo.gr")).includes("Μισθοδοσία ομάδας") && !(await titlesOf("emp_fin@demo.gr")).includes("Μισθοδοσία ομάδας"));
+  state.prompts.length = 0;
+  await readSse(await call("emp_cc@demo.gr", "POST", "/team/query/stream", { question: "Πότε πληρώνονται οι μισθοί;" }));
+  check("ο βοηθός του ίδιου τμήματος συνεχίζει να χρησιμοποιεί το έγγραφο", /MS-X/.test(state.prompts.join("\n")));
+  check("αναφορά από άλλο τμήμα για εμπιστευτικό έγγραφο: 404 (δεν αποκαλύπτεται ότι υπάρχει)", (await call("ed_fin@demo.gr", "POST", "/team/feedback", { documentId: hid, kind: "wrong" })).status === 404);
+
+  // αντίφαση με εμπιστευτικό έγγραφο: κρύβεται όπως ένα κρυφό τμήμα
+  await newDocU("ed_fin@demo.gr", "Μισθοδοσία Finance", "fin", "Οι μισθοί πληρώνονται στις 30 του μήνα. MF-X");
+  const rawFin = await (await call("ed_fin@demo.gr", "GET", "/team/contradictions?status=open")).text();
+  const finView = JSON.parse(rawFin).contradictions.find((c) => c.sides.some((s) => s.hidden));
+  check("αντίφαση με εμπιστευτικό έγγραφο: ο editor Finance βλέπει «κρυφή» πλευρά και γενικό τίτλο", !!finView && finView.topic === "Πιθανή αντίφαση με έγγραφο κρυφού τμήματος");
+  check("... και δεν διαρρέει τίτλος, κείμενο, id ή θέμα του εγγράφου", !/Μισθοδοσία ομάδας|στις 25|MS-X|Ημέρα πληρωμής/.test(rawFin) && !rawFin.includes(hid));
+  const adminView = (await cList("admin@demo.gr")).find((c) => c.topic === "Ημέρα πληρωμής");
+  check("ο admin βλέπει και τις δύο πλευρές με το πραγματικό θέμα", adminView && adminView.sides.every((s) => !s.hidden));
+  const ccView = (await cList("ed_cc@demo.gr")).find((c) => c.topic === "Ημέρα πληρωμής");
+  check("ο editor του ίδιου τμήματος βλέπει και τις δύο πλευρές (η άλλη πλευρά, Finance, είναι ορατή)", ccView && ccView.sides.every((s) => !s.hidden));
+  state.judge = null;
+
+  // επεξεργασία και μεταφορά
+  await call("ed_cc@demo.gr", "PUT", `/team/documents/${hid}`, { title: "Μισθοδοσία ομάδας", departmentId: "cc", text: "Οι μισθοί πληρώνονται στις 25 του μήνα. MS-X Ενημερώθηκε." });
+  check("η επεξεργασία από τον editor του τμήματος ΔΕΝ αίρει την σήμανση", (await readJson(await call("ed_cc@demo.gr", "GET", `/team/documents/${hid}`))).hidden === true && !(await titlesOf("ed_fin@demo.gr")).includes("Μισθοδοσία ομάδας"));
+  check("εμπιστευτικό έγγραφο δεν μεταφέρεται σε «όλη την εταιρεία»: 409", (await call("admin@demo.gr", "PUT", `/team/documents/${hid}`, { title: "Μισθοδοσία ομάδας", departmentId: "_all", text: "Οι μισθοί πληρώνονται στις 25 του μήνα. MS-X" })).status === 409);
+
+  // επισκόπηση admin και άρση
+  const list = (await readJson(await call("admin@demo.gr", "GET", "/team/admin/documents"))).documents;
+  const mine = list.find((x) => x.id === hid);
+  check("admin: λίστα εγγράφων με σήμανση, τμήμα και ανοιχτές αντιφάσεις", mine && mine.hidden === true && mine.departmentName === "Customer Care" && mine.openContradictions >= 1);
+  check("λίστα εγγράφων admin: μόνο για admin", (await call("ed_cc@demo.gr", "GET", "/team/admin/documents")).status === 403 && !JSON.stringify((await readJson(await call("other@other.gr", "GET", "/team/admin/documents"))).documents).includes("Μισθοδοσία"));
+  check("άρση σήμανσης: 200 και ο editor Finance ξαναβλέπει το έγγραφο", (await call("admin@demo.gr", "PATCH", `/team/admin/documents/${hid}`, { hidden: false })).status === 200 && (await titlesOf("ed_fin@demo.gr")).includes("Μισθοδοσία ομάδας"));
+  check("το ιστορικό καταγράφει τη σήμανση και την άρση με τίτλο", ["document_hidden", "document_unhidden"].every((act) => (audit.__x = 1) && true) && (await (async () => { const en = await audit(); return en.some((x) => x.action === "document_hidden" && x.targetLabel === "Μισθοδοσία ομάδας") && en.some((x) => x.action === "document_unhidden"); })()));
+
+  // οθόνη admin: καρτέλα Έγγραφα
+  await call("admin@demo.gr", "PATCH", `/team/admin/documents/${hid}`, { hidden: true });
+  const ad = uiFor("admin@demo.gr")("team-admin.html");
+  clickU(ad, await uiWait(() => $u(ad, "#tab-documents")));
+  const row = await uiWait(() => byTextU(ad, ".doc-row", /Μισθοδοσία ομάδας/));
+  check("σελίδα admin: καρτέλα «Έγγραφα» με τα έγγραφα και σήμανση «εμπιστευτικό»", !!row && /εμπιστευτικό/.test(row.textContent));
+  clickU(ad, row.querySelector(".doc-hide-toggle"));
+  check("σελίδα admin: άρση σήμανσης με κλικ ισχύει αμέσως", !!(await uiWait(() => (readDocHidden(hid) === false))));
+  function readDocHidden(id) { const raw = env.DOCUMENT_REGISTRY.store.get(`team:team-demo:doc:${id}`); return raw ? !!JSON.parse(raw.value).hidden : null; }
+  clickU(ad, await uiWait(() => $u(ad, "#tab-documents")));
+  clickU(ad, await uiWait(() => $u(ad, "#run-rechecks")));
+  check("σελίδα admin: κουμπί «Εκτέλεση τώρα» για επανελέγχους δείχνει αποτέλεσμα", !!(await uiWait(() => /Ελέγχθηκαν \d+ έγγραφα/.test(ad.window.document.body.textContent))));
+  const eDom = uiFor("ed_cc@demo.gr")("team-editor.html", "");
+  clickU(eDom, await uiWait(() => $u(eDom, "#tab-docs")));
+  await call("admin@demo.gr", "PATCH", `/team/admin/documents/${hid}`, { hidden: true });
+  const eDom2 = uiFor("ed_cc@demo.gr")("team-editor.html", "");
+  clickU(eDom2, await uiWait(() => $u(eDom2, "#tab-docs")));
+  check("σελίδα editor: το εμπιστευτικό έγγραφο σημειώνεται στη λίστα", !!(await uiWait(() => byTextU(eDom2, ".item", /Μισθοδοσία ομάδας.*εμπιστευτικό/))));
+  await call("admin@demo.gr", "PATCH", `/team/admin/documents/${hid}`, { hidden: false });
+}
+
+section("22. Αναφορές υπαλλήλων (λάθος ή ξεπερασμένη απάντηση)");
+{
+  db.prepare("delete from team_usage").run();
+  const fb = (email, body) => call(email, "POST", "/team/feedback", body);
+  const target = await newDocU("ed_cc@demo.gr", "Πολιτική δώρων", "cc", "Τα δώρα πελατών δεν ξεπερνούν τα 20 €. GF-X");
+  check("αναφορά από υπάλληλο του τμήματος: 201", (await fb("emp_cc@demo.gr", { documentId: target, kind: "wrong", note: "Το όριο είναι 30 €", question: "Ποιο είναι το όριο δώρων;" })).status === 201);
+  check("δεύτερη αναφορά (άλλη σημείωση): 201", (await fb("emp_cc@demo.gr", { documentId: target, kind: "wrong", note: "Λάθος ποσό" })).status === 201);
+  check("άκυρο είδος: 400", (await fb("emp_cc@demo.gr", { documentId: target, kind: "xyz" })).status === 400);
+  check("υπερβολικά μεγάλη σημείωση: 400", (await fb("emp_cc@demo.gr", { documentId: target, kind: "wrong", note: "α".repeat(301) })).status === 400);
+  check("ανύπαρκτο ή άκυρο έγγραφο: 404", (await fb("emp_cc@demo.gr", { documentId: "doc-0000000000000000", kind: "wrong" })).status === 404 && (await fb("emp_cc@demo.gr", { documentId: "../x", kind: "wrong" })).status === 404);
+  check("έγγραφο που δεν μπορεί να διαβάσει (Finance): 404, ίδια απάντηση με το ανύπαρκτο", (await fb("emp_cc@demo.gr", { documentId: DOC.fin, kind: "wrong" })).status === 404);
+  check("χωρίς σύνδεση: 401, από άλλον οργανισμό: 404", (await req(env, workerNew, "POST", "/team/feedback", { body: { documentId: target, kind: "wrong" } })).status === 401 && (await fb("other@other.gr", { documentId: target, kind: "wrong" })).status === 404);
+
+  const inboxFb = async (email) => (await readJson(await call(email, "GET", "/team/inbox")));
+  const ccInbox = await inboxFb("ed_cc@demo.gr");
+  const grp = ccInbox.feedback.find((f) => f.documentId === target);
+  check("ο editor CC βλέπει την αναφορά ομαδοποιημένη (2 υπάλληλοι), με σημειώσεις και ερώτηση", grp && grp.count === 2 && grp.kind === "wrong" && grp.notes.length === 2 && grp.questions[0] === "Ποιο είναι το όριο δώρων;" && grp.documentTitle === "Πολιτική δώρων");
+  check("ο μετρητής εισερχομένων περιλαμβάνει τις αναφορές", ccInbox.counts.feedback === ccInbox.feedback.length && ccInbox.counts.feedback >= 1);
+  check("ο editor Finance ΔΕΝ βλέπει αναφορές για έγγραφα του CC", !(await inboxFb("ed_fin@demo.gr")).feedback.some((f) => f.documentId === target));
+  check("ο admin τις βλέπει", (await inboxFb("admin@demo.gr")).feedback.some((f) => f.documentId === target));
+  check("ο υπάλληλος δεν έχει πρόσβαση στα εισερχόμενα: 403", (await call("emp_cc@demo.gr", "GET", "/team/inbox")).status === 403);
+  const stored = JSON.stringify(db.prepare("select * from team_feedback").all());
+  check("ΔΕΝ αποθηκεύεται ταυτότητα του υπαλλήλου (κανένα email ή id μέλους)", !/@/.test(stored) && !/member/.test(Object.keys(db.prepare("select * from team_feedback limit 1").get()).join(",")));
+
+  check("κλείσιμο από editor άλλου τμήματος: 403", (await call("ed_fin@demo.gr", "POST", "/team/inbox/feedback/close", { documentId: target, kind: "wrong" })).status === 403);
+  check("κλείσιμο με άκυρα στοιχεία: 400", (await call("ed_cc@demo.gr", "POST", "/team/inbox/feedback/close", { documentId: target, kind: "x" })).status === 400);
+  check("κλείσιμο από editor του τμήματος: 200", (await call("ed_cc@demo.gr", "POST", "/team/inbox/feedback/close", { documentId: target, kind: "wrong" })).status === 200);
+  check("... οι αναφορές φεύγουν από τα εισερχόμενα και το κλείσιμο καταγράφεται", !(await inboxFb("ed_cc@demo.gr")).feedback.some((f) => f.documentId === target) && (await audit()).some((x) => x.action === "feedback_closed" && x.targetLabel === "Πολιτική δώρων"));
+
+  // ημερήσιο όριο αναφορών
+  env.TEAM_DAILY_FEEDBACK_LIMIT = "2";
+  db.prepare("delete from team_usage").run();
+  const c = [(await fb("emp_cc@demo.gr", { documentId: target, kind: "outdated" })).status, (await fb("emp_cc@demo.gr", { documentId: target, kind: "outdated" })).status, (await fb("emp_cc@demo.gr", { documentId: target, kind: "outdated" })).status];
+  check("ημερήσιο όριο αναφορών: οι 2 πρώτες περνούν, η 3η 429", c[0] === 201 && c[1] === 201 && c[2] === 429);
+  delete env.TEAM_DAILY_FEEDBACK_LIMIT;
+
+  // διαγραφή εγγράφου κλείνει τις αναφορές
+  await call("ed_cc@demo.gr", "DELETE", `/team/documents/${target}`);
+  check("όταν διαγραφεί το έγγραφο, οι αναφορές του κλείνουν", db.prepare("select count(*) c from team_feedback where document_id = ? and status = 'open'").get(target).c === 0);
+
+  // ελλιπές migration
+  db.exec("ALTER TABLE team_feedback RENAME TO team_feedback_x");
+  const noTable = await readJson(await call("ed_cc@demo.gr", "GET", "/team/inbox"));
+  const noTablePost = await fb("emp_cc@demo.gr", { documentId: DOC.cc, kind: "wrong" });
+  db.exec("ALTER TABLE team_feedback_x RENAME TO team_feedback");
+  check("χωρίς τον πίνακα αναφορών: τα εισερχόμενα δουλεύουν (feedback κενό)", noTable.counts.feedback === 0 && Array.isArray(noTable.feedback) && noTable.counts.contradictions !== undefined);
+  check("... και η αναφορά απαντά καθαρά 503, όχι σφάλμα", noTablePost.status === 503);
+
+  // σελίδες: αναφορά από τον υπάλληλο και κλείσιμο από τον editor
+  db.prepare("delete from team_usage").run();
+  const pe = uiFor("emp_cc@demo.gr")("portal.html");
+  await uiWait(() => $u(pe, "#q"));
+  $u(pe, "#q").value = "Σε πόσες ημέρες γίνεται η επιστροφή;";
+  $u(pe, "form").dispatchEvent(new pe.window.Event("submit", { bubbles: true, cancelable: true }));
+  const row = await uiWait(() => $u(pe, ".answer .feedback"));
+  check("portal: κάτω από απάντηση με πηγή εμφανίζονται κουμπιά «Είναι λάθος» / «Είναι ξεπερασμένη»", !!row && !!byTextU(pe, ".feedback button", /Είναι λάθος/) && !!byTextU(pe, ".feedback button", /Είναι ξεπερασμένη/));
+  clickU(pe, byTextU(pe, ".feedback button", /Είναι ξεπερασμένη/));
+  check("portal: το κλικ στέλνει αναφορά και δείχνει ευχαριστώ", !!(await uiWait(() => /Ευχαριστούμε/.test($u(pe, ".answer .feedback").textContent))) && db.prepare("select count(*) c from team_feedback where kind = 'outdated' and status = 'open'").get().c >= 1);
+  const ed = uiFor("ed_cc@demo.gr")("team-editor.html");
+  const card = await uiWait(() => $u(ed, ".card.feedback"));
+  check("editor: η αναφορά εμφανίζεται ως κάρτα στα Εισερχόμενα, με τέταρτο μετρητή", !!card && $$u(ed, ".count").length === 4 && /ξεπερασμένη/.test(card.textContent));
+  clickU(ed, byTextU(ed, ".card.feedback button", /Κλείσιμο αναφορών/));
+  check("editor: «Κλείσιμο αναφορών» αφαιρεί την κάρτα", !!(await uiWait(() => !$u(ed, ".card.feedback"))));
+  state.judge = null;
 }
 
 // ============================================================================ Σύνοψη

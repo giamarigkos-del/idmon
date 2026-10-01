@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- public\team-admin.html -->
 <html lang="el">
 <head>
 <meta charset="UTF-8">
@@ -55,6 +56,7 @@
   var me = null;
   var data = null; // overview
   var audit = null;
+  var docsData = null;
   var tab = "departments";
   var flash = null;
   var flashErr = null; // σφάλμα που πρέπει να επιβιώσει μετά την ανανέωση της οθόνης
@@ -89,7 +91,7 @@
   function errText(r) { return ERRORS[r.data && r.data.error] || "Κάτι πήγε στραβά."; }
   var ROLE_LABEL = { admin: "Admin", editor: "Editor", employee: "Υπάλληλος" };
   var ACTION_LABEL = {
-    login: "σύνδεση", document_created: "νέο έγγραφο", document_updated: "αλλαγή εγγράφου", document_deleted: "διαγραφή εγγράφου",
+    login: "σύνδεση", document_hidden: "σήμανση εμπιστευτικού", document_unhidden: "άρση εμπιστευτικού", feedback_closed: "κλείσιμο αναφορών υπαλλήλων", rechecks_run: "εκτέλεση επανελέγχων", document_created: "νέο έγγραφο", document_updated: "αλλαγή εγγράφου", document_deleted: "διαγραφή εγγράφου",
     update_created: "νέο update", update_applied: "ενσωμάτωση update", update_rejected: "απόρριψη update", update_proposal_generated: "πρόταση ενσωμάτωσης",
     contradiction_dismissed: "«δεν είναι αντίφαση»", contradiction_reminder: "υπενθύμιση αντίφασης", contradiction_check: "έλεγχος αντιφάσεων",
     contradiction_check_failed: "αποτυχία ελέγχου αντιφάσεων", department_created: "νέο τμήμα", department_renamed: "μετονομασία τμήματος",
@@ -99,6 +101,7 @@
 
   function load() {
     return api("/team/admin/overview").then(function (r) { if (r.status === 200) data = r.data; })
+      .then(function () { return api("/team/admin/documents"); }).then(function (r) { if (r.status === 200) docsData = r.data; })
       .then(function () { return api("/team/admin/audit"); }).then(function (r) { if (r.status === 200) audit = r.data; })
       .then(render);
   }
@@ -109,7 +112,7 @@
       h("h1", { text: (me.workspaceName || "") + " · Διαχείριση" }),
       h("div", null, [h("a", { href: "/team-editor.html", text: "Εισερχόμενα και έγγραφα" }), h("a", { href: "/portal.html", text: "← Αναζήτηση" })]),
     ]));
-    var tabs = [["departments", "Τμήματα"], ["members", "Μέλη"], ["audit", "Ιστορικό ενεργειών"]];
+    var tabs = [["departments", "Τμήματα"], ["documents", "Έγγραφα"], ["members", "Μέλη"], ["audit", "Ιστορικό ενεργειών"]];
     app.appendChild(h("div", { class: "tabs", role: "tablist" }, tabs.map(function (t) {
       return h("button", { class: "tab" + (tab === t[0] ? " active" : ""), type: "button", role: "tab", id: "tab-" + t[0], text: t[1],
         onclick: function () { tab = t[0]; render(); } });
@@ -214,6 +217,42 @@
     return box;
   }
 
+  // ---------------------------------------------------------------- έγγραφα
+  function documentsView() {
+    var box = h("div", { class: "card" }, [
+      h("h2", { text: "Έγγραφα" }),
+      h("p", { class: "hint", text: "Ένα εμπιστευτικό έγγραφο το διαβάζουν μόνο οι admins και τα μέλη του ίδιου τμήματος. Οι editors άλλων τμημάτων δεν το βλέπουν, και μια αντίφαση μαζί του τους εμφανίζεται χωρίς περιεχόμενο. Έγγραφα «όλης της εταιρείας» δεν μπορούν να γίνουν εμπιστευτικά." }),
+    ]);
+    var msg = h("p", { class: "note", role: "status", "aria-live": "polite" });
+    var docs = (docsData && docsData.documents) || [];
+    if (!docs.length) box.appendChild(h("div", { class: "hint", text: "Κανένα έγγραφο ακόμα." }));
+    docs.forEach(function (d) {
+      var toggle = h("button", { class: "btn secondary doc-hide-toggle", type: "button", text: d.hidden ? "Άρση εμπιστευτικού" : "Σήμανση ως εμπιστευτικό", onclick: function () {
+        api("/team/admin/documents/" + encodeURIComponent(d.id), "PATCH", { hidden: !d.hidden }).then(function (r) {
+          if (r.status === 200) { flash = d.hidden ? "Το έγγραφο δεν είναι πια εμπιστευτικό." : "Το έγγραφο είναι πλέον εμπιστευτικό."; load(); }
+          else { flashErr = r.data && r.data.error === "company_wide_cannot_hide" ? "Έγγραφα όλης της εταιρείας δεν μπορούν να γίνουν εμπιστευτικά." : errText(r); load(); }
+        });
+      } });
+      var bits = d.departmentName + (d.pendingUpdates ? " · " + d.pendingUpdates + " update" : "") + (d.openContradictions ? " · " + d.openContradictions + " αντιφάσεις" : "");
+      box.appendChild(h("div", { class: "row doc-row" }, [
+        h("div", null, [h("span", { class: "name", text: d.title }), d.hidden ? h("span", { class: "pill hid", text: " εμπιστευτικό" }) : null, h("div", { class: "meta", text: bits })]),
+        h("div", { class: "controls" }, [toggle]),
+      ]));
+    });
+    box.appendChild(h("div", { class: "row" }, [
+      h("div", null, [h("span", { class: "name", text: "Επανέλεγχος αντιφάσεων" }), h("div", { class: "meta", text: "Μετά από κάθε δημοσίευση προγραμματίζεται αυτόματα δεύτερος έλεγχος σε λίγα λεπτά. Εδώ μπορείς να τον τρέξεις αμέσως." })]),
+      h("div", { class: "controls" }, [h("button", { class: "btn secondary", id: "run-rechecks", type: "button", text: "Εκτέλεση τώρα", onclick: function () {
+        msg.className = "note"; msg.textContent = "Εκτέλεση…";
+        api("/team/admin/rechecks/run", "POST").then(function (r) {
+          if (r.status === 200) { msg.className = "note ok"; msg.textContent = "Ελέγχθηκαν " + r.data.processed + " έγγραφα, βρέθηκαν " + r.data.created + " νέες αντιφάσεις."; }
+          else { msg.className = "note err"; msg.textContent = errText(r); }
+        });
+      } })]),
+    ]));
+    box.appendChild(msg);
+    return box;
+  }
+
   // ---------------------------------------------------------------- ιστορικό
   function auditView() {
     var box = h("div", { class: "card" }, [
@@ -233,7 +272,7 @@
 
   function render() {
     if (!data) return;
-    shell(tab === "departments" ? departmentsView() : tab === "members" ? membersView() : auditView());
+    shell(tab === "departments" ? departmentsView() : tab === "documents" ? documentsView() : tab === "members" ? membersView() : auditView());
   }
 
   api("/team/me").then(function (r) {

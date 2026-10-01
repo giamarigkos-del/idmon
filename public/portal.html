@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- public\portal.html -->
 <html lang="el">
 <head>
 <meta charset="UTF-8">
@@ -96,6 +97,24 @@
         else node.appendChild(document.createTextNode(part));
       });
     });
+  }
+  // Αναφορά προς τον υπεύθυνο του τμήματος: "η απάντηση είναι λάθος / ξεπερασμένη". Δεν στέλνεται ταυτότητα, μόνο το
+  // έγγραφο-πηγή, το είδος και η ερώτηση.
+  function feedbackRow(documentId, question) {
+    var row = h("div", { class: "feedback", style: "display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:12.5px;color:var(--text-soft);" });
+    function send(kind) {
+      fetch("/team/feedback", {
+        method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ documentId: documentId, kind: kind, question: String(question).slice(0, 300) }),
+      }).then(function (r) {
+        row.textContent = r.status === 201 ? "Ευχαριστούμε. Το είδε ο υπεύθυνος του τμήματος."
+          : r.status === 429 ? "Έχεις στείλει πολλές αναφορές σήμερα." : "Δεν στάλθηκε. Δοκίμασε ξανά.";
+      }).catch(function () { row.textContent = "Δεν στάλθηκε. Δοκίμασε ξανά."; });
+    }
+    row.appendChild(h("span", { text: "Ήταν σωστή η απάντηση;" }));
+    row.appendChild(h("button", { class: "linkbtn", type: "button", text: "Είναι λάθος", onclick: function () { send("wrong"); } }));
+    row.appendChild(h("button", { class: "linkbtn", type: "button", text: "Είναι ξεπερασμένη", onclick: function () { send("outdated"); } }));
+    return row;
   }
   function h(tag, props, children) {
     var node = document.createElement(tag);
@@ -295,6 +314,7 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question: question, history: chatHistory.slice(-6) }),
     }).then(function (res) {
+      if (res.status === 429) { body.textContent = "Έφτασες το ημερήσιο όριο ερωτήσεων. Δοκίμασε αύριο ή ρώτα τον υπεύθυνο του τμήματός σου."; return null; }
       if (res.status === 401) { renderLogin("Η σύνδεσή σου έληξε. Ζήτησε νέο σύνδεσμο.", "err"); return null; }
       if (!res.ok || !res.body) throw new Error("bad response");
       var reader = res.body.getReader();
@@ -326,6 +346,7 @@
               h("span", { text: "Πηγή: " + (s.title || "έγγραφο") + " · " + s.departmentName + (s.isUpdate ? " (πρόσφατη ενημέρωση)" : "") }),
               h("button", { class: "linkbtn", type: "button", text: "Άνοιγμα άρθρου", onclick: function () { openDocument(s.documentId); } }),
             ]));
+            box.appendChild(feedbackRow(s.documentId, question));
           }
           box.appendChild(h("p", { class: "handoff", text: "Δεν βρήκες αυτό που έψαχνες; Ρώτα τον υπεύθυνο του τμήματος." }));
           chatHistory.push({ role: "user", text: question }, { role: "assistant", text: text });

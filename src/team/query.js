@@ -1,3 +1,4 @@
+// src\team\query.js
 // Section W: ερωτήσεις υπαλλήλων προς τον βοηθό. ΙΔΙΟ pipeline με το SMB (embedding ->
 // semantic search -> Gemini, streaming με εφεδρεία), αλλά με ΑΠΑΡΑΒΙΑΣΤΟ φίλτρο τμήματος.
 //
@@ -10,6 +11,7 @@
 import { json, loadWorkspaceDepartments } from "./auth.js";
 import { COMPANY_WIDE, searchDepartmentIds, vectorFilterFor } from "./access.js";
 import { docKey } from "./store.js";
+import { DEFAULT_DAILY_QUESTIONS, consumeQuota } from "./quota.js";
 
 const MAX_QUESTION_CHARS = 1000;
 const FALLBACK_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 ημέρες
@@ -72,6 +74,11 @@ export async function handleTeamQuery(request, env, member, deps) {
   if (!question) return json(400, { error: "question_required" });
   if (question.length > MAX_QUESTION_CHARS) return json(400, { error: "question_too_long" });
   const history = deps.sanitizeHistory(body.history);
+
+  // Ημερήσιο όριο ερωτήσεων ανά μέλος (έλεγχος κόστους LLM). Fail open αν ο μετρητής δεν είναι διαθέσιμος.
+  const dailyLimit = parseInt(env.TEAM_DAILY_QUESTION_LIMIT, 10) || DEFAULT_DAILY_QUESTIONS;
+  const quota = await consumeQuota(env, member.id, "question", dailyLimit);
+  if (!quota.ok) return json(429, { error: "daily_limit", limit: dailyLimit });
 
   const departments = await loadWorkspaceDepartments(env, member.workspaceId);
   const allowed = searchDepartmentIds(member); // null = όλα (admin)

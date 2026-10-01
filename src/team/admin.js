@@ -1,3 +1,4 @@
+// src\team\admin.js
 // Section W (Φέτα 4): διαχείριση ομάδας από τον admin: τμήματα (δημιουργία, μετονομασία, κρυφό),
 // μέλη (πρόσκληση, ρόλος, τμήματα, απενεργοποίηση) και ιστορικό ενεργειών.
 // ΟΛΑ τα endpoints είναι μόνο για admin και δουλεύουν πάντα μέσα στο workspace του admin.
@@ -5,8 +6,9 @@
 
 import { json, loadWorkspaceDepartments, normalizeEmail } from "./auth.js";
 import { AUDIT_RETENTION_DAYS, recordAudit } from "./audit.js";
-import { listDocIndex } from "./store.js";
-import { ROLES } from "./access.js";
+import { COMPANY_WIDE, ROLES } from "./access.js";
+import { DOC_ID_RE, departmentName, listDocIndex, pendingUpdateSummary, readDoc, writeDocRecord } from "./store.js";
+import { runDueRechecks } from "./contradictions.js";
 
 const MAX_NAME_CHARS = 80;
 const AUDIT_PAGE_SIZE = 100;
@@ -238,4 +240,57 @@ function safeParse(s) {
   } catch {
     return null;
   }
+}
+
+// ------------------------------------------------------------------ έγγραφα (επισκόπηση και "εμπιστευτικά")
+// GET /team/admin/documents: όλα τα έγγραφα, με τμήμα, σήμανση εμπιστευτικού, εκκρεμή updates και ανοιχτές αντιφάσεις.
+export async function handleAdminDocuments(env, member) {
+  const departments = await loadWorkspaceDepartments(env, member.workspaceId);
+  const index = await listDocIndex(env, member.workspaceId);
+  const pending = await pendingUpdateSummary(env, member.workspaceId);
+  const open = new Map();
+  try {
+    const res = await env.DB.prepare("SELECT doc_a, doc_b FROM team_contradictions WHERE workspace_id = ? AND status = 'open'").bind(member.workspaceId).all();
+    for (const r of (res && res.results) || []) for (const id of [r.doc_a, r.doc_b]) open.set(id, (open.get(id) || 0) + 1);
+  } catch {
+    /* χωρίς πίνακα: μηδενικά */
+  }
+  return json(200, {
+    documents: index
+      .map((d) => ({
+        id: d.id, title: d.title, departmentId: d.departmentId, departmentName: departmentName(departments, d.departmentId),
+        hidden: d.hidden, updatedAt: d.updatedAt,
+        pendingUpdates: (pending.get(d.id) || { count: 0 }).count, openContradictions: open.get(d.id) || 0,
+      }))
+      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))),
+  });
+}
+
+// PATCH /team/admin/documents/{id}  {hidden: boolean}: σήμανση "εμπιστευτικό" (μόνο admin και μέλη του τμήματος το διαβάζουν).
+export async function handleHideDocument(request, rc, id) {
+  const { env, member } = rc;
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json(400, { error: "invalid_json" });
+  }
+  if (typeof body.hidden !== "boolean") return json(400, { error: "invalid_hidden" });
+  if (!DOC_ID_RE.test(id)) return json(404, { error: "not_found" });
+  const doc = await readDoc(env, member.workspaceId, id);
+  if (!doc) return json(404, { error: "not_found" });
+  if (body.hidden && doc.departmentId === COMPANY_WIDE) return json(400, { error: "company_wide_cannot_hide" });
+  if (!!doc.hidden === body.hidden) return json(200, { ok: true });
+  doc.hidden = body.hidden;
+  await writeDocRecord(env, member.workspaceId, doc);
+  await recordAudit(env, member, body.hidden ? "document_hidden" : "document_unhidden", id, { title: String(doc.title).slice(0, 80) });
+  return json(200, { ok: true });
+}
+
+// POST /team/admin/rechecks/run: τρέχει ΤΩΡΑ τους εκκρεμείς επανελέγχους αντιφάσεων του οργανισμού (αντί να περιμένει το cron).
+export async function handleRunRechecks(rc) {
+  const { env, deps, member } = rc;
+  const out = await runDueRechecks(env, deps, { force: true, workspaceId: member.workspaceId });
+  await recordAudit(env, member, "rechecks_run", null, { processed: out.processed, created: out.created });
+  return json(200, out);
 }

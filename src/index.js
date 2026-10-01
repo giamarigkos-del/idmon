@@ -1,3 +1,4 @@
+// src\index.js
 import { argon2id, argon2Verify, setWASMModules } from "argon2-wasm-edge";
 // Section R: το Cloudflare Workers runtime απαγορεύει δυναμικό
 // WebAssembly.compile() την ώρα του request ("Wasm code generation
@@ -10,6 +11,7 @@ import blake2bWASM from "argon2-wasm-edge/wasm/blake2b.wasm";
 setWASMModules({ argon2WASM, blake2bWASM });
 // Section W: "Idmon για ομάδες" (εσωτερικό portal). Όλος ο νέος κώδικας ζει στο src/team/.
 import { handleTeamRequest } from "./team/index.js";
+import { runTeamMaintenance } from "./team/maintenance.js";
 
 const CHUNK_SIZE = 300;
 const CHUNK_OVERLAP = 30;
@@ -4651,6 +4653,10 @@ const TEAM_DEPS = {
 };
 
 export default {
+  // Cron (μόνο όπου έχει οριστεί [triggers] crons, π.χ. στο lab "Idmon για ομάδες"): επανέλεγχοι αντιφάσεων.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runTeamMaintenance(env, TEAM_DEPS));
+  },
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
