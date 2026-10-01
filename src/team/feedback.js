@@ -33,7 +33,7 @@ export async function handleCreateFeedback(request, rc) {
   const doc = await readDoc(env, member.workspaceId, documentId);
   const departments = await loadWorkspaceDepartments(env, member.workspaceId);
   // Ίδια απάντηση με το "δεν υπάρχει": δεν αποκαλύπτεται ότι ένα έγγραφο υπάρχει αν δεν το βλέπεις.
-  if (!doc || !canReadDocument(member, departments, doc.departmentId, doc.hidden)) return json(404, { error: "not_found" });
+  if (!doc || !canReadDocument(member, departments, doc.departmentId, doc.hidden, doc.audienceProjectIds)) return json(404, { error: "not_found" });
 
   const limit = parseInt(env.TEAM_DAILY_FEEDBACK_LIMIT, 10) || DEFAULT_DAILY_FEEDBACK;
   const quota = await consumeQuota(env, member.id, "feedback", limit);

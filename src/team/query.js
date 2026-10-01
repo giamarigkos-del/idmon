@@ -3,19 +3,42 @@
 // semantic search -> Gemini, streaming με εφεδρεία), αλλά με ΑΠΑΡΑΒΙΑΣΤΟ φίλτρο τμήματος.
 //
 // Το φίλτρο εφαρμόζεται ΔΥΟ φορές (άμυνα σε βάθος):
-//   (1) μέσα στο ερώτημα προς το Vectorize (φίλτρο metadata department_id, ΠΡΙΝ το topK),
-//   (2) ξανά στον κώδικα, πάνω στα αποτελέσματα, ΠΡΙΝ φτιαχτεί το context για το LLM.
-// Vector χωρίς department_id απορρίπτεται πάντα (fail closed). Το LLM δεν βλέπει ποτέ
+//   (1) μέσα στο ερώτημα προς το Vectorize (φίλτρο metadata department_id = project ή ομάδα ακροατηρίου, ΠΡΙΝ το topK). Αν η λίστα δεν
+//       χωράει σε ένα φίλτρο (όριο 2048 bytes), σπάει σε παρτίδες με παράλληλα ερωτήματα, ενωμένα με βάση το score,
+//   (2) ξανά, ΑΥΘΕΝΤΙΚΑ στη βάση ανά έγγραφο (ιδιοκτήτης, ακροατήριο, εμπιστευτικό), ΠΡΙΝ φτιαχτεί το context για το LLM.
+// Vector χωρίς department_id ή με έγγραφο που δεν υπάρχει στη βάση απορρίπτεται πάντα (fail closed). Το LLM δεν βλέπει ποτέ
 // κείμενο που ο χρήστης δεν δικαιούται -- ό,τι δεν ανακτήθηκε δεν μπορεί να διαρρεύσει.
 
 import { json, loadWorkspaceDepartments } from "./auth.js";
-import { COMPANY_WIDE, searchDepartmentIds, vectorFilterFor } from "./access.js";
-import { readDoc } from "./store.js";
+import { COMPANY_WIDE, buildVectorFilters, canReadDocument } from "./access.js";
+import { audienceGroupsForMember, documentAccessInfo, readDoc } from "./store.js";
 import { DEFAULT_DAILY_QUESTIONS, consumeQuota } from "./quota.js";
 
 const MAX_QUESTION_CHARS = 1000;
 const FALLBACK_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 ημέρες
 const NO_MATCH_ANSWER = "Δεν βρέθηκε σχετική διαδικασία στα έγγραφα που έχεις πρόσβαση.";
+// Όταν ένα μέλος ανήκει σε τόσα projects και ακροατήρια που ούτε οι παρτίδες φίλτρου δεν αρκούν: ρητό μήνυμα, όχι σιωπηλή αποκοπή.
+export const TOO_MANY_PROJECTS_ANSWER = "Ο λογαριασμός σου ανήκει σε πάρα πολλά projects και ο βοηθός δεν μπορεί να ψάξει σε όλα. Ζήτησε από τον admin να μειώσει τα projects σου.";
+
+// Ένωση των αποτελεσμάτων των παρτίδων: ταξινόμηση με βάση το score και κόψιμο στο μέγεθος που θα είχε ένα μόνο ερώτημα.
+// Το topK του retrieveMatches δεν είναι γνωστό εδώ. Αν κάποια παρτίδα επέστρεψε "γεμάτη", αυτό είναι το μέγεθος. Αλλιώς (λίγα έγγραφα σε κάθε
+// παρτίδα) κρατάμε τουλάχιστον MIN_MERGED_MATCHES, ώστε να μη χαθούν σχετικά αποτελέσματα από διαφορετικές παρτίδες.
+const MIN_MERGED_MATCHES = 5;
+function mergeMatches(results) {
+  const lists = results.map((r) => (r && r.matches) || []);
+  if (lists.length === 1) return lists[0];
+  const limit = Math.max(MIN_MERGED_MATCHES, ...lists.map((l) => l.length));
+  const seen = new Set();
+  const out = [];
+  for (const m of lists.flat().sort((a, b) => b.score - a.score)) {
+    const meta = m.metadata || {};
+    const key = m.id || `${meta.documentId}|${meta.chunkIndex}|${meta.updateId || ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(m);
+  }
+  return out.slice(0, limit);
+}
 
 function isFallbackAnswer(answer) {
   const a = answer.toLowerCase();
@@ -81,20 +104,32 @@ export async function handleTeamQuery(request, env, member, deps) {
   if (!quota.ok) return json(429, { error: "daily_limit", limit: dailyLimit });
 
   const departments = await loadWorkspaceDepartments(env, member.workspaceId);
-  const allowed = searchDepartmentIds(member); // null = όλα (admin)
-  const filter = vectorFilterFor(member); // undefined = χωρίς φίλτρο (admin)
+  const isAdmin = member.role === "admin";
+  // Οι ομάδες ακροατηρίου που αφορούν το μέλος (άδειο αν λείπει το migration 0015) και το φίλτρο σε παρτίδες.
+  const groupIds = isAdmin ? [] : await audienceGroupsForMember(env, member);
+  const { filters, tooMany } = buildVectorFilters(member, groupIds); // admin: ένα ερώτημα χωρίς φίλτρο
   const workspaceId = member.workspaceId;
 
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const found = await deps.retrieveMatches(env, workspaceId, question, history, filter);
-        let matches = (found && found.matches) || [];
-        // (2) δεύτερος έλεγχος στον κώδικα, fail closed
-        if (allowed !== null) {
-          matches = matches.filter(
-            (m) => m.metadata && typeof m.metadata.department_id === "string" && allowed.has(m.metadata.department_id)
-          );
+        if (tooMany) {
+          // Δεν ψάχνουμε καθόλου (fail closed) και ΔΕΝ το καταγράφουμε ως αναπάντητη ερώτηση: δεν φταίει το περιεχόμενο.
+          controller.enqueue(deps.encodeSSE({ type: "chunk", text: TOO_MANY_PROJECTS_ANSWER }));
+          controller.enqueue(deps.encodeSSE({ type: "done", isFallback: true, primarySource: null, relatedSections: [] }));
+          controller.close();
+          return;
+        }
+        const found = await Promise.all(filters.map((f) => deps.retrieveMatches(env, workspaceId, question, history, f)));
+        let matches = mergeMatches(found);
+        // (2) δεύτερος έλεγχος, ΑΥΘΕΝΤΙΚΑ στη βάση ανά έγγραφο, fail closed
+        if (!isAdmin) {
+          matches = matches.filter((m) => m.metadata && typeof m.metadata.department_id === "string" && typeof m.metadata.documentId === "string");
+          const info = await documentAccessInfo(env, workspaceId, matches.map((m) => m.metadata.documentId));
+          matches = matches.filter((m) => {
+            const d = info.get(m.metadata.documentId);
+            return !!d && canReadDocument(member, departments, d.departmentId, d.hidden, d.audienceProjectIds);
+          });
         }
 
         matches = await dropInactiveUpdates(env, workspaceId, matches);
@@ -130,7 +165,8 @@ export async function handleTeamQuery(request, env, member, deps) {
         let primarySource = null;
         if (!isFallback) {
           const doc = (await readDoc(env, workspaceId, top.metadata.documentId)) || {};
-          const deptId = top.metadata.department_id;
+          // Το department_id των vectors είναι πλέον id ΟΜΑΔΑΣ ακροατηρίου. Ο ιδιοκτήτης του εγγράφου έρχεται από τη βάση.
+          const deptId = doc.departmentId || top.metadata.department_id;
           const dept = departments.find((d) => d.id === deptId);
           primarySource = {
             documentId: top.metadata.documentId,

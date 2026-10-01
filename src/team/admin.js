@@ -9,8 +9,9 @@
 import { json, loadWorkspaceDepartments, normalizeEmail } from "./auth.js";
 import { AUDIT_RETENTION_DAYS, recordAudit } from "./audit.js";
 import { COMPANY_WIDE, ROLES } from "./access.js";
-import { DOC_ID_RE, departmentName, listDocIndex, pendingUpdateSummary, readDoc, writeDocRecord } from "./store.js";
+import { DOC_ID_RE, departmentName, listDocIndex, pendingUpdateSummary, readDoc, resetDocumentAudience, writeDocRecord } from "./store.js";
 import { runDueRechecks } from "./contradictions.js";
+import { pendingUpdatesForDocument } from "./updates.js";
 
 const MAX_NAME_CHARS = 80;
 const AUDIT_PAGE_SIZE = 100;
@@ -178,7 +179,17 @@ export async function handleUpdateDepartment(request, rc, id) {
   await env.DB.prepare("UPDATE departments SET name = ?, hidden = ? WHERE id = ?")
     .bind(changes.name !== undefined ? changes.name : dept.name, changes.hidden !== undefined ? changes.hidden : dept.hidden, id).run();
   if (changes.name !== undefined) await recordAudit(env, member, "department_renamed", id, { from: dept.name, to: changes.name });
-  if (changes.hidden !== undefined) await recordAudit(env, member, changes.hidden ? "department_hidden" : "department_unhidden", id, { name: dept.name });
+  let sharedReset = 0;
+  if (changes.hidden === 1 && !dept.hidden) {
+    // Ένα κρυφό project δεν μοιράζει έγγραφα: το ακροατήριο των εγγράφων του επιστρέφει σε "μόνο μέλη του project".
+    for (const d of (await listDocIndex(env, member.workspaceId)).filter((x) => x.departmentId === id && x.audienceGroupId)) {
+      const doc = await readDoc(env, member.workspaceId, d.id);
+      if (doc && (await resetDocumentAudience(env, member.workspaceId, doc, await pendingUpdatesForDocument(env, member.workspaceId, d.id))).changed) sharedReset++;
+    }
+  }
+  if (changes.hidden !== undefined) {
+    await recordAudit(env, member, changes.hidden ? "department_hidden" : "department_unhidden", id, sharedReset ? { name: dept.name, sharedReset } : { name: dept.name });
+  }
   return json(200, { ok: true });
 }
 
@@ -345,7 +356,7 @@ export async function handleAdminDocuments(env, member) {
     documents: index
       .map((d) => ({
         id: d.id, title: d.title, departmentId: d.departmentId, departmentName: departmentName(departments, d.departmentId),
-        hidden: d.hidden, updatedAt: d.updatedAt,
+        hidden: d.hidden, updatedAt: d.updatedAt, audienceProjectIds: d.audienceProjectIds,
         pendingUpdates: (pending.get(d.id) || { count: 0 }).count, openContradictions: open.get(d.id) || 0,
       }))
       .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))),
@@ -369,7 +380,12 @@ export async function handleHideDocument(request, rc, id) {
   if (!!doc.hidden === body.hidden) return json(200, { ok: true });
   doc.hidden = body.hidden;
   await writeDocRecord(env, member.workspaceId, doc);
-  await recordAudit(env, member, body.hidden ? "document_hidden" : "document_unhidden", id, { title: String(doc.title).slice(0, 80) });
+  // Ένα εμπιστευτικό έγγραφο δεν έχει ακροατήριο: επιστρέφει σε "μόνο μέλη του ιδιοκτήτη" (πρώτα η βάση, μετά τα vectors).
+  let audienceReset = false;
+  if (body.hidden && doc.audienceGroupId) {
+    audienceReset = (await resetDocumentAudience(env, member.workspaceId, doc, await pendingUpdatesForDocument(env, member.workspaceId, id))).changed;
+  }
+  await recordAudit(env, member, body.hidden ? "document_hidden" : "document_unhidden", id, audienceReset ? { title: String(doc.title).slice(0, 80), audienceReset: true } : { title: String(doc.title).slice(0, 80) });
   return json(200, { ok: true });
 }
 

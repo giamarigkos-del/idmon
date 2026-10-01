@@ -27,13 +27,14 @@ export async function questionHash(question) {
 
 async function listQuestionsFor(env, member) {
   const keys = (await listAllKvKeys(env, fallbackPrefix(member.workspaceId))).slice(0, MAX_QUESTION_KEYS);
-  const own = new Set(member.departmentIds || []);
+  // editor: μόνο ερωτήσεις υπαλλήλων των projects όπου είναι ΡΗΤΑ editor (όχι όσων είναι απλό μέλος).
+  const own = new Set(member.editorProjectIds || []);
   const groups = new Map(); // hash -> { question, count, lastAt }
   for (const k of keys) {
     const meta = k.metadata || {};
     if (typeof meta.q !== "string" || !meta.q) continue;
     const depts = Array.isArray(meta.d) ? meta.d : [];
-    // admin: όλα. editor: μόνο ερωτήσεις υπαλλήλων των δικών του τμημάτων.
+    // admin: όλα. editor: μόνο ερωτήσεις υπαλλήλων των projects όπου είναι editor.
     if (member.role !== "admin" && !depts.some((d) => own.has(d))) continue;
     const hash = await questionHash(meta.q);
     const g = groups.get(hash) || { hash, question: meta.q, count: 0, lastAt: "" };

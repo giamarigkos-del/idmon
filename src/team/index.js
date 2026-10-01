@@ -58,11 +58,12 @@ function sameOrigin(request, url) {
   return !origin || origin === url.origin;
 }
 
-// Τμήματα ορατά στο μέλος (για επιλογείς και ετικέτες).
+// Τμήματα ορατά στο μέλος (για επιλογείς και ετικέτες): ο admin όλα, οι άλλοι ΜΟΝΟ τα δικά τους projects (σε ένα BPO τα ονόματα των
+// άλλων projects είναι ονόματα πελατών).
 function visibleDepartments(member, all) {
   if (member.role === "admin") return all;
   const own = new Set(member.departmentIds);
-  return all.filter((d) => own.has(d.id) || (member.role === "editor" && !d.hidden));
+  return all.filter((d) => own.has(d.id));
 }
 
 const isStaff = (member) => member.role === "editor" || member.role === "admin";

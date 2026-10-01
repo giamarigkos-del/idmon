@@ -92,10 +92,23 @@ async function editorEmails(env, workspaceId, departmentIds) {
   const ids = [...departmentIds].filter((d) => d && d !== COMPANY_WIDE);
   if (!ids.length) return [];
   const marks = ids.map(() => "?").join(",");
-  const res = await env.DB.prepare(
-    `SELECT DISTINCT m.email FROM team_members m JOIN member_departments md ON md.member_id = m.id
-      WHERE m.workspace_id = ? AND m.role = 'editor' AND m.status = 'active' AND md.department_id IN (${marks})`
-  ).bind(workspaceId, ...ids).all();
+  let res;
+  try {
+    // Μόνο ΡΗΤΟΙ editors του project: μέλος που είναι editor ΣΕ ΑΥΤΟ το project (όχι όποιος είναι editor κάπου αλλού).
+    res = await env.DB.prepare(
+      `SELECT DISTINCT m.email FROM team_members m
+         JOIN team_project_editors e ON e.member_id = m.id
+         JOIN member_departments md ON md.member_id = m.id AND md.department_id = e.project_id
+        WHERE m.workspace_id = ? AND m.status = 'active' AND e.project_id IN (${marks})`
+    ).bind(workspaceId, ...ids).all();
+  } catch (err) {
+    if (!/no such table/i.test(String((err && err.message) || err))) throw err;
+    // migration 0014 δεν έχει εφαρμοστεί: παλιό μοντέλο (ένας ρόλος ανά άνθρωπο)
+    res = await env.DB.prepare(
+      `SELECT DISTINCT m.email FROM team_members m JOIN member_departments md ON md.member_id = m.id
+        WHERE m.workspace_id = ? AND m.role = 'editor' AND m.status = 'active' AND md.department_id IN (${marks})`
+    ).bind(workspaceId, ...ids).all();
+  }
   return ((res && res.results) || []).map((r) => r.email);
 }
 
@@ -271,7 +284,7 @@ function viewFor(member, departments, docIndex, row) {
   for (const [docId, quote] of [[row.doc_a, row.quote_a], [row.doc_b, row.quote_b]]) {
     const entry = docIndex.get(docId);
     if (!entry) return null; // το έγγραφο δεν υπάρχει πια
-    const readable = canReadDocument(member, departments, entry.departmentId, entry.hidden);
+    const readable = canReadDocument(member, departments, entry.departmentId, entry.hidden, entry.audienceProjectIds);
     const editable = canWriteDepartment(member, departments, entry.departmentId);
     sides.push({ docId, quote, entry, readable, editable });
   }

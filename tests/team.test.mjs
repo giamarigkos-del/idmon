@@ -173,8 +173,13 @@ function makeVectorize() {
     async deleteByIds(ids) {
       for (const id of ids) vectors.delete(id);
     },
+    async getByIds(ids) {
+      return ids.map((id) => vectors.get(id)).filter(Boolean).map((x) => ({ id: x.id, values: x.values, namespace: x.namespace, metadata: x.metadata }));
+    },
     async query(values, options) {
       v.calls.push({ ...JSON.parse(JSON.stringify(options)), __keys: Object.keys(options).sort() });
+      // Το πραγματικό Vectorize απορρίπτει φίλτρο metadata μεγαλύτερο από 2048 bytes.
+      if (options.filter && Buffer.byteLength(JSON.stringify(options.filter)) > 2048) throw new Error("VECTOR_QUERY_ERROR: filter too large");
       const filter = v.ignoreFilter ? undefined : options.filter;
       const rows = [...vectors.values()]
         .filter((x) => x.namespace === options.namespace && matchesFilter(x.metadata, filter))
@@ -321,7 +326,7 @@ section("1. Κανόνες πρόσβασης (access.js)");
   const adm = { role: "admin", departmentIds: [] };
   const set = (s) => (s === null ? null : [...s].sort().join(","));
   check("employee διαβάζει: δικό του + εταιρικά", set(access.readableDepartmentIds(emp, depts)) === "_all,cc");
-  check("editor διαβάζει: δικό του + εταιρικά + άλλα ΜΗ κρυφά", set(access.readableDepartmentIds(ed, depts)) === "_all,cc,fin");
+  check("editor διαβάζει: ΜΟΝΟ δικό του + εταιρικά (κανόνας Β: το ακροατήριο εγγράφων περιορίζει και τους editors)", set(access.readableDepartmentIds(ed, depts)) === "_all,cc");
   check("admin διαβάζει όλα (null)", access.readableDepartmentIds(adm, depts) === null);
   check("βοηθός employee ψάχνει μόνο δικό του + εταιρικά", set(access.searchDepartmentIds(emp)) === "_all,cc");
   check("βοηθός editor ψάχνει μόνο δικό του + εταιρικά (ΟΧΙ άλλα τμήματα)", set(access.searchDepartmentIds(ed)) === "_all,cc");
@@ -478,12 +483,11 @@ section("5. Έγγραφα: δικαιώματα ανάγνωσης");
 {
   const titles = async (email) => (await readJson(await call(email, "GET", "/team/documents"))).documents.map((d) => d.title).sort();
   check("employee CC βλέπει: CC + εταιρικά", JSON.stringify(await titles("emp_cc@demo.gr")) === JSON.stringify(["Διαδικασία επιστροφών", "Ωράριο εορτών"].sort()));
-  check("editor CC βλέπει: CC + εταιρικά + Finance, ΟΧΙ HR (κρυφό)", JSON.stringify(await titles("ed_cc@demo.gr")) === JSON.stringify(["Διαδικασία επιστροφών", "Όρια έγκρισης", "Ωράριο εορτών"].sort()));
+  check("editor CC βλέπει: CC + εταιρικά, ΟΧΙ Finance (κανόνας Β), ΟΧΙ HR (κρυφό)", JSON.stringify(await titles("ed_cc@demo.gr")) === JSON.stringify(["Διαδικασία επιστροφών", "Ωράριο εορτών"].sort()));
   check("admin βλέπει όλα, και το κρυφό HR", (await titles("admin@demo.gr")).length === 4);
   check("employee HR βλέπει το ΔΙΚΟ του κρυφό τμήμα", (await titles("emp_hr@demo.gr")).includes("Πειθαρχικά"));
   check("employee CC: έγγραφο Finance = 404 (δεν αποκαλύπτεται καν ότι υπάρχει)", (await call("emp_cc@demo.gr", "GET", `/team/documents/${DOC.fin}`)).status === 404);
-  const readFin = await readJson(await call("ed_cc@demo.gr", "GET", `/team/documents/${DOC.fin}`));
-  check("editor CC διαβάζει έγγραφο Finance, μόνο για ανάγνωση (editable=false)", readFin.title === "Όρια έγκρισης" && readFin.editable === false);
+  check("editor CC: έγγραφο Finance = 404 (κανόνας Β: ένας editor δεν διαβάζει άλλα projects χωρίς ακροατήριο)", (await call("ed_cc@demo.gr", "GET", `/team/documents/${DOC.fin}`)).status === 404);
   check("editor CC: κρυφό έγγραφο HR = 404", (await call("ed_cc@demo.gr", "GET", `/team/documents/${DOC.hr}`)).status === 404);
   check("editor CC: δικό του έγγραφο editable=true", (await readJson(await call("ed_cc@demo.gr", "GET", `/team/documents/${DOC.cc}`))).editable === true);
   check("άλλη εταιρεία: δεν βλέπει τίποτα", (await titles("other@other.gr")).length === 0);
@@ -768,17 +772,21 @@ section("11. portal.html και team-editor.html: χρήση σαν πραγμα
   await waitFor(() => edPortal.window.document.querySelector("#q"));
   check("editor: βλέπει σύνδεσμο διαχείρισης", !!edPortal.window.document.querySelector('a[href="/team-editor.html"]'));
 
+  // Κανόνας Β (φέτα 2): ο editor βλέπει έγγραφο άλλου project ΜΟΝΟ αν το project του είναι στο ακροατήριο. Φτιάχνουμε ένα ΠΡΟΣΩΡΙΝΟ κοινό
+  // έγγραφο (Finance -> CC), δοκιμάζουμε την ανάγνωση μόνο, και το σβήνουμε αμέσως ώστε να μη μπερδέψει τις επόμενες ερωτήσεις του βοηθού.
+  const sharedId = (await readJson(await call("admin@demo.gr", "POST", "/team/documents", { title: "Όρια έγκρισης (κοινό με CC)", departmentId: "fin", text: "Κοινή σημείωση ορίων για ομάδες. SHARED-X", audienceProjectIds: ["cc"] }))).id;
   const ed = brEd.open(editorHtml, "/team-editor.html");
   await waitFor(() => ed.window.document.querySelector("#tab-docs")); // η οθόνη ξεκινά από τα Εισερχόμενα
   ed.window.document.querySelector("#tab-docs").dispatchEvent(new ed.window.Event("click", { bubbles: true }));
   await waitFor(() => ed.window.document.querySelectorAll(".item").length > 2);
   const items = [...ed.window.document.querySelectorAll(".item")];
-  check("editor: η λίστα δείχνει και έγγραφα άλλων τμημάτων (Finance)", items.some((i) => /Όρια έγκρισης/.test(i.textContent)));
+  check("editor: η λίστα δείχνει έγγραφο άλλου τμήματος (Finance) που μοιράζεται με το project του μέσω ακροατηρίου", items.some((i) => /Όρια έγκρισης/.test(i.textContent)));
   check("... σημειωμένα ως μόνο ανάγνωση", items.find((i) => /Όρια έγκρισης/.test(i.textContent)).textContent.includes("μόνο ανάγνωση"));
   check("editor: το κρυφό τμήμα HR δεν εμφανίζεται", !items.some((i) => /Πειθαρχικά/.test(i.textContent)));
   items.find((i) => /Όρια έγκρισης/.test(i.textContent)).dispatchEvent(new ed.window.Event("click", { bubbles: true }));
   await waitFor(() => ed.window.document.querySelector(".readonly-text"));
   check("έγγραφο άλλου τμήματος: μόνο ανάγνωση, χωρίς φόρμα επεξεργασίας", !!ed.window.document.querySelector(".readonly-text") && !ed.window.document.querySelector("#panel form"));
+  await call("admin@demo.gr", "DELETE", `/team/documents/${sharedId}`);
 
   ed.window.document.querySelector(".item").dispatchEvent(new ed.window.Event("click", { bubbles: true })); // + Νέο έγγραφο
   await waitFor(() => ed.window.document.querySelector("#panel form"));
@@ -831,12 +839,13 @@ const audit = async () => (await readJson(await call("admin@demo.gr", "GET", "/t
   const emailsBefore = state.emails.length;
   await call("ed_cc@demo.gr", "PUT", `/team/documents/${DOC.cc}`, mk("Διαδικασία επιστροφών", "cc", "Η επιστροφή χρημάτων γίνεται σε πέντε εργάσιμες ημέρες. Ποσά άνω των εκατόν πενήντα ευρώ χρειάζονται έγκριση. CC-MARK"));
   list = await cList("ed_cc@demo.gr");
-  const fin = list.find((c) => c.topic === "Όριο έγκρισης");
+  // Κανόνας Β: ο editor ΔΕΝ διαβάζει έγγραφα άλλων projects (χωρίς ακροατήριο). Η αντίφαση φαίνεται, αλλά η ξένη πλευρά είναι κρυμμένη και ο τίτλος γενικός.
+  const fin = list.find((c) => c.sides.some((s) => s.hidden) && c.sides.some((s) => s.editable && /εκατόν πενήντα/.test(s.quote)));
   check("βρέθηκε αντίφαση ανάμεσα σε CC και Finance", !!fin);
   const own = fin.sides.find((s) => s.editable), foreign = fin.sides.find((s) => !s.editable);
-  check("ο editor CC βλέπει την άλλη πλευρά ΜΟΝΟ για ανάγνωση, με τίτλο και τμήμα", foreign && !foreign.hidden && foreign.title === "Όρια έγκρισης" && foreign.departmentName === "Finance" && /εκατό ευρώ/.test(foreign.quote));
-  const finView = (await cList("ed_fin@demo.gr")).find((c) => c.topic === "Όριο έγκρισης");
-  check("ο editor Finance τη βλέπει ανάποδα: δικό του Finance, ξένο CC (ανάγνωση)", finView && finView.sides.find((s) => s.editable).title === "Όρια έγκρισης" && !finView.sides.find((s) => !s.editable).editable);
+  check("ο editor CC βλέπει την ξένη πλευρά ΚΡΥΜΜΕΝΗ (κανόνας Β): ούτε τίτλος, ούτε τμήμα, ούτε παράθεση, γενικός τίτλος", foreign && foreign.hidden === true && Object.keys(foreign).length === 2 && fin.topic === "Πιθανή αντίφαση με έγγραφο κρυφού τμήματος" && !JSON.stringify(fin).includes("Όρια έγκρισης") && !JSON.stringify(fin).includes("εκατό ευρώ"));
+  const finView = (await cList("ed_fin@demo.gr")).find((c) => c.sides.some((s) => s.hidden) && c.sides.some((s) => s.editable && s.title === "Όρια έγκρισης"));
+  check("ο editor Finance τη βλέπει ανάποδα: δικό του Finance, η πλευρά του CC κρυμμένη", finView && finView.sides.find((s) => s.editable).title === "Όρια έγκρισης" && finView.sides.find((s) => !s.editable).hidden === true);
   const finMails = state.emails.slice(emailsBefore).filter((e) => e.to === "ed_fin@demo.gr");
   check("ο editor Finance ειδοποιήθηκε με email", finMails.length === 1 && /team-editor\.html/.test(finMails[0].text));
   check("το email είναι γενικό: ΚΑΝΕΝΑΣ τίτλος ή περιεχόμενο εγγράφου", !/Όρια έγκρισης|Διαδικασία|εκατό|CC-MARK|FIN-MARK/.test(finMails[0].text + finMails[0].subject));
@@ -877,10 +886,10 @@ const audit = async () => (await readJson(await call("admin@demo.gr", "GET", "/t
   // (ε) "δεν είναι αντίφαση" και υπενθύμιση
   check("editor που δεν εμπλέκεται δεν μπορεί να απορρίψει: 404", (await call("ed_fin@demo.gr", "POST", `/team/contradictions/${DOC2.apContradiction}/dismiss`)).status === 404);
   check("editor Finance που ΕΜΠΛΕΚΕΤΑΙ μπορεί να κάνει dismiss στη δική του: 200", (await call("ed_fin@demo.gr", "POST", `/team/contradictions/${DOC2.finContradiction}/dismiss`)).status === 200);
-  check("η απορριφθείσα δεν φαίνεται πια στα ανοιχτά", !(await cList("ed_cc@demo.gr")).some((c) => c.topic === "Όριο έγκρισης"));
+  check("η απορριφθείσα δεν φαίνεται πια στα ανοιχτά", !(await cList("ed_cc@demo.gr")).some((c) => c.id === DOC2.finContradiction));
   check("... και δεύτερο dismiss: 409", (await call("ed_cc@demo.gr", "POST", `/team/contradictions/${DOC2.finContradiction}/dismiss`)).status === 409);
   const chk = await readJson(await call("ed_cc@demo.gr", "POST", `/team/documents/${DOC.cc}/check`));
-  check("χειροκίνητος έλεγχος: η απορριφθείσα ΔΕΝ ξαναδημιουργείται", chk.created === 0 && !(await cList("ed_cc@demo.gr")).some((c) => c.topic === "Όριο έγκρισης"));
+  check("χειροκίνητος έλεγχος: η απορριφθείσα ΔΕΝ ξαναδημιουργείται", chk.created === 0 && !(await cList("ed_cc@demo.gr")).some((c) => c.id === DOC2.finContradiction));
   check("χειροκίνητος έλεγχος από άλλο τμήμα: 403", (await call("ed_fin@demo.gr", "POST", `/team/documents/${DOC.cc}/check`)).status === 403);
   check("υπενθύμιση σε αντίφαση όπου ήδη στάλθηκε ειδοποίηση: 429 (cooldown)", (await call("ed_cc@demo.gr", "POST", `/team/contradictions/${DOC2.hrContradiction}/remind`)).status === 429);
   const mailsBeforeRemind = state.emails.length;
@@ -1097,9 +1106,9 @@ section("15. Διαχείριση: τμήματα, μέλη, ιστορικό");
 
   // απόκρυψη τμήματος: άμεση επίδραση
   const titles = async (email) => (await readJson(await call(email, "GET", "/team/documents"))).documents.map((d) => d.title);
-  check("πριν την απόκρυψη: ο editor CC βλέπει Finance", (await titles("ed_cc@demo.gr")).includes("Όρια έγκρισης"));
+  check("πριν την απόκρυψη: ο υπάλληλος του Finance βλέπει τα έγγραφά του, ο editor CC ΟΧΙ (κανόνας Β)", (await titles("emp_fin@demo.gr")).includes("Όρια έγκρισης") && !(await titles("ed_cc@demo.gr")).includes("Όρια έγκρισης"));
   check("απόκρυψη του Finance: 200", (await adm("PATCH", "/departments/fin", { hidden: true })).status === 200);
-  check("ΑΜΕΣΑ: ο editor CC δεν βλέπει πια έγγραφα Finance", !(await titles("ed_cc@demo.gr")).includes("Όρια έγκρισης") && (await call("ed_cc@demo.gr", "GET", `/team/documents/${DOC.fin}`)).status === 404);
+  check("ΑΜΕΣΑ: ο editor CC δεν βλέπει έγγραφα Finance (ούτε με άμεσο id)", !(await titles("ed_cc@demo.gr")).includes("Όρια έγκρισης") && (await call("ed_cc@demo.gr", "GET", `/team/documents/${DOC.fin}`)).status === 404);
   check("... ούτε το τμήμα στους επιλογείς", !(await readJson(await call("ed_cc@demo.gr", "GET", "/team/departments"))).departments.some((d) => d.id === "fin"));
   const dismissed = (await readJson(await call("ed_cc@demo.gr", "GET", "/team/contradictions?status=dismissed"))).contradictions.find((c) => c.sides.some((s) => s.hidden));
   check("οι αντιφάσεις με το κρυφό Finance εμφανίζονται χωρίς περιεχόμενο", dismissed && dismissed.sides.some((s) => s.hidden === true && Object.keys(s).length === 2));
@@ -1107,7 +1116,7 @@ section("15. Διαχείριση: τμήματα, μέλη, ιστορικό");
   const a1 = await ask2("emp_cc@demo.gr");
   async function ask2(email) { state.prompts.length = 0; await readSse(await call(email, "POST", "/team/query/stream", { question: "Ποια είναι τα όρια έγκρισης;" })); return state.prompts.join("\n"); }
   check("ο βοηθός του CC δεν χρησιμοποιεί ποτέ Finance (ούτε πριν ούτε μετά)", !/FIN-MARK/.test(a1));
-  check("επαναφορά ορατότητας: 200 και ο editor CC ξαναβλέπει Finance", (await adm("PATCH", "/departments/fin", { hidden: false })).status === 200 && (await titles("ed_cc@demo.gr")).includes("Όρια έγκρισης"));
+  check("επαναφορά ορατότητας: 200 (ο editor CC συνεχίζει να μη βλέπει Finance χωρίς ακροατήριο)", (await adm("PATCH", "/departments/fin", { hidden: false })).status === 200 && !(await titles("ed_cc@demo.gr")).includes("Όρια έγκρισης") && (await titles("emp_fin@demo.gr")).includes("Όρια έγκρισης"));
 
   // μέλη
   check("μέλος: άκυρο email 400", (await adm("POST", "/members", { email: "oxi", role: "employee" })).status === 400);
@@ -1574,7 +1583,9 @@ section("21. Εμπιστευτικά έγγραφα (σήμανση από το
   state.judge = [{ x: "στις 25", y: "στις 30", topic: "Ημέρα πληρωμής" }];
   const hid = await newDocU("ed_cc@demo.gr", "Μισθοδοσία ομάδας", "cc", "Οι μισθοί πληρώνονται στις 25 του μήνα. MS-X");
   const titlesOf = async (email) => (await readJson(await call(email, "GET", "/team/documents"))).documents.map((x) => x.title);
-  check("πριν τη σήμανση: ο editor Finance βλέπει το έγγραφο του CC (ανάγνωση)", (await titlesOf("ed_fin@demo.gr")).includes("Μισθοδοσία ομάδας"));
+  check("κανόνας Β: χωρίς ακροατήριο ο editor Finance ΔΕΝ βλέπει το έγγραφο του CC", !(await titlesOf("ed_fin@demo.gr")).includes("Μισθοδοσία ομάδας"));
+  await call("admin@demo.gr", "PUT", `/team/documents/${hid}`, { title: "Μισθοδοσία ομάδας", departmentId: "cc", text: "Οι μισθοί πληρώνονται στις 25 του μήνα. MS-X", audienceProjectIds: ["fin"] });
+  check("πριν τη σήμανση: με ακροατήριο [fin] ο editor Finance βλέπει το έγγραφο του CC (ανάγνωση)", (await titlesOf("ed_fin@demo.gr")).includes("Μισθοδοσία ομάδας"));
   check("σήμανση από editor: 403, από υπάλληλο: 403", (await call("ed_cc@demo.gr", "PATCH", `/team/admin/documents/${hid}`, { hidden: true })).status === 403 && (await call("emp_cc@demo.gr", "PATCH", `/team/admin/documents/${hid}`, { hidden: true })).status === 403);
   check("άκυρο σώμα: 400, ανύπαρκτο έγγραφο: 404, άκυρο id: 404", (await call("admin@demo.gr", "PATCH", `/team/admin/documents/${hid}`, { hidden: "ναι" })).status === 400 && (await call("admin@demo.gr", "PATCH", "/team/admin/documents/doc-0000000000000000", { hidden: true })).status === 404 && (await call("admin@demo.gr", "PATCH", "/team/admin/documents/xyz", { hidden: true })).status === 404);
   check("έγγραφο άλλου οργανισμού: 404", (await call("other@other.gr", "PATCH", `/team/admin/documents/${hid}`, { hidden: true })).status === 404);
@@ -1599,8 +1610,8 @@ section("21. Εμπιστευτικά έγγραφα (σήμανση από το
   check("... και δεν διαρρέει τίτλος, κείμενο, id ή θέμα του εγγράφου", !/Μισθοδοσία ομάδας|στις 25|MS-X|Ημέρα πληρωμής/.test(rawFin) && !rawFin.includes(hid));
   const adminView = (await cList("admin@demo.gr")).find((c) => c.topic === "Ημέρα πληρωμής");
   check("ο admin βλέπει και τις δύο πλευρές με το πραγματικό θέμα", adminView && adminView.sides.every((s) => !s.hidden));
-  const ccView = (await cList("ed_cc@demo.gr")).find((c) => c.topic === "Ημέρα πληρωμής");
-  check("ο editor του ίδιου τμήματος βλέπει και τις δύο πλευρές (η άλλη πλευρά, Finance, είναι ορατή)", ccView && ccView.sides.every((s) => !s.hidden));
+  const ccView = (await cList("ed_cc@demo.gr")).find((c) => c.sides.some((x) => x.hidden === true) && c.sides.some((x) => x.editable && x.title === "Μισθοδοσία ομάδας"));
+  check("κανόνας Β: ο editor του CC βλέπει την πλευρά του Finance ΚΡΥΜΜΕΝΗ (δεν διαβάζει το έγγραφο του Finance) και γενικό τίτλο", !!ccView && ccView.topic === "Πιθανή αντίφαση με έγγραφο κρυφού τμήματος" && ccView.sides.find((x) => !x.editable).hidden === true);
   state.judge = null;
 
   // επεξεργασία και μεταφορά
@@ -1613,7 +1624,7 @@ section("21. Εμπιστευτικά έγγραφα (σήμανση από το
   const mine = list.find((x) => x.id === hid);
   check("admin: λίστα εγγράφων με σήμανση, τμήμα και ανοιχτές αντιφάσεις", mine && mine.hidden === true && mine.departmentName === "Customer Care" && mine.openContradictions >= 1);
   check("λίστα εγγράφων admin: μόνο για admin", (await call("ed_cc@demo.gr", "GET", "/team/admin/documents")).status === 403 && !JSON.stringify((await readJson(await call("other@other.gr", "GET", "/team/admin/documents"))).documents).includes("Μισθοδοσία"));
-  check("άρση σήμανσης: 200 και ο editor Finance ξαναβλέπει το έγγραφο", (await call("admin@demo.gr", "PATCH", `/team/admin/documents/${hid}`, { hidden: false })).status === 200 && (await titlesOf("ed_fin@demo.gr")).includes("Μισθοδοσία ομάδας"));
+  check("άρση σήμανσης: 200. Το ακροατήριο ΔΕΝ επανέρχεται μόνο του (το εμπιστευτικό το είχε επαναφέρει): ο editor Finance δεν το βλέπει, ο ιδιοκτήτης ναι", (await call("admin@demo.gr", "PATCH", `/team/admin/documents/${hid}`, { hidden: false })).status === 200 && !(await titlesOf("ed_fin@demo.gr")).includes("Μισθοδοσία ομάδας") && (await titlesOf("emp_cc@demo.gr")).includes("Μισθοδοσία ομάδας"));
   check("το ιστορικό καταγράφει τη σήμανση και την άρση με τίτλο", ["document_hidden", "document_unhidden"].every((act) => (audit.__x = 1) && true) && (await (async () => { const en = await audit(); return en.some((x) => x.action === "document_hidden" && x.targetLabel === "Μισθοδοσία ομάδας") && en.some((x) => x.action === "document_unhidden"); })()));
 
   // οθόνη admin: καρτέλα Έγγραφα
@@ -1717,12 +1728,13 @@ section("24. Έγγραφα στο D1: άμεση συνέπεια (αντί γ�
   const fresh = (await readJson(await call("ed_cc@demo.gr", "POST", "/team/documents", { title: "Νέο ΤΑΧΕΙΑ", departmentId: "cc", text: "Κείμενο που πρέπει να φαίνεται αμέσως. TX-MARK" }))).id;
   check("με 'αργό' KV: ένα νέο έγγραφο φαίνεται ΑΜΕΣΩΣ στη λίστα του συναδέλφου και του admin", (await titlesOf("emp_cc@demo.gr")).includes("Νέο ΤΑΧΕΙΑ") && (await titlesOf("admin@demo.gr")).includes("Νέο ΤΑΧΕΙΑ"));
   check("... και ανοίγει αμέσως (ανάγνωση)", (await readJson(await call("emp_cc@demo.gr", "GET", `/team/documents/${fresh}`))).fullText.includes("TX-MARK"));
-  check("με 'αργό' KV: ο editor Finance βλέπει το έγγραφο πριν τη σήμανση", (await titlesOf("ed_fin@demo.gr")).includes("Νέο ΤΑΧΕΙΑ"));
+  await call("admin@demo.gr", "PUT", `/team/documents/${fresh}`, { title: "Νέο ΤΑΧΕΙΑ", departmentId: "cc", text: "Κείμενο που πρέπει να φαίνεται αμέσως. TX-MARK", audienceProjectIds: ["fin"] });
+  check("με 'αργό' KV: ο editor Finance βλέπει (μέσω ακροατηρίου [fin]) το έγγραφο πριν τη σήμανση", (await titlesOf("ed_fin@demo.gr")).includes("Νέο ΤΑΧΕΙΑ"));
   await call("admin@demo.gr", "PATCH", `/team/admin/documents/${fresh}`, { hidden: true });
   check("ΑΜΕΣΑ μετά τη σήμανση εμπιστευτικού: ο editor Finance δεν το βλέπει (λίστα και άμεση ανάγνωση)", !(await titlesOf("ed_fin@demo.gr")).includes("Νέο ΤΑΧΕΙΑ") && (await call("ed_fin@demo.gr", "GET", `/team/documents/${fresh}`)).status === 404);
   check("... και η λίστα του admin δείχνει αμέσως τη σήμανση", (await readJson(await call("admin@demo.gr", "GET", "/team/admin/documents"))).documents.find((x) => x.id === fresh).hidden === true);
   await call("admin@demo.gr", "PATCH", `/team/admin/documents/${fresh}`, { hidden: false });
-  check("ΑΜΕΣΑ μετά την άρση: ξαναφαίνεται", (await titlesOf("ed_fin@demo.gr")).includes("Νέο ΤΑΧΕΙΑ"));
+  check("ΑΜΕΣΑ μετά την άρση: ο ιδιοκτήτης το βλέπει, ο editor Finance όχι (το ακροατήριο επαναφέρθηκε με τη σήμανση)", (await titlesOf("emp_cc@demo.gr")).includes("Νέο ΤΑΧΕΙΑ") && !(await titlesOf("ed_fin@demo.gr")).includes("Νέο ΤΑΧΕΙΑ"));
   await call("ed_cc@demo.gr", "DELETE", `/team/documents/${fresh}`);
   check("ΑΜΕΣΑ μετά τη διαγραφή: εξαφανίζεται από όλους (λίστα και άμεση ανάγνωση)", !(await titlesOf("emp_cc@demo.gr")).includes("Νέο ΤΑΧΕΙΑ") && (await call("emp_cc@demo.gr", "GET", `/team/documents/${fresh}`)).status === 404);
   kv.list = realList; kv.get = realGet;
@@ -1808,7 +1820,7 @@ section("25. Ρόλος ανά project: μέλος σε ένα project, editor �
   check("γράφει: ανάθεση editor χωρίς συμμετοχή στο project δεν δίνει πρόσβαση (b)", !w(stale, "b") && w(stale, "a"));
   check("γράφει: project που δεν υπάρχει στον οργανισμό ΠΟΤΕ (ούτε ο admin σε ξένο project)", !w(edBoth, "zzz") && !w(admin, "zzz"));
   check("διαβάζει: μέλος και στα δικά του, όχι στα άλλα (b) ούτε στα κρυφά (c)", r(plain, "a") && !r(plain, "b") && !r(plain, "c") && r(plain, "_all"));
-  check("διαβάζει: editor (παραγόμενος ρόλος) βλέπει και άλλα μη κρυφά projects, όχι κρυφά", r(edAmemB, "b") && !r(edAmemB, "c"));
+  check("διαβάζει: editor (παραγόμενος ρόλος) διαβάζει τα projects όπου είναι μέλος (a, b), όχι κρυφά projects που δεν είναι δικά του (c)", r(edAmemB, "b") && !r(edAmemB, "c"));
   check("ρόλος σε project: admin, editor, member, null", access.projectRoleOf(admin, "a") === "admin" && access.projectRoleOf(edAmemB, "a") === "editor" && access.projectRoleOf(edAmemB, "b") === "member" && access.projectRoleOf(outsider, "a") === null);
 
   // (β) από άκρη σε άκρη: νέο μέλος με ρόλο ανά project
@@ -2432,6 +2444,358 @@ section("27b. Οθόνη διαχείρισης: λίστα ανθρώπων, μ
   clickU(dom, $u(dom, "#tab-audit"));
   const auditTxt = await uiWait(() => { const x = $u(dom, "#app").textContent; return /Ιστορικό ενεργειών/.test(x) && x; });
   check("ιστορικό: ελληνικές ετικέτες για τις μαζικές ενέργειες, όχι τεχνικά ονόματα", /μαζική αλλαγή projects/.test(auditTxt) && /μαζική αλλαγή κατάστασης/.test(auditTxt) && !/members_bulk_/.test(auditTxt));
+}
+
+// ============================================================================ 28. Ακροατήριο εγγράφου: ένα έγγραφο, πολλά projects (API)
+section("28. Ακροατήριο εγγράφου: ιδιοκτήτης και λίστα projects που το διαβάζουν (κανόνας Β: όλοι εκτός από τον admin)");
+{ // ένα μπλοκ: οι βοηθοί αυτής της ενότητας δεν συγκρούονται με τα top-level ονόματα της ενότητας 27
+// Το ψεύτικο D1 δεν είχε batch στις παλιότερες ενότητες. Εδώ υπάρχει (όπως στο πραγματικό D1: όλα ή τίποτα).
+if (!env.DB.batch) {
+  env.DB.batch = async (statements) => {
+    db.exec("BEGIN");
+    try { for (const s of statements) await s.run(); db.exec("COMMIT"); } catch (e) { db.exec("ROLLBACK"); throw e; }
+  };
+}
+const nowIso = () => new Date().toISOString();
+const J = async (pending) => { const res = await pending; return { status: res.status, data: await readJson(res) }; };
+const mkProject = (id, name, hidden = 0) => db.prepare("insert into departments(id,workspace_id,name,hidden,created_at) values (?,?,?,?,?)").run(id, "team-demo", name, hidden, nowIso());
+const mkMember = async (email, projects, editorOf = []) => {
+  const ins = db.prepare("insert into team_members(workspace_id,email,role,status,created_at) values (?,?,?,?,?)").run("team-demo", email, editorOf.length ? "editor" : "employee", "active", nowIso());
+  const id = Number(ins.lastInsertRowid);
+  for (const p of projects) db.prepare("insert into member_departments(member_id,department_id) values (?,?)").run(id, p);
+  for (const p of editorOf) db.prepare("insert into team_project_editors(member_id,project_id,created_at) values (?,?,?)").run(id, p, nowIso());
+  S[email] = (await login(email)).cookie;
+  return id;
+};
+const askQ = async (email, q) => {
+  state.prompts.length = 0;
+  const before = env.VECTORIZE.calls.length;
+  const events = await readSse(await call(email, "POST", "/team/query/stream", { question: q }));
+  return { events, prompt: state.prompts.join("\n"), queries: env.VECTORIZE.calls.slice(before), done: events.find((e) => e.type === "done") };
+};
+const vecGroups = (docId) => [...new Set([...env.VECTORIZE.vectors.values()].filter((v) => v.metadata.documentId === docId && v.metadata.kind !== "update").map((v) => v.metadata.department_id))];
+const audRows = (docId) => db.prepare("select group_id from team_document_audience where document_id = ?").all(docId);
+const groupProjects = (g) => db.prepare("select project_id from team_audience_group_projects where group_id = ? order by project_id").all(g).map((r) => r.project_id);
+const putDoc = (who, id, body) => J(call(who, "PUT", `/team/documents/${id}`, body));
+const A = "admin@demo.gr";
+const QA = "Η διαδικασία ακύρωσης συμβολαίου απαιτεί ειδοποίηση τριάντα ημέρες."; // σχεδόν αντίγραφο του εγγράφου, ΧΩΡΙΣ το σήμα του (το LLM βλέπει και την ερώτηση): σταθερή κατάταξη ακόμα και με πολλά άλλα έγγραφα
+
+// ---------------------------------------------------------------- 28.1 καθαροί κανόνες
+{
+  const depts = [{ id: "ta", name: "Telecom A", hidden: 0 }, { id: "tb", name: "Telecom B", hidden: 0 }, { id: "tx", name: "Secret", hidden: 1 }];
+  const mem = (ids, role = "employee") => ({ role, departmentIds: ids, editorProjectIds: role === "editor" ? ids : [] });
+  const adm = { role: "admin", departmentIds: [] };
+  check("κανόνας: ο editor του tb ΔΕΝ διαβάζει έγγραφο του ta χωρίς ακροατήριο (Β)", !access.canReadDocument(mem(["tb"], "editor"), depts, "ta", false, []));
+  check("κανόνας: ο editor του tb διαβάζει έγγραφο του ta όταν το tb είναι στο ακροατήριο", access.canReadDocument(mem(["tb"], "editor"), depts, "ta", false, ["tb"]));
+  check("κανόνας: μέλος του ιδιοκτήτη διαβάζει πάντα (και το εμπιστευτικό)", access.canReadDocument(mem(["ta"]), depts, "ta", true, []));
+  check("κανόνας: το εμπιστευτικό δεν διαβάζεται από ακροατήριο", !access.canReadDocument(mem(["tb"]), depts, "ta", true, ["tb"]));
+  check("κανόνας: ιδιοκτήτης κρυφό project: το ακροατήριο αγνοείται", !access.canReadDocument(mem(["tb"]), depts, "tx", false, ["tb"]));
+  check("κανόνας: το εταιρικό το διαβάζουν όλοι", access.canReadDocument(mem([]), depts, "_all", false, []) && !access.canReadDocument(mem([]), depts, "_all", true, []));
+  check("κανόνας: ο admin διαβάζει τα πάντα", access.canReadDocument(adm, depts, "tx", true, []));
+  check("κανόνας: άγνωστος ιδιοκτήτης = απόρριψη (deny by default)", !access.canReadDocument(mem(["tb"]), depts, "zz", false, ["tb"]));
+  check("κανόνας: ο παράγωγος ρόλος editor δεν διαβάζει πια άλλα projects", JSON.stringify([...access.readableDepartmentIds(mem(["ta"], "editor"), depts)].sort()) === '["_all","ta"]');
+
+  const fmt = (n) => Array.from({ length: n }, (_, i) => `d-${(i * 2654435761 % 4294967296).toString(16).padStart(8, "0")}`);
+  const bytes = (f) => Buffer.byteLength(JSON.stringify(f));
+  const small = access.buildVectorFilters(mem(["ta", "tb"]), ["ag-0123456789abcdef"]);
+  check("φίλτρο: μικρός χρήστης = ένα φίλτρο με όλα τα ids", small.filters.length === 1 && !small.tooMany && JSON.stringify(small.filters[0].department_id.$in) === JSON.stringify(["_all", "ag-0123456789abcdef", "ta", "tb"]));
+  const mid = access.buildVectorFilters(mem(fmt(250)), []);
+  const midIds = mid.filters.flatMap((f) => f.department_id.$in);
+  check("φίλτρο: 250 projects σπάνε σε παρτίδες, καθεμία ≤ 1800 bytes (όριο Vectorize 2048)", mid.filters.length >= 2 && !mid.tooMany && mid.filters.every((f) => bytes(f) <= 1800));
+  check("φίλτρο: η ένωση των παρτίδων = ακριβώς τα ids του μέλους (κανένα δεν χάνεται, κανένα δεν διπλασιάζεται)", midIds.length === 251 && new Set(midIds).size === 251 && midIds.includes("_all") && fmt(250).every((id) => midIds.includes(id)));
+  const huge = access.buildVectorFilters(mem(fmt(480)), []);
+  check("φίλτρο: πάνω από 3 παρτίδες = αποτυχία κλειστά (tooMany, κανένα φίλτρο)", huge.tooMany === true && huge.filters.length === 0);
+  check("φίλτρο: ο admin = ένα ερώτημα χωρίς φίλτρο", access.buildVectorFilters(adm, []).filters.length === 1 && access.buildVectorFilters(adm, []).filters[0] === undefined);
+  check("φίλτρο: το όριο παρτίδας είναι ρυθμιζόμενο και τηρείται και σε μικρό όριο", access.buildVectorFilters(mem(fmt(30)), [], { maxBytes: 200, maxBatches: 99 }).filters.every((f) => bytes(f) <= 200));
+}
+
+// ---------------------------------------------------------------- 28.2 σενάριο: Telecom A και B (BPO με δύο πελάτες)
+mkProject("ta", "Telecom A"); mkProject("tb", "Telecom B"); mkProject("tc", "Telecom C"); mkProject("tx", "Secret X", 1);
+const idEdA = await mkMember("au_ed_a@demo.gr", ["ta"], ["ta"]);
+await mkMember("au_ed_b@demo.gr", ["tb"], ["tb"]);
+await mkMember("au_a@demo.gr", ["ta"]);
+await mkMember("au_b@demo.gr", ["tb"]);
+await mkMember("au_c@demo.gr", ["tc"]);
+await mkMember("au_mixed@demo.gr", ["ta", "tc"], ["tc"]); // editor στο tc, απλός πράκτορας στο ta
+await mkMember("au_mx@demo.gr", ["tx"]);
+const D = {};
+{
+  const r = await J(call("au_ed_a@demo.gr", "POST", "/team/documents", { title: "Ακύρωση συμβολαίου Α", departmentId: "ta", text: "Η διαδικασία ακύρωσης συμβολαίου απαιτεί ειδοποίηση τριάντα ημέρες. AUDA-MARK" }));
+  D.a = r.data.id;
+  check("έγγραφο μόνο του ιδιοκτήτη: 201", r.status === 201 && !!D.a);
+  check("... τα vectors του κρατούν το id του project (όπως πάντα, χωρίς αλλαγή)", JSON.stringify(vecGroups(D.a)) === '["ta"]' && audRows(D.a).length === 0);
+  check("... ο editor του tb ΔΕΝ το βλέπει: 404, ούτε στη λίστα", (await J(call("au_ed_b@demo.gr", "GET", `/team/documents/${D.a}`))).status === 404 && !(await J(call("au_ed_b@demo.gr", "GET", "/team/documents"))).data.documents.some((d) => d.id === D.a));
+  check("... το μέλος του tb: 404", (await J(call("au_b@demo.gr", "GET", `/team/documents/${D.a}`))).status === 404);
+  check("... το μέλος του ta το διαβάζει", (await J(call("au_a@demo.gr", "GET", `/team/documents/${D.a}`))).status === 200);
+
+  let x = await J(call("au_ed_a@demo.gr", "PUT", `/team/documents/${D.a}`, { title: "Ακύρωση συμβολαίου Α", departmentId: "ta", text: "Η διαδικασία ακύρωσης συμβολαίου απαιτεί ειδοποίηση τριάντα ημέρες. AUDA-MARK", audienceProjectIds: ["tb"] }));
+  check("ο editor του ta ΔΕΝ βάζει στο ακροατήριο project όπου δεν είναι μέλος: 403 audience_forbidden", x.status === 403 && x.data.error === "audience_forbidden" && audRows(D.a).length === 0);
+}
+
+// ---- ο admin ορίζει ακροατήριο [tb]
+{
+  const body = { title: "Ακύρωση συμβολαίου Α", departmentId: "ta", text: "Η διαδικασία ακύρωσης συμβολαίου απαιτεί ειδοποίηση τριάντα ημέρες. AUDA-MARK" };
+  const x = await putDoc(A, D.a, { ...body, audienceProjectIds: ["tb"] });
+  const rows = audRows(D.a);
+  check("admin: ακροατήριο [tb]: 200 και μία γραμμή ακροατηρίου", x.status === 200 && rows.length === 1);
+  const g = rows[0] && rows[0].group_id;
+  check("... η ομάδα έχει μορφή ag-<16 hex> και περιέχει ιδιοκτήτη και tb", /^ag-[0-9a-f]{16}$/.test(g || "") && JSON.stringify(groupProjects(g)) === '["ta","tb"]');
+  check("... ΟΛΑ τα vectors του εγγράφου γράφτηκαν με το id της ομάδας", JSON.stringify(vecGroups(D.a)) === JSON.stringify([g]));
+  D.g = g;
+  const groupsBefore = db.prepare("select count(*) c from team_audience_groups").get().c;
+  const sameAgain = await putDoc(A, D.a, { ...body, audienceProjectIds: ["tb", "ta", "tb"] });
+  check("το ίδιο σύνολο (άλλη σειρά, διπλότυπα, με τον ιδιοκτήτη μέσα) δίνει ΤΗΝ ΙΔΙΑ ομάδα, καμία δεύτερη", sameAgain.status === 200 && audRows(D.a)[0].group_id === g && db.prepare("select count(*) c from team_audience_groups").get().c === groupsBefore);
+
+  const gb = await J(call("au_b@demo.gr", "GET", `/team/documents/${D.a}`));
+  check("το μέλος του tb διαβάζει το έγγραφο, ΜΟΝΟ για ανάγνωση", gb.status === 200 && gb.data.editable === false && gb.data.departmentId === "ta" && gb.data.departmentName === "Telecom A");
+  const eb = await J(call("au_ed_b@demo.gr", "GET", `/team/documents/${D.a}`));
+  check("ο editor του tb διαβάζει το έγγραφο μέσω ακροατηρίου, ΜΟΝΟ για ανάγνωση (δεν είναι δικό του)", eb.status === 200 && eb.data.editable === false);
+  check("... και δεν μπορεί να το αλλάξει: PUT 403", (await call("au_ed_b@demo.gr", "PUT", `/team/documents/${D.a}`, { ...body, departmentId: "tb" })).status === 403 && (await call("au_ed_b@demo.gr", "PUT", `/team/documents/${D.a}`, { ...body, departmentId: "ta" })).status === 403);
+  const lb = (await J(call("au_b@demo.gr", "GET", "/team/documents"))).data.documents.find((d) => d.id === D.a);
+  check("λίστα του tb: το έγγραφο εμφανίζεται (editable:false, audienceCount:1)", !!lb && lb.editable === false && lb.audienceCount === 1);
+  check("το μέλος του tc ΔΕΝ το βλέπει (404)", (await J(call("au_c@demo.gr", "GET", `/team/documents/${D.a}`))).status === 404);
+  const mine = await J(call("au_ed_a@demo.gr", "GET", `/team/documents/${D.a}`));
+  check("ο ιδιοκτήτης βλέπει στο ακροατήριο μόνο το πλήθος για projects που δεν γνωρίζει (hiddenCount=1, χωρίς όνομα)", mine.data.audience.hiddenCount === 1 && mine.data.audience.projects.length === 0 && !JSON.stringify(mine.data).includes("Telecom B"));
+  check("ο admin βλέπει ονόματα", JSON.stringify((await J(call(A, "GET", `/team/documents/${D.a}`))).data.audience.projects) === JSON.stringify([{ id: "tb", name: "Telecom B" }]));
+  check("ο editor του tb βλέπει το δικό του project στο ακροατήριο", JSON.stringify(eb.data.audience.projects) === JSON.stringify([{ id: "tb", name: "Telecom B" }]) && eb.data.audience.hiddenCount === 0);
+  check("το GET του admin για όλα τα έγγραφα δίνει τη λίστα ακροατηρίου", (await J(call(A, "GET", "/team/admin/documents"))).data.documents.find((d) => d.id === D.a).audienceProjectIds.join() === "tb");
+
+  // ---- ο βοηθός
+  let q = await askQ("au_b@demo.gr", QA);
+  const f0 = q.queries[0] && q.queries[0].filter && q.queries[0].filter.department_id.$in;
+  check("βοηθός tb: το φίλτρο περιέχει την ομάδα ακροατηρίου", Array.isArray(f0) && f0.includes(g) && f0.includes("tb") && f0.includes("_all"));
+  check("βοηθός tb: το LLM είδε το έγγραφο του ακροατηρίου", q.prompt.includes("AUDA-MARK") && q.done && q.done.primarySource && q.done.primarySource.departmentName === "Telecom A");
+  q = await askQ("au_ed_b@demo.gr", QA);
+  check("βοηθός editor tb: το βλέπει (το ακροατήριο ισχύει και για editors)", q.prompt.includes("AUDA-MARK"));
+  q = await askQ("au_c@demo.gr", QA);
+  check("βοηθός tc: ΔΕΝ είδε το έγγραφο, το φίλτρο δεν έχει την ομάδα", !q.prompt.includes("AUDA-MARK") && !q.queries[0].filter.department_id.$in.includes(g));
+  q = await askQ("au_a@demo.gr", QA);
+  check("βοηθός ta (ιδιοκτήτης): το βρίσκει και με το ακροατήριο", q.prompt.includes("AUDA-MARK"));
+
+  // ---- δεύτερος έλεγχος στη βάση, όταν το Vectorize ΔΕΝ φιλτράρει (ή έχει παλιά δεδομένα)
+  env.VECTORIZE.ignoreFilter = true;
+  q = await askQ("au_c@demo.gr", QA);
+  check("χωρίς φίλτρο Vectorize: ο έλεγχος στη βάση κόβει το έγγραφο του ακροατηρίου για το tc", !q.prompt.includes("AUDA-MARK"));
+  q = await askQ("au_b@demo.gr", QA);
+  check("χωρίς φίλτρο Vectorize: το tb (στο ακροατήριο) το βλέπει κανονικά", q.prompt.includes("AUDA-MARK"));
+  env.VECTORIZE.ignoreFilter = false;
+  const sameValues = env.VECTORIZE.vectors.get(`${D.a}-chunk-0`).values; // ίδιο διάνυσμα με το πραγματικό έγγραφο: ανακτώνται σίγουρα
+  env.VECTORIZE.vectors.set("ghost-chunk-0", { id: "ghost-chunk-0", values: sameValues, namespace: "team-demo", metadata: { documentId: "doc-ffffffffffffffff", chunkIndex: 0, text: "GHOST-MARK " + QA, department_id: "tb" } });
+  env.VECTORIZE.vectors.set("nodept-chunk-0", { id: "nodept-chunk-0", values: sameValues, namespace: "team-demo", metadata: { documentId: D.a, chunkIndex: 0, text: "NODEPT-MARK " + QA } });
+  const qAdmin = await askQ(A, QA);
+  check("(έλεγχος του ελέγχου) ο admin, που δεν περνά από τον δεύτερο έλεγχο, ανακτά τα ψεύτικα vectors: άρα οι επόμενοι έλεγχοι είναι ουσιαστικοί", qAdmin.prompt.includes("GHOST-MARK") && qAdmin.prompt.includes("NODEPT-MARK"));
+  q = await askQ("au_b@demo.gr", QA);
+  check("vector για έγγραφο που ΔΕΝ υπάρχει στη βάση: απορρίπτεται (deny by default)", !q.prompt.includes("GHOST-MARK"));
+  check("vector χωρίς department_id: απορρίπτεται (fail closed)", !q.prompt.includes("NODEPT-MARK"));
+  env.VECTORIZE.ignoreFilter = true;
+  q = await askQ("au_b@demo.gr", QA);
+  check("vector χωρίς department_id: απορρίπτεται ΚΑΙ όταν το Vectorize δεν φιλτράρει (fail closed στον κώδικα)", !q.prompt.includes("NODEPT-MARK") && !q.prompt.includes("GHOST-MARK"));
+  env.VECTORIZE.ignoreFilter = false;
+  env.VECTORIZE.vectors.delete("ghost-chunk-0"); env.VECTORIZE.vectors.delete("nodept-chunk-0");
+}
+
+// ---- επεξεργασία από τον ιδιοκτήτη: το ακροατήριο μένει
+{
+  const body = { title: "Ακύρωση συμβολαίου Α", departmentId: "ta", text: "Η διαδικασία ακύρωσης συμβολαίου απαιτεί ειδοποίηση σαράντα ημέρες. AUDA-MARK" };
+  let x = await putDoc("au_ed_a@demo.gr", D.a, body);
+  check("επεξεργασία κειμένου χωρίς πεδίο ακροατηρίου: το ακροατήριο μένει όπως ήταν", x.status === 200 && audRows(D.a).length === 1 && audRows(D.a)[0].group_id === D.g && JSON.stringify(vecGroups(D.a)) === JSON.stringify([D.g]));
+  x = await putDoc("au_ed_a@demo.gr", D.a, { ...body, audienceProjectIds: [] });
+  check("ο editor που ΔΕΝ βλέπει το tb δεν μπορεί να το αφαιρέσει (audienceProjectIds: [] το διατηρεί)", x.status === 200 && audRows(D.a).length === 1 && groupProjects(audRows(D.a)[0].group_id).join() === "ta,tb");
+  x = await putDoc(A, D.a, { ...body, audienceProjectIds: [] });
+  check("ο admin αφαιρεί το ακροατήριο: σβήνει η γραμμή, τα vectors γυρίζουν στο id του project", x.status === 200 && audRows(D.a).length === 0 && JSON.stringify(vecGroups(D.a)) === '["ta"]');
+  check("... το tb χάνει αμέσως την πρόσβαση (404)", (await J(call("au_b@demo.gr", "GET", `/team/documents/${D.a}`))).status === 404);
+  const q = await askQ("au_b@demo.gr", QA);
+  check("... και ο βοηθός του tb δεν το βρίσκει πια", !q.prompt.includes("AUDA-MARK"));
+  // παλιά vectors με την παλιά ομάδα (π.χ. αποτυχημένη ενημέρωση): το Vectorize τα επιστρέφει, ο έλεγχος στη βάση τα κόβει
+  for (const v of env.VECTORIZE.vectors.values()) if (v.metadata.documentId === D.a) v.metadata.department_id = D.g;
+  const q2 = await askQ("au_b@demo.gr", QA);
+  check("ξεπερασμένο vector με παλιά ομάδα: δεν διαρρέει (ο έλεγχος στη βάση αποφασίζει)", !q2.prompt.includes("AUDA-MARK"));
+  for (const v of env.VECTORIZE.vectors.values()) if (v.metadata.documentId === D.a) v.metadata.department_id = "ta";
+  // ο editor βάζει ακροατήριο σε project όπου ΕΙΝΑΙ μέλος
+  const x2 = await putDoc("au_mixed@demo.gr", D.a, body); // μέλος του ta αλλά μόνο μέλος (όχι editor): δεν γράφει
+  check("απλό μέλος (όχι editor του ta): 403 στο PUT", x2.status === 403);
+}
+
+// ---- επικύρωση ακροατηρίου
+{
+  for (let i = 1; i <= 10; i++) mkProject(`px${i}`, `Project X${i}`);
+  const body = { title: "Ακύρωση συμβολαίου Α", departmentId: "ta", text: "Η διαδικασία ακύρωσης συμβολαίου απαιτεί ειδοποίηση σαράντα ημέρες. AUDA-MARK" };
+  const ids = (n) => Array.from({ length: n }, (_, i) => `px${i + 1}`);
+  let x = await putDoc(A, D.a, { ...body, audienceProjectIds: ids(10) });
+  check("ακροατήριο 10 άλλα projects (11 με τον ιδιοκτήτη): 400 audience_too_large", x.status === 400 && x.data.error === "audience_too_large" && audRows(D.a).length === 0);
+  x = await putDoc(A, D.a, { ...body, audienceProjectIds: ids(9) });
+  check("ακροατήριο 9 άλλα projects (10 με τον ιδιοκτήτη): επιτρέπεται", x.status === 200 && audRows(D.a).length === 1);
+  x = await putDoc(A, D.a, { ...body, audienceProjectIds: [] });
+  check("επιστροφή σε μόνο ιδιοκτήτη", x.status === 200 && audRows(D.a).length === 0);
+  check("άγνωστο project στο ακροατήριο: 400 invalid_audience", (await putDoc(A, D.a, { ...body, audienceProjectIds: ["nope"] })).data.error === "invalid_audience");
+  check("project άλλου οργανισμού στο ακροατήριο: 400 invalid_audience", (await putDoc(A, D.a, { ...body, audienceProjectIds: ["cc2"] })).data.error === "invalid_audience");
+  check("το «_all» δεν είναι έγκυρο μέλος ακροατηρίου: 400", (await putDoc(A, D.a, { ...body, audienceProjectIds: ["_all"] })).data.error === "invalid_audience");
+  check("ακροατήριο που δεν είναι πίνακας: 400", (await putDoc(A, D.a, { ...body, audienceProjectIds: "tb" })).data.error === "invalid_audience" && (await putDoc(A, D.a, { ...body, audienceProjectIds: [1] })).data.error === "invalid_audience");
+  const rAll = await J(call(A, "POST", "/team/documents", { title: "Εταιρικό με ακροατήριο", departmentId: "_all", text: "κείμενο εταιρικού", audienceProjectIds: ["tb"] }));
+  check("εταιρικό έγγραφο με ακροατήριο: 400 audience_not_allowed", rAll.status === 400 && rAll.data.error === "audience_not_allowed");
+  const rNew = await J(call(A, "POST", "/team/documents", { title: "Νέο με ακροατήριο", departmentId: "tb", text: "Διαδικασία επιστροφής εξοπλισμού τηλεπικοινωνιών. AUDN-MARK", audienceProjectIds: ["ta", "tc"] }));
+  D.n = rNew.data.id;
+  check("νέο έγγραφο με ακροατήριο από την αρχή (admin): 201, ομάδα {ta,tb,tc}", rNew.status === 201 && groupProjects(audRows(D.n)[0].group_id).join() === "ta,tb,tc" && vecGroups(D.n).join() === audRows(D.n)[0].group_id);
+  check("ο ιδιοκτήτης του tb και το tc το διαβάζουν, το tx όχι", (await J(call("au_c@demo.gr", "GET", `/team/documents/${D.n}`))).status === 200 && (await J(call("au_mx@demo.gr", "GET", `/team/documents/${D.n}`))).status === 404);
+  // ένας editor βάζει ακροατήριο σε project όπου είναι μέλος: ο au_mixed είναι editor στο tc και μέλος στο ta
+  const rMix = await J(call("au_mixed@demo.gr", "POST", "/team/documents", { title: "Από τον mixed", departmentId: "tc", text: "Κείμενο ελέγχου προσβασιμότητας. AUDM-MARK", audienceProjectIds: ["ta"] }));
+  check("editor με ακροατήριο σε project όπου ΕΙΝΑΙ μέλος: 201", rMix.status === 201 && groupProjects(audRows(rMix.data.id)[0].group_id).join() === "ta,tc");
+  const rMix2 = await J(call("au_mixed@demo.gr", "POST", "/team/documents", { title: "Από τον mixed 2", departmentId: "tc", text: "Κείμενο ελέγχου. AUDM2-MARK", audienceProjectIds: ["tb"] }));
+  check("... σε project όπου ΔΕΝ είναι μέλος: 403 audience_forbidden και το έγγραφο ΔΕΝ δημιουργείται", rMix2.status === 403 && db.prepare("select count(*) c from team_documents where title = 'Από τον mixed 2'").get().c === 0);
+  D.m = rMix.data.id;
+}
+
+// ---- εμπιστευτικό έγγραφο και κρυφό project
+{
+  const body = { title: "Νέο με ακροατήριο", departmentId: "tb", text: "Διαδικασία επιστροφής εξοπλισμού τηλεπικοινωνιών. AUDN-MARK" };
+  let x = await J(call(A, "PATCH", `/team/admin/documents/${D.n}`, { hidden: true }));
+  check("σήμανση εμπιστευτικού: 200, η γραμμή ακροατηρίου σβήνει αμέσως", x.status === 200 && audRows(D.n).length === 0);
+  check("... τα vectors γυρίζουν στο id του ιδιοκτήτη (ξαναγράφονται από τη βάση χωρίς νέα embeddings)", JSON.stringify(vecGroups(D.n)) === '["tb"]');
+  check("... το tc χάνει την πρόσβαση, ο ιδιοκτήτης (tb) τη διατηρεί", (await J(call("au_c@demo.gr", "GET", `/team/documents/${D.n}`))).status === 404 && (await J(call("au_b@demo.gr", "GET", `/team/documents/${D.n}`))).status === 200);
+  check("... στο ιστορικό σημειώνεται η επαναφορά ακροατηρίου", JSON.stringify(db.prepare("select detail from team_audit_log where action = 'document_hidden' and target = ? order by id desc").get(D.n)).includes("audienceReset"));
+  x = await putDoc(A, D.n, { ...body, audienceProjectIds: ["ta"] });
+  check("ακροατήριο σε εμπιστευτικό έγγραφο: 409 hidden_cannot_have_audience", x.status === 409 && x.data.error === "hidden_cannot_have_audience" && audRows(D.n).length === 0);
+  await J(call(A, "PATCH", `/team/admin/documents/${D.n}`, { hidden: false }));
+  x = await putDoc(A, D.n, { ...body, audienceProjectIds: ["ta"] });
+  check("μετά το «δεν είναι εμπιστευτικό» το ακροατήριο ξαναδίνεται", x.status === 200 && audRows(D.n).length === 1);
+
+  // κρυφό project
+  const rx = await J(call(A, "POST", "/team/documents", { title: "Κρυφό έγγραφο", departmentId: "tx", text: "Μυστική διαδικασία. AUDX-MARK", audienceProjectIds: ["tb"] }));
+  check("έγγραφο κρυφού project με ακροατήριο: 409 hidden_cannot_have_audience", rx.status === 409 && rx.data.error === "hidden_cannot_have_audience");
+  // το project tb γίνεται κρυφό ενώ το έγγραφό του έχει ακροατήριο
+  const grp = audRows(D.n)[0].group_id;
+  check("πριν: το ta διαβάζει το έγγραφο του tb μέσω ακροατηρίου", (await J(call("au_a@demo.gr", "GET", `/team/documents/${D.n}`))).status === 200 && vecGroups(D.n).join() === grp);
+  await J(call(A, "PATCH", "/team/admin/departments/tb", { hidden: true }));
+  check("το project tb γίνεται κρυφό: το ακροατήριο των εγγράφων του σβήνει, τα vectors γυρίζουν στο tb", audRows(D.n).length === 0 && JSON.stringify(vecGroups(D.n)) === '["tb"]');
+  check("... το ta χάνει την πρόσβαση, τα μέλη του tb τη διατηρούν", (await J(call("au_a@demo.gr", "GET", `/team/documents/${D.n}`))).status === 404 && (await J(call("au_b@demo.gr", "GET", `/team/documents/${D.n}`))).status === 200);
+  check("... το ιστορικό του project αναφέρει πόσα μοιρασμένα έγγραφα επανήλθαν", JSON.stringify(db.prepare("select detail from team_audit_log where action = 'department_hidden' and target = 'tb'").get()).includes("sharedReset"));
+  await J(call(A, "PATCH", "/team/admin/departments/tb", { hidden: false }));
+}
+
+// ---- εκκρεμή updates, vectors των updates, διαγραφή
+{
+  const body = { title: "Ακύρωση συμβολαίου Α", departmentId: "ta", text: "Η διαδικασία ακύρωσης συμβολαίου απαιτεί ειδοποίηση σαράντα ημέρες. AUDA-MARK" };
+  let x = await putDoc(A, D.a, { ...body, audienceProjectIds: ["tb"] });
+  D.g = audRows(D.a)[0].group_id;
+  const u = await J(call("au_ed_a@demo.gr", "POST", "/team/updates", { documentId: D.a, text: "Νέα προθεσμία ειδοποίησης είκοσι ημέρες. AUDU-MARK" }));
+  const uv = [...env.VECTORIZE.vectors.values()].filter((v) => v.metadata.kind === "update" && v.metadata.updateId === u.data.id);
+  check("update σε έγγραφο με ακροατήριο: τα vectors του κρατούν την ΙΔΙΑ ομάδα με το έγγραφο", u.status === 201 && uv.length > 0 && uv.every((v) => v.metadata.department_id === D.g));
+  const q = await askQ("au_b@demo.gr", "Νέα προθεσμία ειδοποίησης είκοσι ημέρες.");
+  check("το tb (ακροατήριο) βρίσκει και το update (η ομάδα του update είναι ίδια με του εγγράφου)", q.prompt.includes("AUDU-MARK"));
+  x = await putDoc(A, D.a, { ...body, audienceProjectIds: [] });
+  check("αλλαγή ακροατηρίου με εκκρεμές update: 409 has_pending_updates, τίποτα δεν αλλάζει", x.status === 409 && x.data.error === "has_pending_updates" && audRows(D.a).length === 1 && vecGroups(D.a).join() === D.g);
+  x = await putDoc(A, D.a, { ...body, text: body.text + " Προσθήκη.", audienceProjectIds: ["tb"] });
+  check("αποθήκευση με ΙΔΙΟ ακροατήριο και εκκρεμές update: επιτρέπεται", x.status === 200);
+  await J(call("au_ed_a@demo.gr", "POST", `/team/updates/${u.data.id}/reject`));
+  x = await putDoc(A, D.a, { ...body, audienceProjectIds: [] });
+  check("μετά την απόρριψη του update η αλλαγή ακροατηρίου επιτρέπεται", x.status === 200 && audRows(D.a).length === 0);
+
+  // ενσωμάτωση update σε έγγραφο με ακροατήριο: μένει η ομάδα
+  await putDoc(A, D.a, { ...body, audienceProjectIds: ["tb"] });
+  D.g = audRows(D.a)[0].group_id;
+  const u2 = await J(call("au_ed_a@demo.gr", "POST", "/team/updates", { documentId: D.a, text: "Ενημέρωση ειδοποίησης δεκαπέντε ημέρες. AUDU2-MARK" }));
+  const ap = await J(call("au_ed_a@demo.gr", "POST", `/team/updates/${u2.data.id}/apply`, { text: "Η διαδικασία ακύρωσης συμβολαίου απαιτεί ειδοποίηση δεκαπέντε ημέρες. AUDA-MARK" }));
+  check("ενσωμάτωση update: το ακροατήριο και τα vectors μένουν στην ίδια ομάδα", ap.status === 200 && audRows(D.a)[0].group_id === D.g && vecGroups(D.a).join() === D.g);
+
+  // διαγραφή
+  const del = await J(call("au_ed_a@demo.gr", "DELETE", `/team/documents/${D.a}`));
+  check("διαγραφή εγγράφου: σβήνει και η γραμμή ακροατηρίου (cascade)", del.status === 200 && audRows(D.a).length === 0 && db.prepare("select count(*) c from team_documents where id = ?").get(D.a).c === 0);
+  check("... η ομάδα μένει (ξαναχρησιμοποιείται), αλλά ΔΕΝ μπαίνει πια στο φίλτρο του tb (κανένα έγγραφο δεν τη χρησιμοποιεί)", db.prepare("select count(*) c from team_audience_groups where id = ?").get(D.g).c === 1);
+  const q2 = await askQ("au_b@demo.gr", QA);
+  check("... το φίλτρο του tb δεν περιέχει ορφανή ομάδα", !q2.queries[0].filter.department_id.$in.includes(D.g));
+}
+
+// ---- αντιφάσεις, ειδοποιήσεις και εισερχόμενα με τον κανόνα Β
+{
+  state.judge = [{ x: "απαιτεί τρεις υπογραφές", y: "απαιτεί δύο υπογραφές", topic: "Υπογραφές ειδικής άδειας" }];
+  const ra = await J(call("au_ed_a@demo.gr", "POST", "/team/documents", { title: "Άδειες Α", departmentId: "ta", text: "Η έγκριση ειδικής άδειας τηλεπικοινωνιών απαιτεί τρεις υπογραφές. ΑΔΕΙΑ-ΑΑ" }));
+  const emailsBefore = state.emails.length;
+  const rb = await J(call("au_ed_b@demo.gr", "POST", "/team/documents", { title: "Άδειες Β", departmentId: "tb", text: "Η έγκριση ειδικής άδειας τηλεπικοινωνιών απαιτεί δύο υπογραφές. ΑΔΕΙΑ-ΒΒ" }));
+  const found = db.prepare("select count(*) c from team_contradictions where status = 'open' and topic = 'Υπογραφές ειδικής άδειας'").get().c;
+  check("αντίφαση ανάμεσα σε έγγραφα δύο projects: βρέθηκε", found === 1);
+  const cB = (await J(call("au_ed_b@demo.gr", "GET", "/team/contradictions"))).data.contradictions;
+  const viewB = cB.find((c) => c.sides.some((s) => s.editable && /δύο υπογραφές/.test(s.quote)));
+  check("ο editor του tb ΔΕΝ βλέπει το κείμενο του εγγράφου του ta (Β): η πλευρά είναι κρυμμένη, γενικός τίτλος", !!viewB && viewB.sides.some((s) => s.hidden === true) && !JSON.stringify(viewB).includes("τρεις υπογραφές") && /κρυφού τμήματος/.test(viewB.topic));
+  const sent = state.emails.slice(emailsBefore).map((e) => e.to).sort();
+  check("ειδοποίηση: μόνο στους ΡΗΤΟΥΣ editors των projects (ο editor του tc που είναι απλό μέλος στο ta ΔΕΝ ειδοποιείται)", sent.includes("au_ed_a@demo.gr") && !sent.includes("au_mixed@demo.gr") && !sent.includes("au_a@demo.gr"));
+  await putDoc(A, ra.data.id, { title: "Άδειες Α", departmentId: "ta", text: "Η έγκριση ειδικής άδειας τηλεπικοινωνιών απαιτεί τρεις υπογραφές. ΑΔΕΙΑ-ΑΑ", audienceProjectIds: ["tb"] });
+  const cB2 = (await J(call("au_ed_b@demo.gr", "GET", "/team/contradictions"))).data.contradictions;
+  const viewB2 = cB2.find((c) => c.sides.some((s) => s.editable && /δύο υπογραφές/.test(s.quote)));
+  check("μόλις το tb μπει στο ακροατήριο, ο editor του tb βλέπει και τις δύο παραθέσεις (συνεννόηση)", !!viewB2 && viewB2.sides.every((s) => !s.hidden) && JSON.stringify(viewB2).includes("τρεις υπογραφές"));
+  check("... η πλευρά του ta φαίνεται ΜΟΝΟ για ανάγνωση", viewB2.sides.filter((s) => !s.editable).length === 1);
+  state.judge = undefined;
+
+  // εισερχόμενα: αναπάντητες ερωτήσεις μόνο των projects όπου είσαι editor
+  state.unknown = ["ΑΓΝΩΣΤΟΣΟΡΟΣ"];
+  await askQ("au_a@demo.gr", "Τι ισχύει για ΑΓΝΩΣΤΟΣΟΡΟΣ ΑΙΤΗΜΑ;");
+  state.unknown = [];
+  const inboxEd = (await J(call("au_ed_a@demo.gr", "GET", "/team/inbox"))).data;
+  const inboxMixed = (await J(call("au_mixed@demo.gr", "GET", "/team/inbox"))).data;
+  check("εισερχόμενα: ο editor του ta βλέπει την αναπάντητη ερώτηση του μέλους του ta", inboxEd.questions.some((q) => /ΑΓΝΩΣΤΟΣΟΡΟΣ/.test(q.question)));
+  check("εισερχόμενα: ο au_mixed (editor στο tc, απλό μέλος στο ta) ΔΕΝ βλέπει ερωτήσεις του ta", !inboxMixed.questions.some((q) => /ΑΓΝΩΣΤΟΣΟΡΟΣ/.test(q.question)));
+}
+
+// ---- αναφορές υπαλλήλων και ορατά projects
+{
+  const rd = await J(call("au_ed_a@demo.gr", "POST", "/team/documents", { title: "Για αναφορές", departmentId: "ta", text: "Διαδικασία αναφορών ελέγχου. AUDF-MARK", audienceProjectIds: [] }));
+  await putDoc(A, rd.data.id, { title: "Για αναφορές", departmentId: "ta", text: "Διαδικασία αναφορών ελέγχου. AUDF-MARK", audienceProjectIds: ["tb"] });
+  check("αναφορά ότι η απάντηση είναι λάθος: το μέλος του ακροατηρίου (tb) μπορεί", (await call("au_b@demo.gr", "POST", "/team/feedback", { documentId: rd.data.id, kind: "wrong", question: "ερώτηση" })).status === 201);
+  check("... μέλος εκτός ακροατηρίου (tc): 404", (await call("au_c@demo.gr", "POST", "/team/feedback", { documentId: rd.data.id, kind: "wrong", question: "ερώτηση" })).status === 404);
+  const deps1 = (await J(call("au_ed_a@demo.gr", "GET", "/team/departments"))).data.departments.map((d) => d.id);
+  check("/team/departments: ο editor βλέπει ΜΟΝΟ τα δικά του projects (όχι ονόματα άλλων πελατών)", deps1.join() === "ta");
+  check("/team/departments: ο admin τα βλέπει όλα", (await J(call(A, "GET", "/team/departments"))).data.departments.length >= 5);
+}
+
+// ---- μεγάλοι χρήστες: φίλτρο σε παρτίδες και αποτυχία κλειστά
+{
+  const mkMany = (n, tag) => { const ids = []; for (let i = 0; i < n; i++) { const id = `d-${tag}${i.toString(16).padStart(7, "0")}`; db.prepare("insert into departments(id,workspace_id,name,hidden,created_at) values (?,?,?,0,?)").run(id, "team-demo", `P ${tag} ${i}`, nowIso()); ids.push(id); } return ids.sort(); };
+  const bigIds = mkMany(250, "a");
+  await mkMember("au_big@demo.gr", bigIds);
+  const first = bigIds[0], last = bigIds[bigIds.length - 1];
+  await J(call(A, "POST", "/team/documents", { title: "Πρώτο project", departmentId: first, text: "Διαδικασία πρώτου πελάτη μεγάλου χρήστη. BIGF-MARK" }));
+  await J(call(A, "POST", "/team/documents", { title: "Τελευταίο project", departmentId: last, text: "Διαδικασία τελευταίου πελάτη μεγάλου χρήστη. BIGL-MARK" }));
+  const q = await askQ("au_big@demo.gr", "Διαδικασία πελάτη μεγάλου χρήστη");
+  const sizes = q.queries.map((c) => Buffer.byteLength(JSON.stringify(c.filter)));
+  check("μεγάλος χρήστης (250 projects): περισσότερα από ένα ερωτήματα, καθένα κάτω από το όριο 2048 bytes του Vectorize", q.queries.length >= 2 && sizes.every((s) => s <= 2048));
+  check("... τα αποτελέσματα όλων των παρτίδων ενώνονται: βρίσκει έγγραφα και από την πρώτη και από την τελευταία παρτίδα", q.prompt.includes("BIGF-MARK") && q.prompt.includes("BIGL-MARK"));
+  check("... κανένα project δεν χάθηκε από τα φίλτρα", new Set(q.queries.flatMap((c) => c.filter.department_id.$in)).size === 251);
+
+  const hugeIds = mkMany(480, "b");
+  await mkMember("au_huge@demo.gr", hugeIds);
+  const kvBefore = [...env.DOCUMENT_REGISTRY.store.keys()].filter((k) => k.includes(":fallback:")).length;
+  const qh = await askQ("au_huge@demo.gr", "Διαδικασία πελάτη μεγάλου χρήστη");
+  check("πάρα πολλά projects (480): ΚΑΝΕΝΑ ερώτημα στο Vectorize (αποτυχία κλειστά)", qh.queries.length === 0 && !qh.prompt.includes("MARK"));
+  const hugeText = qh.events.filter((e) => e.type === "chunk").map((e) => e.text).join("");
+  check("... ρητό μήνυμα προς τον χρήστη, όχι σιωπηλή αποκοπή", /πάρα πολλά projects/.test(hugeText) && qh.done && qh.done.isFallback === true && qh.done.primarySource === null);
+  check("... δεν καταγράφεται ως αναπάντητη ερώτηση (δεν φταίει το περιεχόμενο)", [...env.DOCUMENT_REGISTRY.store.keys()].filter((k) => k.includes(":fallback:")).length === kvBefore);
+  const qa = await askQ(A, "Διαδικασία πελάτη μεγάλου χρήστη");
+  check("ο admin δεν επηρεάζεται από τα όρια (ένα ερώτημα χωρίς φίλτρο)", qa.queries.length === 1 && qa.queries[0].filter === undefined);
+}
+
+// ---- χωρίς το migration 0015: ο βοηθός δουλεύει όπως πριν και μόνο η αλλαγή ακροατηρίου δίνει 503
+{
+  const rOld = await J(call("au_ed_a@demo.gr", "POST", "/team/documents", { title: "Πριν το migration", departmentId: "ta", text: "Διαδικασία ελέγχου παλιού μοντέλου συγχρονισμού. AUDO-MARK" }));
+  const saved = { doc: rOld.data.id };
+  db.exec("PRAGMA foreign_keys = OFF");
+  for (const t of ["team_document_audience", "team_audience_group_projects", "team_audience_groups"]) db.exec(`DROP TABLE ${t}`);
+  db.exec("PRAGMA foreign_keys = ON");
+  const q = await askQ("au_a@demo.gr", "Διαδικασία ελέγχου παλιού μοντέλου συγχρονισμού");
+  check("χωρίς πίνακες ακροατηρίου: ο βοηθός δουλεύει (μόνο ιδιοκτήτης)", q.prompt.includes("AUDO-MARK") && q.events.some((e) => e.type === "done"));
+  check("... η λίστα και η ανάγνωση εγγράφων δουλεύουν", (await J(call("au_a@demo.gr", "GET", `/team/documents/${saved.doc}`))).status === 200 && (await J(call("au_a@demo.gr", "GET", "/team/documents"))).status === 200);
+  const body = { title: "Πριν το migration", departmentId: "ta", text: "Διαδικασία ελέγχου παλιού μοντέλου συγχρονισμού. AUDO-MARK" };
+  check("... η αποθήκευση εγγράφου χωρίς πεδίο ακροατηρίου δουλεύει", (await putDoc("au_ed_a@demo.gr", saved.doc, body)).status === 200);
+  check("... το κενό ακροατήριο ([]) όταν δεν υπάρχει κανένα δουλεύει", (await putDoc("au_ed_a@demo.gr", saved.doc, { ...body, audienceProjectIds: [] })).status === 200);
+  const x = await putDoc(A, saved.doc, { ...body, audienceProjectIds: ["tb"] });
+  check("... η ΑΛΛΑΓΗ ακροατηρίου: 503 audience_unavailable και το έγγραφο μένει όπως ήταν", x.status === 503 && x.data.error === "audience_unavailable");
+  check("... νέο έγγραφο με ακροατήριο: 503 και δεν δημιουργείται", (await J(call(A, "POST", "/team/documents", { title: "Χωρίς πίνακα ακροατηρίου", departmentId: "tb", text: "κείμενο", audienceProjectIds: ["ta"] }))).status === 503 && db.prepare("select count(*) c from team_documents where title = 'Χωρίς πίνακα ακροατηρίου'").get().c === 0);
+  check("... οι ενέργειες διαχείρισης (εμπιστευτικό, κρυφό project) δουλεύουν", (await J(call(A, "PATCH", `/team/admin/documents/${saved.doc}`, { hidden: true }))).status === 200 && (await J(call(A, "PATCH", "/team/admin/departments/tc", { hidden: true }))).status === 200);
+  await J(call(A, "PATCH", `/team/admin/documents/${saved.doc}`, { hidden: false }));
+  await J(call(A, "PATCH", "/team/admin/departments/tc", { hidden: false }));
+  // επαναφορά: το migration είναι ασφαλές να ξανατρέξει
+  db.exec(readFileSync(join(REPO, "migrations", "0015_team_audience.sql"), "utf8"));
+  const x2 = await putDoc(A, saved.doc, { ...body, audienceProjectIds: ["tb"] });
+  check("μετά την εφαρμογή του migration 0015 η αλλαγή ακροατηρίου δουλεύει", x2.status === 200 && audRows(saved.doc).length === 1);
+}
 }
 
 // ============================================================================ Σύνοψη
