@@ -238,7 +238,9 @@ function installFetchMock(state) {
         const afterDoc = prompt.split(/ΕΓΓΡΑΦΟ: «[^»]*»\n/)[1];
         const [base, update] = afterDoc.split("\n\nΕΝΗΜΕΡΩΣΗ:\n");
         const n = update.match(/\d+ €/);
-        return reply(n ? base.replace(/\d+ €/, n[0]) : base + "\n" + update);
+        const merged = n ? base.replace(/\d+ €/, n[0]) : base + "\n" + update;
+        if (state.mergeMode === "title") return reply("«" + prompt.match(/ΕΓΓΡΑΦΟ: «([^»]*)»/)[1] + "»\n" + merged);
+        return reply(merged);
       }
       // (γ) ερωτήσεις με λέξεις "άγνωστες" στο LLM
       if ((state.unknown || []).some((w) => prompt.includes(w))) {
@@ -250,7 +252,9 @@ function installFetchMock(state) {
       }
       // Η "απάντηση" αναφέρει μόνο τους δείκτες *-MARK που είδε το LLM, ώστε να φαίνεται τι του δόθηκε.
       const marks = [...new Set(prompt.match(/[A-Z]+-MARK/g) || [])].join(",");
-      const text = "ΑΠΑΝΤΗΣΗ [" + marks + "]";
+      const text = state.mdHtml ? "<script>window.__xss=1</script><img src=x onerror=window.__xss=1> εκτελέστηκε"
+        : state.md ? "* **3 εργάσιμες ημέρες** η επιστροφή\n- δεύτερη γραμμή"
+        : "ΑΠΑΝΤΗΣΗ [" + marks + "]";
       if (u.includes("streamGenerateContent")) {
         const sse = `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] })}\r\n\r\n`;
         return new Response(sse, { status: 200, headers: { "Content-Type": "text/event-stream" } });
@@ -1315,6 +1319,124 @@ section("17. Κλήσεις Gemini: απευθείας όταν δεν υπάρ�
   env.CF_ACCOUNT_ID = "acc123"; env.AI_GATEWAY_ID = "gw-test";
   check("production (με τις δύο μεταβλητές): ο κριτής περνά από το gateway, όπως πριν", await (async () => { const urls = await oneSave("URL-B"); return urls.length > 0 && urls.every((x) => x.startsWith("https://gateway.ai.cloudflare.com/v1/acc123/gw-test/google-ai-studio/v1beta/models/gemini-")); })());
   delete env.CF_ACCOUNT_ID; delete env.AI_GATEWAY_ID;
+}
+
+// ============================================================================ 18. Βελτιώσεις μετά τη δοκιμή στο lab
+section("18. Βελτιώσεις: τίτλος πρότασης, μήνυμα ελέγχου, ετικέτες, markdown, ενεργά updates, ονόματα στο ιστορικό");
+{
+  const mk = (title, dept, text) => ({ title, departmentId: dept, text });
+  const newDoc = async (email, title, dept, text) => (await readJson(await call(email, "POST", "/team/documents", mk(title, dept, text)))).id;
+
+  // (1) ο τίτλος που προσθέτει το LLM αφαιρείται από την πρόταση ενσωμάτωσης
+  const dC = await newDoc("ed_cc@demo.gr", "Όρια Γ", "cc", "Ποσά άνω των 10 € θέλουν έγκριση από τον υπεύθυνο.");
+  const uC = (await readJson(await call("ed_cc@demo.gr", "POST", "/team/updates", { documentId: dC, text: "Το όριο γίνεται 20 €." }))).id;
+  state.mergeMode = "title";
+  const pC = await readJson(await call("ed_cc@demo.gr", "POST", `/team/updates/${uC}/propose`));
+  state.mergeMode = null;
+  check("πρόταση ενσωμάτωσης: ο τίτλος «Όρια Γ» που πρόσθεσε το LLM αφαιρείται", /^Ποσά άνω των 20 €/.test(pC.proposedText) && !/«/.test(pC.proposedText));
+  const dD = await newDoc("ed_cc@demo.gr", "Όρια Δ", "cc", "Όρια Δ\nΠοσά άνω των 10 € θέλουν έγκριση.");
+  const uD = (await readJson(await call("ed_cc@demo.gr", "POST", "/team/updates", { documentId: dD, text: "Το όριο γίνεται 20 €." }))).id;
+  const pD = await readJson(await call("ed_cc@demo.gr", "POST", `/team/updates/${uD}/propose`));
+  check("... αλλά αν το ίδιο το έγγραφο ξεκινά με τη γραμμή του τίτλου, μένει (νόμιμο περιεχόμενο)", /^Όρια Δ\nΠοσά άνω των 20 €/.test(pD.proposedText));
+  await call("ed_cc@demo.gr", "POST", `/team/updates/${uC}/reject`); await call("ed_cc@demo.gr", "POST", `/team/updates/${uD}/reject`);
+
+  // (2) ο χειροκίνητος έλεγχος δηλώνει πόσες αντιφάσεις υπάρχουν ήδη ανοιχτές
+  state.judge = [{ x: "τρεις δόσεις", y: "έξι δόσεις", topic: "Δόσεις" }];
+  const dA = await newDoc("ed_cc@demo.gr", "Δόσεις Α", "cc", "Η εξόφληση γίνεται σε τρεις δόσεις. DA-X");
+  const dB = await newDoc("ed_cc@demo.gr", "Δόσεις Β", "cc", "Η εξόφληση γίνεται σε έξι δόσεις. DB-X");
+  const chk = await readJson(await call("ed_cc@demo.gr", "POST", `/team/documents/${dB}/check`));
+  check("χειροκίνητος έλεγχος: 0 νέες, αλλά δηλώνει ότι υπάρχει ήδη 1 ανοιχτή", chk.created === 0 && chk.open === 1 && chk.failed === 0);
+  const dZ = await newDoc("ed_cc@demo.gr", "Άσχετο έγγραφο", "cc", "Το κατάστημα ανοίγει στις εννιά. AS-X");
+  const chkZ = await readJson(await call("ed_cc@demo.gr", "POST", `/team/documents/${dZ}/check`));
+  check("έγγραφο χωρίς αντιφάσεις: open 0", chkZ.created === 0 && chkZ.open === 0);
+
+  // (2β) το μήνυμα στη σελίδα, σε κάθε περίπτωση
+  installFetchMock(state);
+  const { JSDOM, VirtualConsole } = await import("jsdom");
+  const page = (n) => readFileSync(join(REPO, "public", n), "utf8");
+  const waitFor = async (fn, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { const v = fn(); if (v) return v; } catch { /* ξανά */ } await new Promise((r) => setTimeout(r, 15)); } return null; };
+  const browserFor = (email) => {
+    const jar = { value: S[email] };
+    const bridge = async (input, init = {}) => {
+      const url = new URL(input, BASE); const method = init.method || "GET";
+      const headers = { "CF-Connecting-IP": `198.51.100.${(ipCounter++ % 250) + 1}`, ...(init.headers || {}) };
+      if (jar.value && url.pathname.startsWith("/team")) headers.Cookie = jar.value;
+      if (method !== "GET") headers.Origin = BASE;
+      return workerNew.fetch(new Request(url, { method, headers, body: init.body }), env);
+    };
+    return (file, query = "") => new JSDOM(page(file), { url: BASE + "/" + file + query, runScripts: "dangerously", pretendToBeVisual: true, virtualConsole: new VirtualConsole(),
+      beforeParse(w) { w.fetch = bridge; w.TextDecoder = TextDecoder; w.confirm = () => true; } });
+  };
+  const $ = (dom, sel) => dom.window.document.querySelector(sel);
+  const $$ = (dom, sel) => [...dom.window.document.querySelectorAll(sel)];
+  const click = (dom, el) => el.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  const byText = (dom, sel, re) => $$(dom, sel).find((e) => re.test(e.textContent));
+  const openEd = browserFor("ed_cc@demo.gr");
+  async function checkMessage(docId) {
+    const dom = openEd("team-editor.html", `?doc=${docId}`);
+    const btn = await waitFor(() => byText(dom, "button", /Έλεγχος αντιφάσεων τώρα/));
+    click(dom, btn);
+    return await waitFor(() => { const n = [...dom.window.document.querySelectorAll(".note")].map((x) => x.textContent).find((t) => /Καμία νέα|Δεν βρέθηκε|δεν ολοκληρώθηκε|Βρέθηκαν/.test(t)); return n || null; });
+  }
+  check("μήνυμα σελίδας (γνωστή αντίφαση): «Καμία νέα αντίφαση. Υπάρχουν ήδη 1 ανοιχτές»", /Καμία νέα αντίφαση\. Υπάρχουν ήδη 1 ανοιχτές/.test(await checkMessage(dB) || ""));
+  check("μήνυμα σελίδας (τίποτα): «Δεν βρέθηκε καμία αντίφαση»", /Δεν βρέθηκε καμία αντίφαση/.test(await checkMessage(dZ) || ""));
+  state.llmDown = true;
+  const downMsg = await checkMessage(dB);
+  state.llmDown = false;
+  check("μήνυμα σελίδας (AI εκτός): «δεν ολοκληρώθηκε», ΟΧΙ «0 νέες»", /δεν ολοκληρώθηκε/.test(downMsg || "") && !/Καμία νέα/.test(downMsg || ""));
+  state.judge = null;
+
+  // (3) ετικέτα στήλης εγγράφων ανά ρόλο
+  const pEmp = browserFor("emp_cc@demo.gr")("portal.html");
+  const pStaff = browserFor("ed_cc@demo.gr")("portal.html");
+  check("υπάλληλος: «Έγγραφα του τμήματός σου»", !!(await waitFor(() => $$(pEmp, "h2").some((h) => h.textContent === "Έγγραφα του τμήματός σου"))));
+  check("editor (βλέπει και άλλα τμήματα): «Όλα τα έγγραφα που βλέπεις»", !!(await waitFor(() => $$(pStaff, "h2").some((h) => h.textContent === "Όλα τα έγγραφα που βλέπεις"))) && !$$(pStaff, "h2").some((h) => h.textContent === "Έγγραφα του τμήματός σου"));
+
+  // (4) markdown στις απαντήσεις: έντονα και κουκκίδες, χωρίς αστερίσκους και χωρίς HTML από το LLM
+  state.md = true;
+  $(pEmp, "#q").value = "Σε πόσες ημέρες γίνεται η επιστροφή;";
+  $(pEmp, "form").dispatchEvent(new pEmp.window.Event("submit", { bubbles: true, cancelable: true }));
+  const body = await waitFor(() => $(pEmp, ".answer .body strong") && $(pEmp, ".answer .body"));
+  state.md = false;
+  check("απάντηση: το **κείμενο** γίνεται έντονο (strong) και δεν μένουν αστερίσκοι", !!body && $(pEmp, ".answer .body strong").textContent === "3 εργάσιμες ημέρες" && !/\*/.test(body.textContent));
+  check("απάντηση: οι λίστες με * και - γίνονται κουκκίδες", /^• /.test(body.textContent) && /• δεύτερη γραμμή/.test(body.textContent));
+  state.mdHtml = true;
+  $(pEmp, "#q").value = "Δοκιμή HTML";
+  $(pEmp, "form").dispatchEvent(new pEmp.window.Event("submit", { bubbles: true, cancelable: true }));
+  await waitFor(() => /εκτελέστηκε/.test(($$(pEmp, ".answer .body").pop() || {}).textContent || "") || $$(pEmp, ".answer .body").length > 1);
+  state.mdHtml = false;
+  check("απάντηση με <script>/<img onerror>: εμφανίζεται ως κείμενο, ΚΑΝΕΝΑ στοιχείο δεν δημιουργείται", $$(pEmp, ".answer .body").every((b) => !b.querySelector("script") && !b.querySelector("img")) && !pEmp.window.__xss);
+
+  // (5) ένα update που έχει φύγει από τη βάση ΔΕΝ φτάνει ποτέ στον βοηθό, ακόμα κι αν το Vectorize το έχει ακόμα
+  const dE = await newDoc("ed_cc@demo.gr", "Ωράριο καφέ", "cc", "Ο καφές σερβίρεται από τις εννιά. KF-MARK");
+  const uE = (await readJson(await call("ed_cc@demo.gr", "POST", "/team/updates", { documentId: dE, text: "Ο καφές σερβίρεται πλέον από τις οκτώ. ZZ-MARK" }))).id;
+  const stale = env.VECTORIZE.vectors.get(`upd-${uE}-chunk-0`);
+  const askPrompt = async (q) => { state.prompts.length = 0; await readSse(await call("emp_cc@demo.gr", "POST", "/team/query/stream", { question: q })); return state.prompts.join("\n"); };
+  check("ενεργό update: φτάνει στον βοηθό", /ZZ-MARK/.test(await askPrompt("Από τι ώρα σερβίρεται ο καφές;")));
+  await call("ed_cc@demo.gr", "POST", `/team/updates/${uE}/reject`);
+  env.VECTORIZE.vectors.set(`upd-${uE}-chunk-0`, stale); // προσομοίωση: το Vectorize δεν έχει προλάβει να σβήσει
+  check("απορριφθέν update που το Vectorize δεν έχει σβήσει ακόμα: ΔΕΝ φτάνει στον βοηθό", !/ZZ-MARK/.test(await askPrompt("Από τι ώρα σερβίρεται ο καφές;")) && /KF-MARK/.test(state.prompts.join("\n")));
+  env.VECTORIZE.vectors.delete(`upd-${uE}-chunk-0`);
+  // fail closed: χωρίς δυνατότητα ελέγχου στη βάση, κανένα update δεν περνά
+  const uF = (await readJson(await call("ed_cc@demo.gr", "POST", "/team/updates", { documentId: dE, text: "Ο καφές σερβίρεται και στις επτά. YY-MARK" }))).id;
+  const realPrepare = env.DB.prepare.bind(env.DB);
+  env.DB.prepare = (sql) => { if (/FROM team_updates WHERE workspace_id = \? AND status = 'pending' AND id IN/.test(sql)) throw new Error("db down"); return realPrepare(sql); };
+  const downPrompt = await askPrompt("Από τι ώρα σερβίρεται ο καφές;");
+  env.DB.prepare = realPrepare;
+  check("αν ο έλεγχος στη βάση αποτύχει, κανένα update δεν δίνεται στον βοηθό (fail closed), το έγγραφο όμως ναι", !/YY-MARK/.test(downPrompt) && /KF-MARK/.test(downPrompt));
+  await call("ed_cc@demo.gr", "POST", `/team/updates/${uF}/reject`);
+
+  // (6) ονόματα αντί για id στο ιστορικό
+  const entries = (await readJson(await call("admin@demo.gr", "GET", "/team/admin/audit"))).entries;
+  check("ιστορικό: τα έγγραφα εμφανίζονται με τον τίτλο τους", entries.some((e) => e.action === "document_created" && e.target === dB && e.targetLabel === "Δόσεις Β"));
+  check("ιστορικό: τα τμήματα εμφανίζονται με το όνομά τους (όχι «fin»)", entries.some((e) => e.action === "department_hidden" && e.target === "fin" && e.targetLabel === "Finance"));
+  await call("admin@demo.gr", "DELETE", `/team/documents/${dZ}`);
+  const after = (await readJson(await call("admin@demo.gr", "GET", "/team/admin/audit"))).entries;
+  check("ιστορικό: διαγραμμένο έγγραφο κρατά τον τίτλο που είχε", after.some((e) => e.action === "document_deleted" && e.target === dZ && e.targetLabel === "Άσχετο έγγραφο"));
+  check("ιστορικό: πάντα μόνο για admin και όχι διαρροή σε άλλον οργανισμό", (await call("ed_cc@demo.gr", "GET", "/team/admin/audit")).status === 403 && !JSON.stringify((await readJson(await call("other@other.gr", "GET", "/team/admin/audit"))).entries).includes("Δόσεις"));
+  const adDom = browserFor("admin@demo.gr")("team-admin.html");
+  click(adDom, await waitFor(() => $(adDom, "#tab-audit")));
+  check("σελίδα ιστορικού: δείχνει «Finance» και τίτλους αντί για id", !!(await waitFor(() => /απόκρυψη τμήματος · Finance/.test(adDom.window.document.body.textContent) && /νέο έγγραφο · Δόσεις/.test(adDom.window.document.body.textContent))) && !/· fin\b/.test(adDom.window.document.body.textContent));
 }
 
 // ============================================================================ Σύνοψη

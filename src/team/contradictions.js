@@ -398,5 +398,10 @@ export async function handleCheckDocument(rc, id) {
   const result = await checkContradictions(env, deps, {
     workspaceId: member.workspaceId, docId: id, title: doc.title, text: doc.fullText, vectors, origin, actorEmail: member.email,
   });
-  return json(200, result);
+  // Οι ήδη γνωστές αντιφάσεις δεν μετρούν ως "νέες". Επιστρέφουμε και πόσες ανοιχτές υπάρχουν, ώστε το μήνυμα
+  // να μη δείχνει "0" όταν απλώς βρέθηκαν ξανά οι ίδιες.
+  const openRow = await env.DB.prepare(
+    "SELECT COUNT(*) AS c FROM team_contradictions WHERE workspace_id = ? AND status = 'open' AND (doc_a = ? OR doc_b = ?)"
+  ).bind(member.workspaceId, id, id).first();
+  return json(200, { ...result, open: openRow ? openRow.c : 0 });
 }

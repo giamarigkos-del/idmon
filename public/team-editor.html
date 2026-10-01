@@ -378,8 +378,12 @@
         h("button", { class: "btn secondary", type: "button", text: "Έλεγχος αντιφάσεων τώρα", onclick: function () {
           note.className = "note"; note.textContent = "Έλεγχος…";
           api("/team/documents/" + encodeURIComponent(currentId) + "/check", "POST").then(function (r) {
-            if (r.status === 200) { note.className = "note ok"; note.textContent = "Ο έλεγχος τελείωσε: " + r.data.created + " νέες αντιφάσεις."; }
-            else { note.className = "note err"; note.textContent = errText(r); }
+            if (r.status !== 200) { note.className = "note err"; note.textContent = errText(r); return; }
+            var d = r.data;
+            if (d.created > 0) { note.className = "note ok"; note.textContent = "Βρέθηκαν " + d.created + " νέες αντιφάσεις. Δες τα Εισερχόμενα."; }
+            else if (d.failed > 0) { note.className = "note err"; note.textContent = "Ο έλεγχος δεν ολοκληρώθηκε (πρόβλημα με τον πάροχο AI). Δοκίμασε ξανά σε λίγο."; }
+            else if (d.open > 0) { note.className = "note ok"; note.textContent = "Καμία νέα αντίφαση. Υπάρχουν ήδη " + d.open + " ανοιχτές για αυτό το έγγραφο (δες τα Εισερχόμενα)."; }
+            else { note.className = "note ok"; note.textContent = "Δεν βρέθηκε καμία αντίφαση."; }
           });
         } }),
         h("button", { class: "btn danger", type: "button", text: "Διαγραφή", onclick: function () {

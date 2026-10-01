@@ -11,7 +11,7 @@
 
 import { json, loadWorkspaceDepartments } from "./auth.js";
 import { canWriteDepartment } from "./access.js";
-import { DOC_ID_RE, UPDATE_PREFIX, deleteUpdateVectors, departmentName, listDocIndex, persistDocument, readDoc } from "./store.js";
+import { DOC_ID_RE, UPDATE_PREFIX, deleteUpdateVectors, departmentName, listDocIndex, normalizeText, persistDocument, readDoc } from "./store.js";
 import { recordAudit } from "./audit.js";
 import { afterDocumentSaved } from "./contradictions.js";
 
@@ -35,6 +35,17 @@ function mergePrompt(baseTitle, baseText, updateText) {
 
 function cleanProposal(raw) {
   return String(raw || "").trim().replace(/^```[a-z]*\s*/i, "").replace(/```\s*$/, "").trim();
+}
+
+// Το LLM προσθέτει συχνά τον τίτλο του εγγράφου σαν πρώτη γραμμή. Αφαιρείται, εκτός αν το ίδιο το έγγραφο
+// ξεκινά ήδη με τη γραμμή του τίτλου (τότε είναι νόμιμο περιεχόμενο).
+function stripLeadingTitle(proposed, title, original) {
+  const nl = proposed.indexOf("\n");
+  if (nl < 0) return proposed;
+  const clean = (s) => normalizeText(String(s).replace(/[«»"'“”#*_]/g, ""));
+  if (clean(proposed.slice(0, nl)) !== clean(title)) return proposed;
+  if (clean(String(original).split("\n")[0]) === clean(title)) return proposed;
+  return proposed.slice(nl + 1).replace(/^\s+/, "");
 }
 
 async function loadPendingUpdate(env, member, id) {
@@ -111,7 +122,7 @@ export async function handleProposeMerge(rc, id) {
 
   let proposed;
   try {
-    proposed = cleanProposal(await deps.askGeminiOnly(mergePrompt(doc.title, doc.fullText, row.text), env));
+    proposed = stripLeadingTitle(cleanProposal(await deps.askGeminiOnly(mergePrompt(doc.title, doc.fullText, row.text), env)), doc.title, doc.fullText);
   } catch {
     return json(503, { error: "ai_unavailable" });
   }

@@ -25,6 +25,28 @@ function isFallbackAnswer(answer) {
   );
 }
 
+// Το Vectorize σβήνει τα vectors με καθυστέρηση. Ένα update που ενσωματώθηκε ή απορρίφθηκε μπορεί λοιπόν να
+// εμφανίζεται ακόμα στην αναζήτηση για λίγα λεπτά. Πριν φτάσει στον βοηθό, κάθε κομμάτι update ελέγχεται στη
+// βάση ότι είναι ΑΚΟΜΑ εκκρεμές. Fail closed: αν δεν μπορεί να ελεγχθεί, το κομμάτι update παραλείπεται.
+async function dropInactiveUpdates(env, workspaceId, matches) {
+  const isUpdate = (m) => m.metadata && m.metadata.kind === "update";
+  if (!matches.some(isUpdate)) return matches;
+  const ids = [...new Set(matches.filter(isUpdate).map((m) => Number(m.metadata.updateId)).filter(Number.isInteger))];
+  let active = new Set();
+  try {
+    if (ids.length) {
+      const marks = ids.map(() => "?").join(",");
+      const res = await env.DB.prepare(
+        `SELECT id FROM team_updates WHERE workspace_id = ? AND status = 'pending' AND id IN (${marks})`
+      ).bind(workspaceId, ...ids).all();
+      active = new Set(((res && res.results) || []).map((r) => r.id));
+    }
+  } catch {
+    active = new Set();
+  }
+  return matches.filter((m) => !isUpdate(m) || active.has(Number(m.metadata.updateId)));
+}
+
 // Καταγραφή αναπάντητης ερώτησης: ΧΩΡΙΣ ταυτότητα υπαλλήλου (απόφαση GDPR, 29-30 Σεπ 2026: μόνο το
 // κείμενο, η ώρα και τα ΤΜΗΜΑΤΑ του ερωτώντος, ώστε ο editor κάθε τμήματος να βλέπει τις δικές του
 // αναπάντητες ερωτήσεις χωρίς να γίνεται εργαλείο παρακολούθησης). Τα στοιχεία μπαίνουν και στα
@@ -67,6 +89,8 @@ export async function handleTeamQuery(request, env, member, deps) {
             (m) => m.metadata && typeof m.metadata.department_id === "string" && allowed.has(m.metadata.department_id)
           );
         }
+
+        matches = await dropInactiveUpdates(env, workspaceId, matches);
 
         if (matches.length === 0) {
           controller.enqueue(deps.encodeSSE({ type: "chunk", text: NO_MATCH_ANSWER }));

@@ -83,6 +83,20 @@
   var app = document.getElementById("app");
   var chatHistory = []; // τελευταία μηνύματα συζήτησης, για follow-up ερωτήσεις
 
+  // Ο βοηθός γράφει συχνά markdown (**έντονα**, λίστες με * ή -). Εμφανίζεται ως κείμενο με έντονα και κουκκίδες,
+  // χωρίς ποτέ innerHTML: κάθε κομμάτι μπαίνει με textContent.
+  function renderRich(node, text) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+    String(text).split("\n").forEach(function (line, i) {
+      if (i > 0) node.appendChild(document.createElement("br"));
+      line = line.replace(/^\s*[*-]\s+/, "• ");
+      line.split(/\*\*([^*]+)\*\*/).forEach(function (part, k) {
+        if (!part) return;
+        if (k % 2 === 1) { var b = document.createElement("strong"); b.textContent = part; node.appendChild(b); }
+        else node.appendChild(document.createTextNode(part));
+      });
+    });
+  }
   function h(tag, props, children) {
     var node = document.createElement(tag);
     props = props || {};
@@ -229,7 +243,7 @@
     app.appendChild(answerBox);
 
     var recent = h("div", null, [h("h2", { text: "Τι άλλαξε πρόσφατα" })]);
-    var docsCol = h("div", null, [h("h2", { text: "Έγγραφα του τμήματός σου" })]);
+    var docsCol = h("div", null, [h("h2", { text: me.role === "employee" ? "Έγγραφα του τμήματός σου" : "Όλα τα έγγραφα που βλέπεις" })]);
     app.appendChild(h("div", { class: "cols" }, [recent, docsCol]));
     input.focus();
     loadDocuments(me, recent, docsCol);
@@ -303,7 +317,7 @@
         });
       }
       function handleEvent(ev) {
-        if (ev.type === "chunk") { text += ev.text; body.textContent = text; }
+        if (ev.type === "chunk") { text += ev.text; renderRich(body, text); }
         else if (ev.type === "error") { body.textContent = "Κάτι πήγε στραβά. Δοκίμασε ξανά."; }
         else if (ev.type === "done") {
           if (ev.primarySource && !ev.isFallback) {

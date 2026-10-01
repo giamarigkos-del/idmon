@@ -224,7 +224,7 @@
     if (!entries.length) box.appendChild(h("div", { class: "hint", text: "Καμία ενέργεια ακόμα." }));
     entries.forEach(function (e) {
       box.appendChild(h("div", { class: "row log" }, [
-        h("span", null, [h("span", { class: "a", text: e.actor }), document.createTextNode(" · " + (ACTION_LABEL[e.action] || e.action) + (e.target ? " · " + e.target : ""))]),
+        h("span", null, [h("span", { class: "a", text: e.actor }), document.createTextNode(" · " + (ACTION_LABEL[e.action] || e.action) + (e.target ? " · " + (e.targetLabel || e.target) : ""))]),
         h("span", { class: "t", text: new Date(e.at).toLocaleString("el-GR") }),
       ]));
     });

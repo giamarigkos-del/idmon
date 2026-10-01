@@ -214,12 +214,21 @@ export async function handleAdminAudit(env, member) {
   const res = await env.DB.prepare(
     "SELECT id, actor_email, action, target, detail, created_at FROM team_audit_log WHERE workspace_id = ? ORDER BY id DESC LIMIT ?"
   ).bind(member.workspaceId, AUDIT_PAGE_SIZE).all();
+  // Ονόματα αντί για τεχνικά id (έγγραφα, τμήματα). Διαγραμμένα έγγραφα: ο τίτλος που κρατήθηκε στην εγγραφή.
+  const docTitles = new Map((await listDocIndex(env, member.workspaceId)).map((d) => [d.id, d.title]));
+  const deptNames = new Map((await loadWorkspaceDepartments(env, member.workspaceId)).map((d) => [d.id, d.name]));
   return json(200, {
     retentionDays: AUDIT_RETENTION_DAYS,
-    entries: ((res && res.results) || []).map((r) => ({
-      id: r.id, actor: r.actor_email, action: r.action, target: r.target,
-      detail: r.detail ? safeParse(r.detail) : null, at: r.created_at,
-    })),
+    entries: ((res && res.results) || []).map((r) => {
+      const detail = r.detail ? safeParse(r.detail) : null;
+      let targetLabel = null;
+      if (r.target) {
+        if (docTitles.has(r.target)) targetLabel = docTitles.get(r.target);
+        else if (deptNames.has(r.target)) targetLabel = deptNames.get(r.target);
+        else if (/^doc-/.test(r.target) && detail && typeof detail.title === "string") targetLabel = detail.title;
+      }
+      return { id: r.id, actor: r.actor_email, action: r.action, target: r.target, targetLabel, detail, at: r.created_at };
+    }),
   });
 }
 
