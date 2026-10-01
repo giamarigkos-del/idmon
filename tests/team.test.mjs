@@ -317,7 +317,7 @@ section("1. Κανόνες πρόσβασης (access.js)");
     { id: "hr", name: "HR", hidden: 1 },
   ];
   const emp = { role: "employee", departmentIds: ["cc"] };
-  const ed = { role: "editor", departmentIds: ["cc"] };
+  const ed = { role: "editor", departmentIds: ["cc"], editorProjectIds: ["cc"] };
   const adm = { role: "admin", departmentIds: [] };
   const set = (s) => (s === null ? null : [...s].sort().join(","));
   check("employee διαβάζει: δικό του + εταιρικά", set(access.readableDepartmentIds(emp, depts)) === "_all,cc");
@@ -359,6 +359,10 @@ INSERT INTO team_members(workspace_id,email,role,status,created_at) VALUES
 const memberId = (email) => db.prepare("select id from team_members where email=?").get(email).id;
 for (const [email, dep] of [["ed_cc@demo.gr","cc"],["ed_fin@demo.gr","fin"],["emp_cc@demo.gr","cc"],["emp_fin@demo.gr","fin"],["emp_hr@demo.gr","hr"],["off@demo.gr","cc"]]) {
   db.prepare("insert into member_departments(member_id,department_id) values(?,?)").run(memberId(email), dep);
+}
+// Ρόλος ανά project: οι editors του demo είναι editors στο δικό τους project (όπως θα τους είχε δώσει το backfill του migration 0014).
+for (const [email, dep] of [["ed_cc@demo.gr", "cc"], ["ed_fin@demo.gr", "fin"]]) {
+  db.prepare("insert into team_project_editors(member_id,project_id,created_at) values(?,?,?)").run(memberId(email), dep, new Date().toISOString());
 }
 
 async function login(email) {
@@ -1281,18 +1285,19 @@ section("16. team-editor (εισερχόμενα), team-admin και portal: π�
   check("διπλό όνομα: εμφανίζεται μήνυμα λάθους", !!(await waitFor(() => /Υπάρχει ήδη τμήμα/.test(ad.window.document.body.textContent))));
 
   click(ad, $(ad, "#tab-members"));
-  check("μέλη: λίστα με επιλογή ρόλου και τμημάτων ανά μέλος", !!(await waitFor(() => $$(ad, ".member-row").length >= 7)) && byText(ad, ".member-row", /ed_cc@demo\.gr/).querySelectorAll("input[type=checkbox]").length >= 3);
+  check("μέλη: λίστα με επιλογή ρόλου και τμημάτων ανά μέλος", !!(await waitFor(() => $$(ad, ".member-row").length >= 7)) && byText(ad, ".member-row", /ed_cc@demo\.gr/).querySelectorAll(".proj-role select").length >= 3);
   setVal(ad, $(ad, "#new-email"), "pg@demo.gr");
-  $(ad, "#new-role").value = "editor";
+  $(ad, "#new-role").value = "member";
+  const newSel = $(ad, "#add-member .proj-roles select[data-project=cc]"); newSel.value = "editor";
   submit(ad, "#add-member");
-  check("προσθήκη μέλους από τη σελίδα", !!(await waitFor(() => byText(ad, ".member-row", /pg@demo\.gr/))) && db.prepare("select role from team_members where email='pg@demo.gr'").get().role === "editor");
-  const sel = byText(ad, ".member-row", /pg@demo\.gr/).querySelector("select");
-  sel.value = "employee"; sel.dispatchEvent(new ad.window.Event("change", { bubbles: true }));
+  check("προσθήκη μέλους από τη σελίδα (editor στο cc)", !!(await waitFor(() => byText(ad, ".member-row", /pg@demo\.gr/))) && db.prepare("select role from team_members where email='pg@demo.gr'").get().role === "editor" && !!db.prepare("select 1 from team_project_editors e join team_members m on m.id=e.member_id where m.email='pg@demo.gr' and e.project_id='cc'").get());
+  const sel = byText(ad, ".member-row", /pg@demo\.gr/).querySelector(".proj-roles select[data-project=cc]");
+  sel.value = "member"; sel.dispatchEvent(new ad.window.Event("change", { bubbles: true }));
   check("αλλαγή ρόλου από τη σελίδα ισχύει αμέσως", !!(await waitFor(() => db.prepare("select role from team_members where email='pg@demo.gr'").get().role === "employee")));
   click(ad, byText(ad, ".member-row", /pg@demo\.gr/).querySelector(".status-toggle"));
   check("απενεργοποίηση από τη σελίδα", !!(await waitFor(() => db.prepare("select status from team_members where email='pg@demo.gr'").get().status === "disabled")) && !!(await waitFor(() => /απενεργοποιημένο/.test((byText(ad, ".member-row", /pg@demo\.gr/) || {}).textContent || ""))));
   const own = byText(ad, ".member-row", /admin@demo\.gr/).querySelector("select");
-  own.value = "editor"; own.dispatchEvent(new ad.window.Event("change", { bubbles: true }));
+  own.value = "member"; own.dispatchEvent(new ad.window.Event("change", { bubbles: true }));
   check("ο τελευταίος admin δεν υποβαθμίζεται: το λάθος μένει ορατό μετά την ανανέωση", !!(await waitFor(() => /χωρίς ενεργό admin/.test(ad.window.document.body.textContent))) && db.prepare("select role from team_members where email='admin@demo.gr'").get().role === "admin");
 
   click(ad, $(ad, "#tab-audit"));
@@ -1767,6 +1772,117 @@ section("24. Έγγραφα στο D1: άμεση συνέπεια (αντί γ�
   store.resetMigrationCache();
   check("χωρίς το migration 0013: 503 με καθαρό μήνυμα (migration_required), όχι ακατέργαστο σφάλμα", noTable.status === 503 && noTableBody.error === "migration_required");
   check("... και μετά την εφαρμογή του όλα δουλεύουν κανονικά", (await titlesOf("admin@demo.gr")).length > 3);
+}
+
+// ============================================================================ 25. Ρόλος ανά project (φέτα 1)
+section("25. Ρόλος ανά project: μέλος σε ένα project, editor σε άλλο");
+{
+  const access = await import(pathToFileURL(join(TMP, "modified", "src", "team", "access.js")).href);
+  const adm = (method, path, body) => call("admin@demo.gr", method, `/team/admin${path}`, body);
+  const myRole = async (email) => readJson(await call(email, "GET", "/team/me"));
+  const post = (email, dep, title) => call(email, "POST", "/team/documents", { title, departmentId: dep, text: `Κείμενο ${title}. PR-X` });
+
+  // (α) πίνακας δικαιωμάτων: ρόλος × ενέργεια, με ρητή άρνηση
+  const deps = [{ id: "a", name: "A", hidden: false }, { id: "b", name: "B", hidden: false }, { id: "c", name: "C", hidden: true }];
+  const M = (role, departmentIds, editorProjectIds) => ({ role, departmentIds, editorProjectIds });
+  const admin = M("admin", [], []);
+  const edAmemB = M("editor", ["a", "b"], ["a"]);           // editor στο Α, απλό μέλος στο Β
+  const edBoth = M("editor", ["a", "b"], ["a", "b"]);
+  const plain = M("employee", ["a"], []);
+  const outsider = M("employee", [], []);
+  const stale = M("editor", ["a"], ["a", "b"]);             // ανάθεση editor σε project όπου ΔΕΝ είναι μέλος (παλιά γραμμή)
+  const w = (m, d) => access.canWriteDepartment(m, deps, d);
+  const r = (m, d) => access.canReadDepartment(m, deps, d);
+  check("γράφει: admin παντού (και στο _all)", w(admin, "a") && w(admin, "b") && w(admin, "_all"));
+  check("γράφει: editor Α + μέλος Β = ΜΟΝΟ στο Α", w(edAmemB, "a") && !w(edAmemB, "b"));
+  check("γράφει: editor και στα δύο = και στα δύο, ΠΟΤΕ στο _all", w(edBoth, "a") && w(edBoth, "b") && !w(edBoth, "_all"));
+  check("γράφει: απλό μέλος και outsider ΠΟΤΕ", !w(plain, "a") && !w(outsider, "a") && !w(plain, "b"));
+  check("γράφει: ανάθεση editor χωρίς συμμετοχή στο project δεν δίνει πρόσβαση (b)", !w(stale, "b") && w(stale, "a"));
+  check("γράφει: project που δεν υπάρχει στον οργανισμό ΠΟΤΕ (ούτε ο admin σε ξένο project)", !w(edBoth, "zzz") && !w(admin, "zzz"));
+  check("διαβάζει: μέλος και στα δικά του, όχι στα άλλα (b) ούτε στα κρυφά (c)", r(plain, "a") && !r(plain, "b") && !r(plain, "c") && r(plain, "_all"));
+  check("διαβάζει: editor (παραγόμενος ρόλος) βλέπει και άλλα μη κρυφά projects, όχι κρυφά", r(edAmemB, "b") && !r(edAmemB, "c"));
+  check("ρόλος σε project: admin, editor, member, null", access.projectRoleOf(admin, "a") === "admin" && access.projectRoleOf(edAmemB, "a") === "editor" && access.projectRoleOf(edAmemB, "b") === "member" && access.projectRoleOf(outsider, "a") === null);
+
+  // (β) από άκρη σε άκρη: νέο μέλος με ρόλο ανά project
+  const created = await adm("POST", "/members", { email: "lead@demo.gr", role: "member", projectRoles: { cc: "editor", fin: "member" } });
+  check("νέο μέλος με ρόλο ανά project: 201", created.status === 201);
+  check("αποθήκευση: συμμετοχή σε 2 projects, editor σε 1, παράγωγος ρόλος editor", db.prepare("select count(*) c from member_departments md join team_members m on m.id=md.member_id where m.email='lead@demo.gr'").get().c === 2 && db.prepare("select project_id from team_project_editors e join team_members m on m.id=e.member_id where m.email='lead@demo.gr'").all().map((x) => x.project_id).join() === "cc" && db.prepare("select role from team_members where email='lead@demo.gr'").get().role === "editor");
+  S["lead@demo.gr"] = (await login("lead@demo.gr")).cookie;
+  const me1 = await myRole("lead@demo.gr");
+  check("/team/me: editorProjectIds = [cc], ρόλος editor", me1.role === "editor" && JSON.stringify(me1.editorProjectIds) === JSON.stringify(["cc"]));
+  check("γράφει στο cc (editor): 201", (await post("lead@demo.gr", "cc", "Έγγραφο lead cc")).status === 201);
+  check("ΔΕΝ γράφει στο fin όπου είναι απλό μέλος: 403", (await post("lead@demo.gr", "fin", "Έγγραφο lead fin")).status === 403);
+  const finDocs = (await readJson(await call("lead@demo.gr", "GET", "/team/documents"))).documents.filter((d) => d.departmentId === "fin");
+  check("διαβάζει έγγραφα του fin αλλά όχι επεξεργάσιμα", finDocs.length >= 1 && finDocs.every((d) => d.editable === false));
+  const finDoc = finDocs[0];
+  check("επεξεργασία εγγράφου του fin: 403", (await call("lead@demo.gr", "PUT", `/team/documents/${finDoc.id}`, { title: finDoc.title, departmentId: "fin", text: "Αλλαγή που δεν επιτρέπεται" })).status === 403);
+  check("διαγραφή εγγράφου του fin: 403", (await call("lead@demo.gr", "DELETE", `/team/documents/${finDoc.id}`)).status === 403);
+  check("μεταφορά δικού του εγγράφου στο fin: 403 (δεν είναι editor εκεί)", await (async () => { const id = (await readJson(await post("lead@demo.gr", "cc", "Μεταφορά Χ"))).id; return (await call("lead@demo.gr", "PUT", `/team/documents/${id}`, { title: "Μεταφορά Χ", departmentId: "fin", text: "Κείμενο Μεταφορά Χ. PR-X" })).status === 403; })());
+
+  // (γ) αλλαγή ρόλων ισχύει ΑΜΕΣΑ, χωρίς νέα σύνδεση
+  check("αλλαγή ρόλων (cc: μέλος, fin: editor): 200", (await adm("PATCH", `/members/${memberId("lead@demo.gr")}`, { projectRoles: { cc: "member", fin: "editor" } })).status === 200);
+  check("ΑΜΕΣΑ: ο editor μεταφέρθηκε: γράφει στο fin, όχι πια στο cc", (await post("lead@demo.gr", "fin", "Έγγραφο lead fin 2")).status === 201 && (await post("lead@demo.gr", "cc", "Έγγραφο lead cc 2")).status === 403);
+  check("το ιστορικό καταγράφει την αλλαγή ρόλων ανά project", (await audit()).some((x) => x.action === "member_project_roles_changed"));
+  check("αφαίρεση από project (μόνο fin): χάνει και τη συμμετοχή στο cc, και κάθε δικαίωμα εκεί", (await adm("PATCH", `/members/${memberId("lead@demo.gr")}`, { projectRoles: { fin: "editor" } })).status === 200 && (await post("lead@demo.gr", "cc", "Μετά την αφαίρεση")).status === 403 && db.prepare("select count(*) c from member_departments md join team_members m on m.id=md.member_id where m.email='lead@demo.gr' and md.department_id='cc'").get().c === 0);
+  check("υποβάθμιση σε μέλος παντού: ο παράγωγος ρόλος γίνεται employee και χάνει ΑΜΕΣΩΣ τα εισερχόμενα (403)", (await adm("PATCH", `/members/${memberId("lead@demo.gr")}`, { projectRoles: { fin: "member" } })).status === 200 && (await call("lead@demo.gr", "GET", "/team/inbox")).status === 403 && (await myRole("lead@demo.gr")).role === "employee");
+  // (δ) συντομογραφίες και έλεγχοι εισόδου
+  check("συντομογραφία role=editor: editor σε ΟΛΑ τα projects του", (await adm("PATCH", `/members/${memberId("lead@demo.gr")}`, { projectRoles: { cc: "member", fin: "member" } })).status === 200 && (await adm("PATCH", `/members/${memberId("lead@demo.gr")}`, { role: "editor" })).status === 200 && (await post("lead@demo.gr", "cc", "Συντομογραφία cc")).status === 201 && (await post("lead@demo.gr", "fin", "Συντομογραφία fin")).status === 201);
+  check("role=member: δεν αγγίζει τους ρόλους ανά project", (await adm("PATCH", `/members/${memberId("lead@demo.gr")}`, { role: "member" })).status === 200 && (await post("lead@demo.gr", "cc", "Μετά member")).status === 201);
+  check("role=employee: αφαιρεί όλους τους ρόλους editor", (await adm("PATCH", `/members/${memberId("lead@demo.gr")}`, { role: "employee" })).status === 200 && (await post("lead@demo.gr", "cc", "Μετά employee")).status === 403);
+  check("άκυρος ρόλος project: 400", (await adm("PATCH", `/members/${memberId("lead@demo.gr")}`, { projectRoles: { cc: "admin" } })).status === 400);
+  check("project άλλου οργανισμού: 400", (await adm("PATCH", `/members/${memberId("lead@demo.gr")}`, { projectRoles: { cc2: "editor" } })).status === 400);
+  check("projectRoles που δεν είναι αντικείμενο: 400", (await adm("PATCH", `/members/${memberId("lead@demo.gr")}`, { projectRoles: ["cc"] })).status === 400);
+  check("δημιουργία με άκυρο project: 400", (await adm("POST", "/members", { email: "bad@demo.gr", role: "member", projectRoles: { nope: "editor" } })).status === 400);
+  check("ο editor δεν αλλάζει ρόλους (admin μόνο): 403", (await call("ed_cc@demo.gr", "PATCH", `/team/admin/members/${memberId("lead@demo.gr")}`, { projectRoles: { cc: "editor" } })).status === 403);
+  check("ο admin άλλου οργανισμού δεν αλλάζει ρόλους εδώ: 404", (await call("other@other.gr", "PATCH", `/team/admin/members/${memberId("lead@demo.gr")}`, { projectRoles: { cc2: "editor" } })).status === 404);
+  const list = (await readJson(await adm("GET", "/overview"))).members.find((m) => m.email === "lead@demo.gr");
+  check("η λίστα μελών δείχνει ρόλο ανά project", list && typeof list.projectRoles === "object" && list.projectRoles.cc === "member" && list.projectRoles.fin === "member");
+  check("η συμμετοχή σε project με editor ανάθεση: διαγραφή project καθαρίζει τις αναθέσεις (cascade)", await (async () => {
+    db.prepare("insert into departments(id,workspace_id,name,hidden,created_at) values('tmp1','team-demo','Tmp',0,'2026-10-01T00:00:00Z')").run();
+    db.prepare("insert into member_departments(member_id,department_id) values(?, 'tmp1')").run(memberId("lead@demo.gr"));
+    db.prepare("insert into team_project_editors(member_id,project_id,created_at) values(?, 'tmp1','2026-10-01T00:00:00Z')").run(memberId("lead@demo.gr"));
+    db.prepare("delete from departments where id='tmp1'").run();
+    return db.prepare("select count(*) c from team_project_editors where project_id='tmp1'").get().c === 0;
+  })());
+
+  // (ε) migration: κάθε παλιός editor γίνεται editor σε όλα τα τμήματά του, μόνο αυτός
+  const t = "2026-10-01T00:00:00Z";
+  db.prepare("insert into team_members(workspace_id,email,role,status,created_at) values('team-demo','legacy_ed@demo.gr','editor','active',?)").run(t);
+  db.prepare("insert into team_members(workspace_id,email,role,status,created_at) values('team-demo','legacy_emp@demo.gr','employee','active',?)").run(t);
+  for (const e of ["legacy_ed@demo.gr", "legacy_emp@demo.gr"]) for (const d of ["cc", "fin"]) db.prepare("insert into member_departments(member_id,department_id) values(?,?)").run(memberId(e), d);
+  db.exec(readFileSync(join(REPO, "migrations", "0014_team_project_roles.sql"), "utf8"));
+  const legacyRows = (e) => db.prepare("select project_id from team_project_editors where member_id = ? order by 1").all(memberId(e)).map((x) => x.project_id).join();
+  check("migration 0014 (backfill): παλιός editor → editor σε όλα τα τμήματά του", legacyRows("legacy_ed@demo.gr") === "cc,fin");
+  check("migration 0014 (backfill): παλιός υπάλληλος → κανένας ρόλος editor", legacyRows("legacy_emp@demo.gr") === "");
+  db.exec(readFileSync(join(REPO, "migrations", "0014_team_project_roles.sql"), "utf8"));
+  check("migration 0014: ασφαλές να ξανατρέξει (καμία διπλή γραμμή)", db.prepare("select count(*) c from team_project_editors where member_id = ?").get(memberId("legacy_ed@demo.gr")).c === 2);
+  S["legacy_ed@demo.gr"] = (await login("legacy_ed@demo.gr")).cookie;
+  check("ο παλιός editor μετά το backfill: γράφει σε cc και fin όπως πριν", (await post("legacy_ed@demo.gr", "cc", "Παλιός cc")).status === 201 && (await post("legacy_ed@demo.gr", "fin", "Παλιός fin")).status === 201);
+
+  // (ζ) ο ρόλος είναι ΠΑΡΑΓΩΓΟΣ από τις αναθέσεις, όχι από την τιμή που κρατά ο πίνακας μελών
+  db.prepare("update team_members set role = 'editor' where email = 'emp_fin@demo.gr'").run();
+  const staleRole = await post("emp_fin@demo.gr", "fin", "Παλιά τιμή editor");
+  check("μπαγιάτικη τιμή role='editor' στη βάση χωρίς ανάθεση: δεν δίνει δικαίωμα εγγραφής, ρόλος employee, ούτε εισερχόμενα", staleRole.status === 403 && (await myRole("emp_fin@demo.gr")).role === "employee" && (await call("emp_fin@demo.gr", "GET", "/team/inbox")).status === 403);
+  db.prepare("update team_members set role = 'employee' where email = 'emp_fin@demo.gr'").run();
+  db.prepare("insert into team_project_editors(member_id,project_id,created_at) values(?, 'cc', '2026-10-01T00:00:00Z')").run(memberId("emp_fin@demo.gr"));
+  const strayRole = await myRole("emp_fin@demo.gr");
+  check("ανάθεση editor σε project όπου ΔΕΝ είναι μέλος: αγνοείται (ρόλος employee, καμία εγγραφή, ούτε εισερχόμενα)", strayRole.role === "employee" && strayRole.editorProjectIds.length === 0 && (await post("emp_fin@demo.gr", "cc", "Ξένη ανάθεση")).status === 403 && (await call("emp_fin@demo.gr", "GET", "/team/inbox")).status === 403);
+  db.prepare("delete from team_project_editors where member_id = ?").run(memberId("emp_fin@demo.gr"));
+  // προαγωγή σε admin και υποβάθμιση: τα δικαιώματα editor δεν "ανασταίνονται"
+  const prom = await adm("POST", "/members", { email: "rise@demo.gr", role: "member", projectRoles: { cc: "editor" } });
+  const riseId = (await readJson(prom)).id;
+  await adm("PATCH", `/members/${riseId}`, { role: "admin" });
+  const afterAdmin = db.prepare("select count(*) c from team_project_editors where member_id = ?").get(riseId).c;
+  await adm("PATCH", `/members/${riseId}`, { role: "member" });
+  S["rise@demo.gr"] = (await login("rise@demo.gr")).cookie;
+  check("προαγωγή σε admin καθαρίζει τις αναθέσεις editor, και η υποβάθμιση σε μέλος ΔΕΝ ανασταίνει δικαιώματα εγγραφής", afterAdmin === 0 && (await post("rise@demo.gr", "cc", "Μετά την υποβάθμιση")).status === 403 && (await myRole("rise@demo.gr")).role === "employee");
+
+  // (στ) αν δεν έχει εφαρμοστεί το migration 0014: το παλιό μοντέλο, χωρίς σκάσιμο
+  db.exec("ALTER TABLE team_project_editors RENAME TO team_project_editors_x");
+  const legacyWrite = await post("ed_cc@demo.gr", "cc", "Χωρίς migration 0014");
+  const legacyEmp = await post("emp_cc@demo.gr", "cc", "Υπάλληλος χωρίς migration");
+  db.exec("ALTER TABLE team_project_editors_x RENAME TO team_project_editors");
+  check("χωρίς το migration 0014: ο editor γράφει όπως πριν και ο υπάλληλος όχι (παλιό μοντέλο)", legacyWrite.status === 201 && legacyEmp.status === 403);
 }
 
 // ============================================================================ Σύνοψη

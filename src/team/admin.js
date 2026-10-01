@@ -28,10 +28,28 @@ async function membersWithDepartments(env, workspaceId) {
     if (!byMember.has(l.member_id)) byMember.set(l.member_id, []);
     byMember.get(l.member_id).push(l.department_id);
   }
-  return ((members && members.results) || []).map((m) => ({
-    id: m.id, email: m.email, role: m.role, status: m.status, createdAt: m.created_at,
-    departmentIds: byMember.get(m.id) || [],
-  }));
+  const editorsOf = new Map();
+  try {
+    const eds = await env.DB.prepare(
+      "SELECT e.member_id, e.project_id FROM team_project_editors e JOIN team_members m ON m.id = e.member_id WHERE m.workspace_id = ?"
+    ).bind(workspaceId).all();
+    for (const e of (eds && eds.results) || []) {
+      if (!editorsOf.has(e.member_id)) editorsOf.set(e.member_id, new Set());
+      editorsOf.get(e.member_id).add(e.project_id);
+    }
+  } catch {
+    /* migration 0014 δεν έχει εφαρμοστεί: χωρίς ρόλους ανά project */
+  }
+  return ((members && members.results) || []).map((m) => {
+    const departmentIds = byMember.get(m.id) || [];
+    const ed = editorsOf.get(m.id) || new Set();
+    const projectRoles = {};
+    for (const d of departmentIds) projectRoles[d] = ed.has(d) ? "editor" : "member";
+    return {
+      id: m.id, email: m.email, role: m.role === "admin" ? "admin" : departmentIds.some((d) => ed.has(d)) ? "editor" : "employee",
+      status: m.status, createdAt: m.created_at, departmentIds, projectRoles,
+    };
+  });
 }
 
 async function activeAdminCount(env, workspaceId) {
@@ -48,6 +66,36 @@ async function validDepartmentIds(env, workspaceId, ids) {
   if (unique.length > 50 || unique.some((d) => typeof d !== "string")) return null;
   const known = new Set((await loadWorkspaceDepartments(env, workspaceId)).map((d) => d.id));
   return unique.every((d) => known.has(d)) ? unique : null;
+}
+
+// "member" = όχι admin, χωρίς να αγγίζει τους ρόλους ανά project. Οι "editor"/"employee" μένουν ως συντομογραφίες (editor σε όλα
+// τα projects του, ή σε κανένα), για συμβατότητα με την παλιά οθόνη.
+const ROLE_INPUTS = [...ROLES, "member"];
+const PROJECT_ROLES = ["member", "editor"];
+
+// Χάρτης {projectId: "member"|"editor"} -> { departmentIds, editorIds } ή null αν είναι άκυρος ή ξένου οργανισμού.
+async function validProjectRoles(env, workspaceId, map) {
+  if (!map || typeof map !== "object" || Array.isArray(map)) return null;
+  const ids = Object.keys(map);
+  if (ids.length > 50 || !ids.every((id) => PROJECT_ROLES.includes(map[id]))) return null;
+  const valid = await validDepartmentIds(env, workspaceId, ids);
+  return valid === null ? null : { departmentIds: valid, editorIds: valid.filter((id) => map[id] === "editor") };
+}
+
+async function setEditors(env, memberId, projectIds) {
+  await env.DB.prepare("DELETE FROM team_project_editors WHERE member_id = ?").bind(memberId).run();
+  for (const p of projectIds) {
+    await env.DB.prepare("INSERT INTO team_project_editors (member_id, project_id, created_at) VALUES (?, ?, ?)")
+      .bind(memberId, p, new Date().toISOString()).run();
+  }
+}
+
+async function currentAccess(env, memberId) {
+  const deps = await env.DB.prepare("SELECT department_id FROM member_departments WHERE member_id = ?").bind(memberId).all();
+  const eds = await env.DB.prepare("SELECT project_id FROM team_project_editors WHERE member_id = ?").bind(memberId).all();
+  const departmentIds = ((deps && deps.results) || []).map((r) => r.department_id);
+  const editorIds = ((eds && eds.results) || []).map((r) => r.project_id).filter((id) => departmentIds.includes(id));
+  return { departmentIds, editorIds };
 }
 
 async function setMemberDepartments(env, memberId, departmentIds) {
@@ -143,9 +191,21 @@ export async function handleCreateMember(request, rc) {
   }
   const email = normalizeEmail(body.email);
   if (!email) return json(400, { error: "invalid_email" });
-  if (!ROLES.includes(body.role)) return json(400, { error: "invalid_role" });
-  const departmentIds = await validDepartmentIds(env, member.workspaceId, body.departmentIds || []);
-  if (departmentIds === null) return json(400, { error: "invalid_departments" });
+  if (!ROLE_INPUTS.includes(body.role)) return json(400, { error: "invalid_role" });
+  let departmentIds;
+  let editorIds;
+  if (body.projectRoles !== undefined) {
+    const pr = await validProjectRoles(env, member.workspaceId, body.projectRoles);
+    if (pr === null) return json(400, { error: "invalid_projects" });
+    departmentIds = pr.departmentIds;
+    editorIds = pr.editorIds;
+  } else {
+    departmentIds = await validDepartmentIds(env, member.workspaceId, body.departmentIds || []);
+    if (departmentIds === null) return json(400, { error: "invalid_departments" });
+    editorIds = body.role === "editor" ? departmentIds.slice() : [];
+  }
+  if (body.role === "admin") editorIds = [];
+  const storedRole = body.role === "admin" ? "admin" : editorIds.length > 0 ? "editor" : "employee";
 
   // Το email είναι μοναδικό σε όλο το σύστημα (ένας άνθρωπος, ένας οργανισμός). Δεν αποκαλύπτουμε
   // σε ποιον οργανισμό ανήκει αν υπάρχει ήδη.
@@ -154,10 +214,11 @@ export async function handleCreateMember(request, rc) {
 
   const ins = await env.DB.prepare(
     "INSERT INTO team_members (workspace_id, email, role, status, created_at) VALUES (?, ?, ?, 'active', ?)"
-  ).bind(member.workspaceId, email, body.role, new Date().toISOString()).run();
+  ).bind(member.workspaceId, email, storedRole, new Date().toISOString()).run();
   const memberId = ins.meta.last_row_id;
   await setMemberDepartments(env, memberId, departmentIds);
-  await recordAudit(env, member, "member_added", email, { role: body.role, departmentIds });
+  await setEditors(env, memberId, editorIds);
+  await recordAudit(env, member, "member_added", email, { role: storedRole, departmentIds, editorIds });
 
   if (body.sendInvite) {
     await deps.sendEmailViaResend(
@@ -184,27 +245,50 @@ export async function handleUpdateMember(request, rc, id) {
     : null;
   if (!target) return json(404, { error: "not_found" });
 
-  const newRole = body.role !== undefined ? body.role : target.role;
+  if (body.role !== undefined && !ROLE_INPUTS.includes(body.role)) return json(400, { error: "invalid_role" });
   const newStatus = body.status !== undefined ? body.status : target.status;
-  if (!ROLES.includes(newRole)) return json(400, { error: "invalid_role" });
   if (!["active", "disabled"].includes(newStatus)) return json(400, { error: "invalid_status" });
-  let departmentIds = null;
+
+  // Πρόσβαση ανά project: τρέχουσα κατάσταση, και μετά οι αλλαγές του αιτήματος.
+  const cur = await currentAccess(env, target.id);
+  let departmentIds = cur.departmentIds;
+  let editorIds = cur.editorIds;
+  let accessChanged = false;
   if (body.departmentIds !== undefined) {
-    departmentIds = await validDepartmentIds(env, member.workspaceId, body.departmentIds);
-    if (departmentIds === null) return json(400, { error: "invalid_departments" });
+    const v = await validDepartmentIds(env, member.workspaceId, body.departmentIds);
+    if (v === null) return json(400, { error: "invalid_departments" });
+    departmentIds = v;
+    editorIds = editorIds.filter((x) => departmentIds.includes(x));
+    accessChanged = true;
   }
+  let projectRolesChanged = false;
+  if (body.projectRoles !== undefined) {
+    const pr = await validProjectRoles(env, member.workspaceId, body.projectRoles);
+    if (pr === null) return json(400, { error: "invalid_projects" });
+    departmentIds = pr.departmentIds;
+    editorIds = pr.editorIds;
+    accessChanged = true;
+    projectRolesChanged = true;
+  }
+  const targetIsAdmin = body.role !== undefined ? body.role === "admin" : target.role === "admin";
+  if (targetIsAdmin) editorIds = [];
+  else if (body.role === "editor") editorIds = departmentIds.slice();
+  else if (body.role === "employee") editorIds = [];
+  const newRole = targetIsAdmin ? "admin" : editorIds.length > 0 ? "editor" : "employee";
 
   // Ο workspace δεν μένει ποτέ χωρίς ενεργό admin (αλλιώς κανείς δεν θα μπορούσε να τον διαχειριστεί).
   const losesAdmin = target.role === "admin" && target.status === "active" && (newRole !== "admin" || newStatus !== "active");
   if (losesAdmin && (await activeAdminCount(env, member.workspaceId)) <= 1) return json(409, { error: "last_admin" });
 
   await env.DB.prepare("UPDATE team_members SET role = ?, status = ? WHERE id = ?").bind(newRole, newStatus, target.id).run();
-  if (departmentIds !== null) await setMemberDepartments(env, target.id, departmentIds);
+  if (accessChanged) await setMemberDepartments(env, target.id, departmentIds);
+  await setEditors(env, target.id, editorIds);
   if (newStatus === "disabled") await env.DB.prepare("DELETE FROM team_sessions WHERE member_id = ?").bind(target.id).run();
 
   if (newRole !== target.role) await recordAudit(env, member, "member_role_changed", target.email, { from: target.role, to: newRole });
   if (newStatus !== target.status) await recordAudit(env, member, newStatus === "disabled" ? "member_disabled" : "member_enabled", target.email, null);
-  if (departmentIds !== null) await recordAudit(env, member, "member_departments_changed", target.email, { departmentIds });
+  if (body.departmentIds !== undefined) await recordAudit(env, member, "member_departments_changed", target.email, { departmentIds });
+  if (projectRolesChanged) await recordAudit(env, member, "member_project_roles_changed", target.email, { projectRoles: body.projectRoles });
   return json(200, { ok: true });
 }
 

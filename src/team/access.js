@@ -5,11 +5,14 @@
 // φαίνονται όλοι οι κανόνες σε ένα σημείο. Ο έλεγχος πρόσβασης γίνεται ΠΑΝΤΑ σε κώδικα
 // του backend, πριν το LLM δει οτιδήποτε -- ποτέ μέσα στο prompt.
 //
-// Ρόλοι (απόφαση 30 Σεπ 2026):
-//   employee: ρωτά τον βοηθό και διαβάζει έγγραφα του τμήματός του + τα εταιρικά.
-//   editor:   ίδια ανάγνωση με τον employee, ΣΥΝ ανάγνωση εγγράφων άλλων τμημάτων
-//             (εκτός από τα κρυφά). Επεξεργάζεται ΜΟΝΟ έγγραφα του δικού του τμήματος.
-//   admin:    διαβάζει και επεξεργάζεται τα πάντα, συμπεριλαμβανομένων των εταιρικών.
+// Ρόλοι (απόφαση 30 Σεπ 2026, ρόλος ανά project από 1 Οκτ 2026):
+//   admin:    ρόλος ΟΡΓΑΝΙΣΜΟΥ. Διαβάζει και επεξεργάζεται τα πάντα, συμπεριλαμβανομένων των εταιρικών.
+//   Όλοι οι άλλοι είναι μέλη του οργανισμού και έχουν ρόλο ΑΝΑ PROJECT (τμήμα):
+//   μέλος:    ρωτά τον βοηθό και διαβάζει έγγραφα του project του + τα εταιρικά.
+//   editor:   (σε ένα συγκεκριμένο project) επεξεργάζεται ΜΟΝΟ έγγραφα ΑΥΤΟΥ του project.
+//             Σε άλλα projects όπου είναι απλό μέλος δεν γράφει. member.editorProjectIds = τα projects όπου είναι editor.
+//   Το member.role είναι ΠΑΡΑΓΩΓΟ: "admin", ή "editor" αν είναι editor σε τουλάχιστον ένα project, αλλιώς "employee".
+//   Ένας "editor" (παραγόμενος) διαβάζει επιπλέον έγγραφα άλλων τμημάτων (εκτός από τα κρυφά), μόνο για ανάγνωση.
 // Ο βοηθός (αναζήτηση) του editor ψάχνει μόνο στα δικά του τμήματα + τα εταιρικά,
 // όπως ο employee. Το "διαβάζω άλλα τμήματα" ισχύει μόνο για τη βιβλιοθήκη εγγράφων.
 
@@ -18,7 +21,7 @@ export const COMPANY_WIDE = "_all";
 
 export const ROLES = ["admin", "editor", "employee"];
 
-// member: { role, departmentIds: string[] }
+// member: { role, departmentIds: string[], editorProjectIds: string[] }
 // workspaceDepartments: [{ id, name, hidden }] -- όλα τα τμήματα του workspace.
 
 // Σύνολο department_id που μπορεί να ΔΙΑΒΑΣΕΙ (βιβλιοθήκη εγγράφων). null = όλα (admin).
@@ -48,14 +51,20 @@ export function canReadDepartment(member, workspaceDepartments, departmentId) {
 export function canWriteDepartment(member, workspaceDepartments, departmentId) {
   const exists = (workspaceDepartments || []).some((d) => d.id === departmentId);
   if (member.role === "admin") return departmentId === COMPANY_WIDE || exists;
-  if (member.role === "editor") {
-    return (
-      departmentId !== COMPANY_WIDE &&
-      exists &&
-      (member.departmentIds || []).includes(departmentId)
-    );
-  }
-  return false;
+  // Μη-admin: μόνο σε project όπου είναι ΚΑΙ μέλος ΚΑΙ editor (deny by default).
+  return (
+    departmentId !== COMPANY_WIDE &&
+    exists &&
+    (member.departmentIds || []).includes(departmentId) &&
+    (member.editorProjectIds || []).includes(departmentId)
+  );
+}
+
+// Ο ρόλος του μέλους σε ένα project: "admin" | "editor" | "member" | null (δεν είναι μέλος).
+export function projectRoleOf(member, projectId) {
+  if (member.role === "admin") return "admin";
+  if (!(member.departmentIds || []).includes(projectId)) return null;
+  return (member.editorProjectIds || []).includes(projectId) ? "editor" : "member";
 }
 
 // Φίλτρο metadata για το Vectorize: εφαρμόζεται ΠΡΙΝ το topK. undefined = χωρίς φίλτρο.

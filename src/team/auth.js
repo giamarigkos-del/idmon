@@ -1,3 +1,4 @@
+// src\team\auth.js
 // Section W: σύνδεση υπαλλήλων με link στο email (χωρίς κωδικό) και sessions ομάδων.
 //
 // Ροή: (1) POST /team/login/start {email} -> στέλνει email με link
@@ -213,14 +214,29 @@ export async function getSession(request, env) {
       WHERE md.member_id = ? AND d.workspace_id = ?`
   ).bind(row.member_id, row.workspace_id).all();
   const departments = (deptRows && deptRows.results) || [];
+  const departmentIds = departments.map((d) => d.id);
+
+  // Ρόλος ανά project: editor μόνο στα projects που έχει ρητή ανάθεση ΚΑΙ είναι μέλος. Ο ρόλος του μέλους είναι παράγωγος.
+  // Αν το migration 0014 δεν έχει εφαρμοστεί ακόμα (λείπει ο πίνακας), ισχύει το παλιό μοντέλο (ένας ρόλος ανά άνθρωπο),
+  // ώστε ένα deploy πριν το migration να μη χαλά τίποτα.
+  let editorProjectIds;
+  try {
+    const edRows = await env.DB.prepare("SELECT project_id FROM team_project_editors WHERE member_id = ?").bind(row.member_id).all();
+    const assigned = new Set(((edRows && edRows.results) || []).map((r) => r.project_id));
+    editorProjectIds = departmentIds.filter((id) => assigned.has(id));
+  } catch {
+    editorProjectIds = row.role === "editor" ? departmentIds.slice() : [];
+  }
+  const role = row.role === "admin" ? "admin" : editorProjectIds.length > 0 ? "editor" : "employee";
 
   return {
     id: row.member_id,
     email: row.email,
-    role: row.role,
+    role,
     workspaceId: row.workspace_id,
     workspaceName: row.workspace_name,
-    departmentIds: departments.map((d) => d.id),
+    departmentIds,
+    editorProjectIds,
     departments,
   };
 }

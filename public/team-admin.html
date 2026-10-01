@@ -40,6 +40,8 @@
   .note{font-size:13px;margin-top:8px;min-height:16px;} .note.ok{color:var(--ok);} .note.err{color:var(--danger);}
   .checks{display:flex;gap:10px;flex-wrap:wrap;font-size:13px;}
   .checks label{display:inline-flex;align-items:center;gap:5px;cursor:pointer;}
+  .proj-roles{display:flex;gap:10px;flex-wrap:wrap;font-size:12.5px;color:var(--text-soft);}
+  .proj-role select{margin-left:4px;}
   form.add{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
   form.add .grow{flex:1;min-width:200px;}
   .log{font-size:12.5px;line-height:1.5;}
@@ -89,7 +91,7 @@
     last_admin: "Ο χώρος δεν μπορεί να μείνει χωρίς ενεργό admin. Όρισε πρώτα άλλον admin.", forbidden: "Δεν έχεις δικαίωμα.", not_found: "Δεν βρέθηκε."
   };
   function errText(r) { return ERRORS[r.data && r.data.error] || "Κάτι πήγε στραβά."; }
-  var ROLE_LABEL = { admin: "Admin", editor: "Editor", employee: "Υπάλληλος" };
+  var ROLE_LABEL = { admin: "Admin", member: "Μέλος", editor: "Editor", employee: "Υπάλληλος" };
   var ACTION_LABEL = {
     login: "σύνδεση", document_hidden: "σήμανση εμπιστευτικού", document_unhidden: "άρση εμπιστευτικού", feedback_closed: "κλείσιμο αναφορών υπαλλήλων", rechecks_run: "εκτέλεση επανελέγχων", document_created: "νέο έγγραφο", document_updated: "αλλαγή εγγράφου", document_deleted: "διαγραφή εγγράφου",
     update_created: "νέο update", update_applied: "ενσωμάτωση update", update_rejected: "απόρριψη update", update_proposal_generated: "πρόταση ενσωμάτωσης",
@@ -174,17 +176,34 @@
     });
     return wrap;
   }
+  // Ρόλος ανά project: για κάθε project ένα select (όχι / Μέλος / Editor). Ο editor γράφει μόνο στα projects όπου είναι Editor.
+  function projectRoleSelects(current, onChange) {
+    var wrap = h("div", { class: "proj-roles" });
+    data.departments.forEach(function (d) {
+      var sel = h("select", { "aria-label": d.name, "data-project": d.id }, [["", "όχι"], ["member", "Μέλος"], ["editor", "Editor"]].map(function (p) {
+        var o = h("option", { value: p[0], text: p[1] }); if ((current[d.id] || "") === p[0]) o.selected = true; return o;
+      }));
+      sel.addEventListener("change", onChange);
+      wrap.appendChild(h("label", { class: "proj-role" }, [document.createTextNode(d.name + " "), sel]));
+    });
+    return wrap;
+  }
+  function readProjectRoles(wrap) {
+    var out = {};
+    Array.prototype.forEach.call(wrap.querySelectorAll("select"), function (s) { if (s.value) out[s.getAttribute("data-project")] = s.value; });
+    return out;
+  }
   function checked(wrap) { return Array.prototype.map.call(wrap.querySelectorAll("input:checked"), function (i) { return i.value; }); }
 
   function membersView() {
     var box = h("div", { class: "card" }, [
       h("h2", { text: "Μέλη" }),
-      h("p", { class: "hint", text: "Οι αλλαγές ισχύουν αμέσως, ακόμα και για όσους είναι ήδη συνδεδεμένοι. Δεν υπάρχουν κωδικοί: κάθε μέλος συνδέεται με σύνδεσμο στο email του." }),
+      h("p", { class: "hint", text: "Κάθε μέλος έχει ρόλο ανά project: Μέλος (ρωτά και διαβάζει) ή Editor (γράφει στο συγκεκριμένο project). Ο ρόλος οργανισμού Admin δίνει πρόσβαση παντού. Νέο μέλος: γράψε το email του και διάλεξε τα projects του." }),
     ]);
     var msg = h("p", { class: "note", role: "status", "aria-live": "polite" });
     data.members.forEach(function (m) {
-      var role = h("select", { "aria-label": "Ρόλος " + m.email }, ["admin", "editor", "employee"].map(function (r) {
-        var o = h("option", { value: r, text: ROLE_LABEL[r] }); if (m.role === r) o.selected = true; return o;
+      var role = h("select", { "aria-label": "Ρόλος οργανισμού " + m.email }, ["member", "admin"].map(function (r) {
+        var o = h("option", { value: r, text: ROLE_LABEL[r] }); if ((m.role === "admin" ? "admin" : "member") === r) o.selected = true; return o;
       }));
       var patch = function (body, okMsg) {
         api("/team/admin/members/" + m.id, "PATCH", body).then(function (r) {
@@ -192,7 +211,7 @@
         });
       };
       role.addEventListener("change", function () { patch({ role: role.value }, "Ο ρόλος άλλαξε."); });
-      var depts = deptChecks(m.departmentIds, function () { patch({ departmentIds: checked(depts) }, "Τα τμήματα άλλαξαν."); });
+      var depts = projectRoleSelects(m.projectRoles || {}, function () { patch({ projectRoles: readProjectRoles(depts) }, "Οι ρόλοι ανά project ενημερώθηκαν."); });
       var toggle = h("button", { class: "btn " + (m.status === "active" ? "danger" : "secondary") + " status-toggle", type: "button",
         text: m.status === "active" ? "Απενεργοποίηση" : "Ενεργοποίηση", onclick: function () {
           patch({ status: m.status === "active" ? "disabled" : "active" }, m.status === "active" ? "Το μέλος απενεργοποιήθηκε." : "Το μέλος ενεργοποιήθηκε.");
@@ -204,12 +223,12 @@
     });
 
     var email = h("input", { type: "email", class: "grow", id: "new-email", placeholder: "email νέου μέλους", "aria-label": "Email νέου μέλους" });
-    var role = h("select", { id: "new-role", "aria-label": "Ρόλος νέου μέλους" }, ["employee", "editor", "admin"].map(function (r) { return h("option", { value: r, text: ROLE_LABEL[r] }); }));
-    var depts = deptChecks([], function () {});
+    var role = h("select", { id: "new-role", "aria-label": "Ρόλος οργανισμού νέου μέλους" }, ["member", "admin"].map(function (r) { return h("option", { value: r, text: ROLE_LABEL[r] }); }));
+    var depts = projectRoleSelects({}, function () {});
     var invite = h("input", { type: "checkbox", id: "new-invite", checked: true, "aria-label": "Στείλε πρόσκληση με email" });
     box.appendChild(h("form", { class: "add", id: "add-member", onsubmit: function (e) {
       e.preventDefault();
-      api("/team/admin/members", "POST", { email: email.value, role: role.value, departmentIds: checked(depts), sendInvite: invite.checked }).then(function (r) {
+      api("/team/admin/members", "POST", { email: email.value, role: role.value, projectRoles: readProjectRoles(depts), sendInvite: invite.checked }).then(function (r) {
         if (r.status === 201) { flash = "Το μέλος προστέθηκε."; load(); } else { msg.className = "note err"; msg.textContent = errText(r); }
       });
     } }, [email, role, depts, h("label", { class: "checks" }, [invite, document.createTextNode("Στείλε πρόσκληση")]), h("button", { class: "btn", type: "submit", text: "Προσθήκη μέλους" })]));

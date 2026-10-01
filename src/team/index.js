@@ -89,6 +89,7 @@ async function routeTeamRequest(request, env, url, deps, ctx) {
       role: member.role,
       workspaceName: member.workspaceName,
       departments: member.departments.map((d) => ({ id: d.id, name: d.name })),
+      editorProjectIds: member.editorProjectIds || [],
     });
   }
 

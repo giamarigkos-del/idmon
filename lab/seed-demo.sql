@@ -1,3 +1,4 @@
+-- lab\seed-demo.sql
 -- Δοκιμαστικά δεδομένα για το lab (idmon-lab). Τρέχει ΜΟΝΟ στη βάση του lab, ποτέ στο production.
 -- Ασφαλές να ξανατρέξει (INSERT OR IGNORE): δεν δημιουργεί διπλότυπα.
 --
@@ -29,3 +30,7 @@ INSERT OR IGNORE INTO member_departments (member_id, department_id)
 
 INSERT OR IGNORE INTO member_departments (member_id, department_id)
   SELECT id, 'fin' FROM team_members WHERE email = 'giamarigkos+finance@gmail.com';
+
+-- Ρόλος ανά project (migration 0014): ο editor του demo είναι editor στο Customer Care.
+INSERT OR IGNORE INTO team_project_editors (member_id, project_id, created_at)
+  SELECT id, 'cc', strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM team_members WHERE email = 'giamarigkos+editor@gmail.com';

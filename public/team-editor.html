@@ -331,7 +331,9 @@
 
   function writableDepartments() {
     if (me.role === "admin") return [{ id: "_all", name: "Όλη η εταιρεία" }].concat(departments.map(function (d) { return { id: d.id, name: d.name }; }));
-    return (me.departments || []).map(function (d) { return { id: d.id, name: d.name }; });
+    // Ρόλος ανά project: γράφεις μόνο στα projects όπου είσαι editor (όχι σε όσα είσαι απλό μέλος).
+    var editorIds = me.editorProjectIds || [];
+    return (me.departments || []).filter(function (d) { return editorIds.indexOf(d.id) >= 0; }).map(function (d) { return { id: d.id, name: d.name }; });
   }
 
   function refreshDocs() {
