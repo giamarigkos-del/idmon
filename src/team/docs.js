@@ -8,7 +8,7 @@
 import { json, loadWorkspaceDepartments } from "./auth.js";
 import { COMPANY_WIDE, canReadDocument, canWriteDepartment } from "./access.js";
 import {
-  DOC_ID_RE, departmentName, docKey, listDocIndex, pendingUpdateSummary, persistDocument, readDoc,
+  DOC_ID_RE, deleteDocRecord, departmentName, listDocIndex, pendingUpdateSummary, persistDocument, readDoc,
 } from "./store.js";
 import { recordAudit } from "./audit.js";
 import { afterDocumentSaved, resolveContradictionsForDeletedDoc } from "./contradictions.js";
@@ -130,7 +130,7 @@ export async function handleDeleteDocument(rc, id) {
   await rejectUpdatesOfDeletedDocument(env, member.workspaceId, id, member.id);
   await closeFeedbackForDeletedDoc(env, member.workspaceId, id, member.id);
   await resolveContradictionsForDeletedDoc(env, member.workspaceId, id, member.id);
-  await env.DOCUMENT_REGISTRY.delete(docKey(member.workspaceId, id));
+  await deleteDocRecord(env, member.workspaceId, id);
   await recordAudit(env, member, "document_deleted", id, { title: String(doc.title).slice(0, 80) });
   return json(200, { ok: true });
 }

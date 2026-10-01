@@ -233,7 +233,7 @@
           else { flashErr = r.data && r.data.error === "company_wide_cannot_hide" ? "Έγγραφα όλης της εταιρείας δεν μπορούν να γίνουν εμπιστευτικά." : errText(r); load(); }
         });
       } });
-      var bits = d.departmentName + (d.pendingUpdates ? " · " + d.pendingUpdates + " update" : "") + (d.openContradictions ? " · " + d.openContradictions + " αντιφάσεις" : "");
+      var bits = d.departmentName + (d.pendingUpdates ? " · " + d.pendingUpdates + " update" : "") + (d.openContradictions ? " · " + d.openContradictions + (d.openContradictions === 1 ? " αντίφαση" : " αντιφάσεις") : "");
       box.appendChild(h("div", { class: "row doc-row" }, [
         h("div", null, [h("span", { class: "name", text: d.title }), d.hidden ? h("span", { class: "pill hid", text: " εμπιστευτικό" }) : null, h("div", { class: "meta", text: bits })]),
         h("div", { class: "controls" }, [toggle]),

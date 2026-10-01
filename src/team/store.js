@@ -2,8 +2,8 @@
 // Section W: κοινός κώδικας αποθήκευσης εγγράφων ομάδων (KV + Vectorize). Το έχουν όλα τα
 // υπόλοιπα αρχεία του src/team/ (έγγραφα, updates, αντιφάσεις), ώστε να μην εισάγουν το ένα το άλλο.
 //
-// Αποθήκευση στο KV με ΔΙΚΟ ΤΟΥΣ πρόθεμα (team:{workspace}:doc:{id}), ξεχωριστό από το
-// session:{workspace}:doc:{id} των SMB, ώστε κανένα SMB endpoint να μην μπορεί ποτέ να τα φτάσει.
+// Τα έγγραφα ζουν στο D1 (πίνακας team_documents), τελείως ξεχωριστά από τα έγγραφα του SMB (KV, πρόθεμα session:).
+// Το πρόθεμα team:{workspace}:doc:{id} του KV είναι μόνο για τη μεταφορά των παλιών εγγράφων.
 // Το τμήμα ενός εγγράφου γράφεται (α) μέσα στο έγγραφο, (β) ως metadata του KV key (γρήγορη λίστα
 // χωρίς ανάγνωση κάθε εγγράφου) και (γ) ως department_id στα metadata κάθε vector (φίλτρο Vectorize).
 
@@ -12,7 +12,6 @@ import { COMPANY_WIDE } from "./access.js";
 export const DOC_ID_RE = /^doc-[a-f0-9]{16}$/;
 export const docKey = (workspaceId, id) => `team:${workspaceId}:doc:${id}`;
 export const docPrefix = (workspaceId) => `team:${workspaceId}:doc:`;
-const KV_META_TITLE_CHARS = 120; // το metadata ενός KV key έχει όριο 1024 bytes
 
 export const UPDATE_PREFIX = "[ΠΡΟΣΦΑΤΗ ΕΝΗΜΕΡΩΣΗ, υπερισχύει του βασικού κειμένου σε περίπτωση διαφοράς] ";
 
@@ -38,33 +37,132 @@ async function listAllKeys(env, prefix) {
   return keys;
 }
 
-// Όλα τα έγγραφα του workspace, από τα metadata των KV keys (χωρίς να διαβαστεί κάθε έγγραφο).
-export async function listDocIndex(env, workspaceId) {
-  const prefix = docPrefix(workspaceId);
-  const keys = await listAllKeys(env, prefix);
-  return keys.map((k) => {
-    const meta = k.metadata || {};
-    return {
-      id: k.name.slice(prefix.length),
-      title: meta.title || "",
-      departmentId: meta.departmentId,
-      updatedAt: meta.updatedAt || null,
-      hidden: !!meta.hidden,
-    };
-  });
+// ΕΓΓΡΑΦΑ ΣΤΟ D1 (άμεσα συνεπές). Παλιότερα ζούσαν στο KV, που είναι "τελικά συνεπές" (μια αλλαγή μπορεί να χρειαστεί
+// ως ένα λεπτό για να φανεί). Για δικαιώματα πρόσβασης (εμπιστευτικό, διαγραφή, μεταφορά) αυτό ήταν παράθυρο ασφάλειας.
+// Το KV χρησιμοποιείται πλέον μόνο για βραχύβια δεδομένα (login tokens, μετρητές, αναπάντητες ερωτήσεις).
+
+const migratedWorkspaces = new Set(); // ανά isolate: ένας οργανισμός ελέγχεται για παλιά έγγραφα μία φορά
+export function resetMigrationCache() {
+  migratedWorkspaces.clear();
 }
 
-// Γράφει την εγγραφή ενός εγγράφου και τα metadata του KV key (τίτλος, τμήμα, ημερομηνία, εμπιστευτικό).
+function rowToDoc(r) {
+  return {
+    id: r.id,
+    title: r.title,
+    fullText: r.full_text,
+    departmentId: r.department_id,
+    hidden: !!r.hidden,
+    status: r.status,
+    version: r.version,
+    chunkCount: r.chunk_count,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    updatedBy: r.updated_by,
+    updatedAt: r.updated_at,
+  };
+}
+
+async function insertDocIfMissing(env, workspaceId, doc) {
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO team_documents
+       (id, workspace_id, title, full_text, department_id, hidden, status, version, chunk_count, created_by, created_at, updated_by, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    doc.id, workspaceId, String(doc.title || ""), String(doc.fullText || ""), String(doc.departmentId || ""), doc.hidden ? 1 : 0,
+    doc.status || "published", doc.version || 1, doc.chunkCount || 0,
+    doc.createdBy === undefined ? null : doc.createdBy, doc.createdAt || now,
+    doc.updatedBy === undefined ? null : doc.updatedBy, doc.updatedAt || now
+  ).run();
+}
+
+// Αντιγράφει τα παλιά έγγραφα του οργανισμού από το KV στο D1 και τα σβήνει από το KV. Ασφαλές να ξανατρέξει.
+async function migrateLegacyDocs(env, workspaceId) {
+  const prefix = docPrefix(workspaceId);
+  const keys = await listAllKeys(env, prefix);
+  for (const k of keys) {
+    const id = k.name.slice(prefix.length);
+    if (!DOC_ID_RE.test(id)) continue;
+    const raw = await env.DOCUMENT_REGISTRY.get(k.name);
+    if (!raw) continue;
+    let doc;
+    try {
+      doc = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    await insertDocIfMissing(env, workspaceId, { ...doc, id });
+    await env.DOCUMENT_REGISTRY.delete(k.name);
+  }
+}
+
+export async function ensureDocsMigrated(env, workspaceId) {
+  if (migratedWorkspaces.has(workspaceId)) return;
+  const row = await env.DB.prepare("SELECT docs_migrated_at FROM team_meta WHERE workspace_id = ?").bind(workspaceId).first();
+  if (!row || !row.docs_migrated_at) {
+    await migrateLegacyDocs(env, workspaceId);
+    await env.DB.prepare(
+      "INSERT INTO team_meta (workspace_id, docs_migrated_at) VALUES (?, ?) ON CONFLICT(workspace_id) DO UPDATE SET docs_migrated_at = excluded.docs_migrated_at"
+    ).bind(workspaceId, new Date().toISOString()).run();
+  }
+  migratedWorkspaces.add(workspaceId);
+}
+
+// Όλα τα έγγραφα του workspace (χωρίς το κείμενο).
+export async function listDocIndex(env, workspaceId) {
+  await ensureDocsMigrated(env, workspaceId);
+  const res = await env.DB.prepare(
+    "SELECT id, title, department_id, updated_at, hidden FROM team_documents WHERE workspace_id = ?"
+  ).bind(workspaceId).all();
+  return ((res && res.results) || []).map((r) => ({
+    id: r.id,
+    title: r.title,
+    departmentId: r.department_id,
+    updatedAt: r.updated_at || null,
+    hidden: !!r.hidden,
+  }));
+}
+
+// Δημιουργία ή ενημέρωση εγγράφου (άμεσα ορατή σε κάθε επόμενο αίτημα).
 export async function writeDocRecord(env, workspaceId, doc) {
-  const meta = { title: String(doc.title).slice(0, KV_META_TITLE_CHARS), departmentId: doc.departmentId, updatedAt: doc.updatedAt };
-  if (doc.hidden) meta.hidden = true;
-  await env.DOCUMENT_REGISTRY.put(docKey(workspaceId, doc.id), JSON.stringify(doc), { metadata: meta });
+  await env.DB.prepare(
+    `INSERT INTO team_documents
+       (id, workspace_id, title, full_text, department_id, hidden, status, version, chunk_count, created_by, created_at, updated_by, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(workspace_id, id) DO UPDATE SET
+       title = excluded.title, full_text = excluded.full_text, department_id = excluded.department_id, hidden = excluded.hidden,
+       status = excluded.status, version = excluded.version, chunk_count = excluded.chunk_count,
+       updated_by = excluded.updated_by, updated_at = excluded.updated_at`
+  ).bind(
+    doc.id, workspaceId, String(doc.title), String(doc.fullText), String(doc.departmentId), doc.hidden ? 1 : 0,
+    doc.status || "published", doc.version || 1, doc.chunkCount || 0,
+    doc.createdBy === undefined ? null : doc.createdBy, doc.createdAt,
+    doc.updatedBy === undefined ? null : doc.updatedBy, doc.updatedAt
+  ).run();
+}
+
+export async function deleteDocRecord(env, workspaceId, id) {
+  await env.DB.prepare("DELETE FROM team_documents WHERE workspace_id = ? AND id = ?").bind(workspaceId, id).run();
 }
 
 export async function readDoc(env, workspaceId, id) {
   if (!DOC_ID_RE.test(id)) return null;
+  await ensureDocsMigrated(env, workspaceId);
+  const row = await env.DB.prepare("SELECT * FROM team_documents WHERE workspace_id = ? AND id = ?").bind(workspaceId, id).first();
+  if (row) return rowToDoc(row);
+  // Δίχτυ ασφαλείας: παλιό έγγραφο που το KV δεν είχε επιστρέψει στη λίστα. Μεταφέρεται εδώ.
   const raw = await env.DOCUMENT_REGISTRY.get(docKey(workspaceId, id));
-  return raw ? JSON.parse(raw) : null;
+  if (!raw) return null;
+  try {
+    const doc = { ...JSON.parse(raw), id };
+    await insertDocIfMissing(env, workspaceId, doc);
+    await env.DOCUMENT_REGISTRY.delete(docKey(workspaceId, id));
+    const migrated = await env.DB.prepare("SELECT * FROM team_documents WHERE workspace_id = ? AND id = ?").bind(workspaceId, id).first();
+    return migrated ? rowToDoc(migrated) : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function listAllKvKeys(env, prefix) {

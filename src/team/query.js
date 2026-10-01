@@ -10,7 +10,7 @@
 
 import { json, loadWorkspaceDepartments } from "./auth.js";
 import { COMPANY_WIDE, searchDepartmentIds, vectorFilterFor } from "./access.js";
-import { docKey } from "./store.js";
+import { readDoc } from "./store.js";
 import { DEFAULT_DAILY_QUESTIONS, consumeQuota } from "./quota.js";
 
 const MAX_QUESTION_CHARS = 1000;
@@ -129,8 +129,7 @@ export async function handleTeamQuery(request, env, member, deps) {
 
         let primarySource = null;
         if (!isFallback) {
-          const raw = await env.DOCUMENT_REGISTRY.get(docKey(workspaceId, top.metadata.documentId));
-          const doc = raw ? JSON.parse(raw) : {};
+          const doc = (await readDoc(env, workspaceId, top.metadata.documentId)) || {};
           const deptId = top.metadata.department_id;
           const dept = departments.find((d) => d.id === deptId);
           primarySource = {

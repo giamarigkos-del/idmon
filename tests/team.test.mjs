@@ -513,7 +513,7 @@ section("7. Vectorize: τι γράφεται και πού");
   check("vector του εταιρικού εγγράφου έχει department_id=_all", vs.find((v) => v.metadata.documentId === DOC.all).metadata.department_id === "_all");
   const kvKeys = [...env.DOCUMENT_REGISTRY.store.keys()];
   check("κανένα KV key ομάδας ΔΕΝ έχει το πρόθεμα session: του SMB", !kvKeys.some((k) => k.startsWith("session:")));
-  check("τα έγγραφα ζουν στο πρόθεμα team:", kvKeys.filter((k) => k.includes(":doc:")).every((k) => k.startsWith("team:team-demo:doc:")));
+  check("τα έγγραφα ΔΕΝ ζουν πια στο KV (άμεση συνέπεια): πίνακας team_documents στο D1", kvKeys.filter((k) => k.includes(":doc:")).length === 0 && db.prepare("select count(*) c from team_documents where workspace_id = 'team-demo'").get().c >= 3);
   // μείωση chunks: μεγάλο κείμενο -> μικρό
   const big = "λέξη ".repeat(700) + "τέλος";
   const rBig = await call("ed_cc@demo.gr", "PUT", `/team/documents/${DOC.cc}`, { title: "Διαδικασία επιστροφών", departmentId: "cc", text: big });
@@ -525,7 +525,7 @@ section("7. Vectorize: τι γράφεται και πού");
   const delDoc = await call("admin@demo.gr", "POST", "/team/documents", { title: "Προσωρινό", departmentId: "cc", text: "Προσωρινό κείμενο διαγραφής" });
   const delId = (await readJson(delDoc)).id;
   await call("ed_cc@demo.gr", "DELETE", `/team/documents/${delId}`);
-  check("DELETE σβήνει και τα vectors και το KV", ![...env.VECTORIZE.vectors.values()].some((v) => v.metadata.documentId === delId) && !env.DOCUMENT_REGISTRY.store.has(`team:team-demo:doc:${delId}`));
+  check("DELETE σβήνει και τα vectors και την εγγραφή του εγγράφου", ![...env.VECTORIZE.vectors.values()].some((v) => v.metadata.documentId === delId) && db.prepare("select count(*) c from team_documents where id = ?").get(delId).c === 0);
 }
 
 section("8. Βοηθός: το φίλτρο τμήματος (η ΚΑΡΔΙΑ του διαχωρισμού)");
@@ -1611,7 +1611,7 @@ section("21. Εμπιστευτικά έγγραφα (σήμανση από το
   check("σελίδα admin: καρτέλα «Έγγραφα» με τα έγγραφα και σήμανση «εμπιστευτικό»", !!row && /εμπιστευτικό/.test(row.textContent));
   clickU(ad, row.querySelector(".doc-hide-toggle"));
   check("σελίδα admin: άρση σήμανσης με κλικ ισχύει αμέσως", !!(await uiWait(() => (readDocHidden(hid) === false))));
-  function readDocHidden(id) { const raw = env.DOCUMENT_REGISTRY.store.get(`team:team-demo:doc:${id}`); return raw ? !!JSON.parse(raw.value).hidden : null; }
+  function readDocHidden(id) { const r = db.prepare("select hidden from team_documents where workspace_id = 'team-demo' and id = ?").get(id); return r ? !!r.hidden : null; }
   clickU(ad, await uiWait(() => $u(ad, "#tab-documents")));
   clickU(ad, await uiWait(() => $u(ad, "#run-rechecks")));
   check("σελίδα admin: κουμπί «Εκτέλεση τώρα» για επανελέγχους δείχνει αποτέλεσμα", !!(await uiWait(() => /Ελέγχθηκαν \d+ έγγραφα/.test(ad.window.document.body.textContent))));
@@ -1688,6 +1688,85 @@ section("22. Αναφορές υπαλλήλων (λάθος ή ξεπερασμ
   clickU(ed, byTextU(ed, ".card.feedback button", /Κλείσιμο αναφορών/));
   check("editor: «Κλείσιμο αναφορών» αφαιρεί την κάρτα", !!(await uiWait(() => !$u(ed, ".card.feedback"))));
   state.judge = null;
+}
+
+// ============================================================================ 24. Έγγραφα στο D1: άμεση συνέπεια και μεταφορά από το KV
+section("24. Έγγραφα στο D1: άμεση συνέπεια (αντί για τελικά συνεπές KV), αυτόματη μεταφορά παλιών εγγράφων");
+{
+  const store = await import(pathToFileURL(join(TMP, "modified", "src", "team", "store.js")).href);
+  const titlesOf = async (email) => (await readJson(await call(email, "GET", "/team/documents"))).documents.map((x) => x.title);
+
+  // (α) προσομοίωση "αργού" KV: οι λίστες και οι αναγνώσεις του KV επιστρέφουν άδεια. Τα έγγραφα δεν πρέπει να επηρεάζονται.
+  const kv = env.DOCUMENT_REGISTRY;
+  const realList = kv.list, realGet = kv.get;
+  kv.list = async () => ({ keys: [], list_complete: true });
+  kv.get = async () => null;
+  const fresh = (await readJson(await call("ed_cc@demo.gr", "POST", "/team/documents", { title: "Νέο ΤΑΧΕΙΑ", departmentId: "cc", text: "Κείμενο που πρέπει να φαίνεται αμέσως. TX-MARK" }))).id;
+  check("με 'αργό' KV: ένα νέο έγγραφο φαίνεται ΑΜΕΣΩΣ στη λίστα του συναδέλφου και του admin", (await titlesOf("emp_cc@demo.gr")).includes("Νέο ΤΑΧΕΙΑ") && (await titlesOf("admin@demo.gr")).includes("Νέο ΤΑΧΕΙΑ"));
+  check("... και ανοίγει αμέσως (ανάγνωση)", (await readJson(await call("emp_cc@demo.gr", "GET", `/team/documents/${fresh}`))).fullText.includes("TX-MARK"));
+  check("με 'αργό' KV: ο editor Finance βλέπει το έγγραφο πριν τη σήμανση", (await titlesOf("ed_fin@demo.gr")).includes("Νέο ΤΑΧΕΙΑ"));
+  await call("admin@demo.gr", "PATCH", `/team/admin/documents/${fresh}`, { hidden: true });
+  check("ΑΜΕΣΑ μετά τη σήμανση εμπιστευτικού: ο editor Finance δεν το βλέπει (λίστα και άμεση ανάγνωση)", !(await titlesOf("ed_fin@demo.gr")).includes("Νέο ΤΑΧΕΙΑ") && (await call("ed_fin@demo.gr", "GET", `/team/documents/${fresh}`)).status === 404);
+  check("... και η λίστα του admin δείχνει αμέσως τη σήμανση", (await readJson(await call("admin@demo.gr", "GET", "/team/admin/documents"))).documents.find((x) => x.id === fresh).hidden === true);
+  await call("admin@demo.gr", "PATCH", `/team/admin/documents/${fresh}`, { hidden: false });
+  check("ΑΜΕΣΑ μετά την άρση: ξαναφαίνεται", (await titlesOf("ed_fin@demo.gr")).includes("Νέο ΤΑΧΕΙΑ"));
+  await call("ed_cc@demo.gr", "DELETE", `/team/documents/${fresh}`);
+  check("ΑΜΕΣΑ μετά τη διαγραφή: εξαφανίζεται από όλους (λίστα και άμεση ανάγνωση)", !(await titlesOf("emp_cc@demo.gr")).includes("Νέο ΤΑΧΕΙΑ") && (await call("emp_cc@demo.gr", "GET", `/team/documents/${fresh}`)).status === 404);
+  kv.list = realList; kv.get = realGet;
+
+  // (β) μεγάλο έγγραφο και ακεραιότητα του κειμένου
+  const bigText = ("Μια πρόταση για το μέγεθος του εγγράφου. ".repeat(900)) + "ΤΕΛΟΣ-BIG"; // κοντά στο όριο λέξεων του προϊόντος
+  const big = (await readJson(await call("ed_cc@demo.gr", "POST", "/team/documents", { title: "Μεγάλο έγγραφο", departmentId: "cc", text: bigText }))).id;
+  check("μεγάλο έγγραφο (κοντά στο όριο λέξεων): αποθηκεύεται και διαβάζεται ακέραιο", (await readJson(await call("emp_cc@demo.gr", "GET", `/team/documents/${big}`))).fullText === bigText);
+  await call("ed_cc@demo.gr", "DELETE", `/team/documents/${big}`);
+
+  // (γ) αυτόματη μεταφορά παλιών εγγράφων από το KV
+  const legacyId = "doc-aaaaaaaaaaaaaaaa";
+  const legacy2 = "doc-bbbbbbbbbbbbbbbb";
+  const otherWs = "doc-cccccccccccccccc";
+  const legacyDoc = (extra = {}) => JSON.stringify({ id: "x", title: "Παλιό έγγραφο", fullText: "Κείμενο παλιού εγγράφου. LEG-MARK", departmentId: "cc", status: "published", version: 3, chunkCount: 1, createdBy: 1, createdAt: "2026-08-01T00:00:00.000Z", updatedBy: 1, updatedAt: "2026-08-02T00:00:00.000Z", ...extra });
+  await kv.put(`team:team-demo:doc:${legacyId}`, legacyDoc(), { metadata: { title: "Παλιό έγγραφο", departmentId: "cc", updatedAt: "2026-08-02T00:00:00.000Z" } });
+  await kv.put(`team:team-demo:doc:not-a-valid-id`, legacyDoc(), {});
+  await kv.put(`team:team-other:doc:${otherWs}`, legacyDoc({ title: "Άλλου οργανισμού" }), {});
+  db.prepare("delete from team_meta").run();
+  store.resetMigrationCache();
+  const afterList = await titlesOf("admin@demo.gr");
+  check("παλιό έγγραφο του KV: εμφανίζεται στη λίστα μετά τη μεταφορά", afterList.includes("Παλιό έγγραφο"));
+  const row = db.prepare("select * from team_documents where workspace_id = 'team-demo' and id = ?").get(legacyId);
+  check("... με όλα τα πεδία ακέραια (κείμενο, τμήμα, έκδοση, ημερομηνίες)", row && row.full_text.includes("LEG-MARK") && row.department_id === "cc" && row.version === 3 && row.created_at === "2026-08-01T00:00:00.000Z" && row.updated_at === "2026-08-02T00:00:00.000Z" && row.chunk_count === 1);
+  check("... και σβήνεται από το KV (μία μόνο πηγή αλήθειας)", !kv.store.has(`team:team-demo:doc:${legacyId}`));
+  check("άκυρο id στο KV: αγνοείται (δεν μεταφέρεται)", !db.prepare("select 1 from team_documents where id = 'not-a-valid-id'").get());
+  check("έγγραφο ΑΛΛΟΥ οργανισμού στο KV: δεν αγγίζεται ούτε εμφανίζεται εδώ", kv.store.has(`team:team-other:doc:${otherWs}`) && !afterList.includes("Άλλου οργανισμού"));
+  check("η μεταφορά σημαίνεται ως ολοκληρωμένη για τον οργανισμό", !!db.prepare("select docs_migrated_at from team_meta where workspace_id = 'team-demo'").get());
+  await titlesOf("admin@demo.gr");
+  check("δεύτερη φορά: καμία διπλή εγγραφή", db.prepare("select count(*) c from team_documents where id = ?").get(legacyId).c === 1);
+  check("το μεταφερμένο έγγραφο ανοίγει κανονικά από υπάλληλο του τμήματος", (await readJson(await call("emp_cc@demo.gr", "GET", `/team/documents/${legacyId}`))).fullText.includes("LEG-MARK"));
+
+  // (δ) έγγραφο που ο λίστα του KV δεν επέστρεψε, αλλά υπάρχει: το δίχτυ ασφαλείας το μεταφέρει όταν ζητηθεί
+  await kv.put(`team:team-demo:doc:${legacy2}`, legacyDoc({ title: "Παλιό που ξέφυγε" }), {});
+  const missed = await call("emp_cc@demo.gr", "GET", `/team/documents/${legacy2}`);
+  check("παλιό έγγραφο που ξέφυγε από τη λίστα του KV: ανοίγει και μεταφέρεται", missed.status === 200 && !kv.store.has(`team:team-demo:doc:${legacy2}`) && !!db.prepare("select 1 from team_documents where id = ?").get(legacy2));
+  check("ανύπαρκτο έγγραφο: 404 όπως πριν", (await call("emp_cc@demo.gr", "GET", "/team/documents/doc-dddddddddddddddd")).status === 404);
+  await call("admin@demo.gr", "DELETE", `/team/documents/${legacyId}`);
+  await call("admin@demo.gr", "DELETE", `/team/documents/${legacy2}`);
+
+  // (ε) απομόνωση οργανισμών και διαγραφή οργανισμού
+  const otherDocs = JSON.stringify((await readJson(await call("other@other.gr", "GET", "/team/documents"))).documents);
+  check("ο άλλος οργανισμός δεν βλέπει έγγραφα του demo", !/Παλιό|Οδηγός|Αποζημιώσεις/.test(otherDocs));
+  db.prepare("insert into team_workspaces(id,name,created_at) values('team-tmp','T','2026-10-01T00:00:00Z')").run();
+  db.prepare("insert into team_documents(id,workspace_id,title,full_text,department_id,created_at,updated_at) values('doc-eeeeeeeeeeeeeeee','team-tmp','t','x','d1','2026-10-01T00:00:00Z','2026-10-01T00:00:00Z')").run();
+  db.prepare("delete from team_workspaces where id = 'team-tmp'").run();
+  check("διαγραφή οργανισμού: διαγράφονται και όλα τα έγγραφά του (cascade)", db.prepare("select count(*) c from team_documents where workspace_id = 'team-tmp'").get().c === 0);
+
+  // (στ) αν δεν έχει εφαρμοστεί το migration 0013: καθαρό μήνυμα και όχι σκάσιμο
+  store.resetMigrationCache();
+  db.exec("ALTER TABLE team_documents RENAME TO team_documents_x");
+  const noTable = await call("admin@demo.gr", "GET", "/team/documents");
+  const noTableBody = await readJson(noTable);
+  db.exec("ALTER TABLE team_documents_x RENAME TO team_documents");
+  store.resetMigrationCache();
+  check("χωρίς το migration 0013: 503 με καθαρό μήνυμα (migration_required), όχι ακατέργαστο σφάλμα", noTable.status === 503 && noTableBody.error === "migration_required");
+  check("... και μετά την εφαρμογή του όλα δουλεύουν κανονικά", (await titlesOf("admin@demo.gr")).length > 3);
 }
 
 // ============================================================================ Σύνοψη

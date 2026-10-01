@@ -66,7 +66,7 @@ function visibleDepartments(member, all) {
 const isStaff = (member) => member.role === "editor" || member.role === "admin";
 
 // ctx: το execution context του Worker (για ctx.waitUntil), προαιρετικό.
-export async function handleTeamRequest(request, env, url, deps, ctx) {
+async function routeTeamRequest(request, env, url, deps, ctx) {
   const path = url.pathname;
   if (!path.startsWith("/team/")) return null;
   const method = request.method;
@@ -166,4 +166,16 @@ export async function handleTeamRequest(request, env, url, deps, ctx) {
   }
 
   return json(404, { error: "not_found" });
+}
+
+// Ό,τι σφάλμα βάσης προκύψει επιστρέφεται ως καθαρή JSON απάντηση. Αν λείπει πίνακας, σημαίνει ότι δεν έχει εφαρμοστεί
+// ακόμα κάποιο migration (π.χ. 0013): 503 migration_required, όχι ακατέργαστο σφάλμα.
+export async function handleTeamRequest(request, env, url, deps, ctx) {
+  try {
+    return await routeTeamRequest(request, env, url, deps, ctx);
+  } catch (err) {
+    const msg = String((err && err.message) || err);
+    if (/no such table/i.test(msg)) return json(503, { error: "migration_required" });
+    return json(500, { error: "server_error" });
+  }
 }

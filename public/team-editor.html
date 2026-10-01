@@ -269,12 +269,13 @@
     ]);
   }
 
+  var KIND_LABEL_ONE = { wrong: "δήλωσε ότι η απάντηση είναι λάθος", outdated: "δήλωσε ότι η πληροφορία είναι ξεπερασμένη", unclear: "δήλωσε ότι δεν είναι σαφής" };
   var KIND_LABEL = { wrong: "δήλωσαν ότι η απάντηση είναι λάθος", outdated: "δήλωσαν ότι η πληροφορία είναι ξεπερασμένη", unclear: "δήλωσαν ότι δεν είναι σαφής" };
   function feedbackCard(f) {
     var msg = h("p", { class: "note", role: "status", "aria-live": "polite" });
     var kids = [
       h("h3", { text: "«" + f.documentTitle + "»" }),
-      h("p", { class: "status", text: f.departmentName + " · " + f.count + (f.count === 1 ? " υπάλληλος " : " υπάλληλοι ") + KIND_LABEL[f.kind] }),
+      h("p", { class: "status", text: f.departmentName + " · " + f.count + (f.count === 1 ? " υπάλληλος " : " υπάλληλοι ") + (f.count === 1 ? KIND_LABEL_ONE[f.kind] : KIND_LABEL[f.kind]) }),
     ];
     f.questions.forEach(function (q) { kids.push(h("div", { style: "font-size:13px;color:var(--text-soft);margin-top:4px;", text: "Ερώτηση: " + q })); });
     f.notes.forEach(function (n) { kids.push(h("div", { style: "font-size:13.5px;margin-top:4px;", text: "• " + n })); });
