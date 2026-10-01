@@ -107,7 +107,7 @@
         method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ documentId: documentId, kind: kind, question: String(question).slice(0, 300) }),
       }).then(function (r) {
-        row.textContent = r.status === 201 ? "Ευχαριστούμε. Το είδε ο υπεύθυνος του τμήματος."
+        row.textContent = r.status === 201 ? "Ευχαριστούμε. Ενημερώθηκε ο υπεύθυνος του τμήματος."
           : r.status === 429 ? "Έχεις στείλει πολλές αναφορές σήμερα." : "Δεν στάλθηκε. Δοκίμασε ξανά.";
       }).catch(function () { row.textContent = "Δεν στάλθηκε. Δοκίμασε ξανά."; });
     }
