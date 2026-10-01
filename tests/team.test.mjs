@@ -1294,8 +1294,10 @@ section("16. team-editor (εισερχόμενα), team-admin και portal: π�
   const sel = byText(ad, ".member-row", /pg@demo\.gr/).querySelector(".proj-roles select[data-project=cc]");
   sel.value = "member"; sel.dispatchEvent(new ad.window.Event("change", { bubbles: true }));
   check("αλλαγή ρόλου από τη σελίδα ισχύει αμέσως", !!(await waitFor(() => db.prepare("select role from team_members where email='pg@demo.gr'").get().role === "employee")));
+  await waitFor(() => $(ad, ".member-row") && !$(ad, ".busy")); // η γραμμή ξεκλειδώνει όταν ανανεωθεί η λίστα
   click(ad, byText(ad, ".member-row", /pg@demo\.gr/).querySelector(".status-toggle"));
-  check("απενεργοποίηση από τη σελίδα", !!(await waitFor(() => db.prepare("select status from team_members where email='pg@demo.gr'").get().status === "disabled")) && !!(await waitFor(() => /απενεργοποιημένο/.test((byText(ad, ".member-row", /pg@demo\.gr/) || {}).textContent || ""))));
+  click(ad, await waitFor(() => $(ad, ".confirm-yes"))); // η απενεργοποίηση ζητά πρώτα «Σίγουρα;»
+  check("απενεργοποίηση από τη σελίδα (μετά το «Ναι»)", !!(await waitFor(() => db.prepare("select status from team_members where email='pg@demo.gr'").get().status === "disabled")) && !!(await waitFor(() => /απενεργοποιημένο/.test((byText(ad, ".member-row", /pg@demo\.gr/) || {}).textContent || ""))));
   const own = byText(ad, ".member-row", /admin@demo\.gr/).querySelector("select");
   own.value = "member"; own.dispatchEvent(new ad.window.Event("change", { bubbles: true }));
   check("ο τελευταίος admin δεν υποβαθμίζεται: το λάθος μένει ορατό μετά την ανανέωση", !!(await waitFor(() => /χωρίς ενεργό admin/.test(ad.window.document.body.textContent))) && db.prepare("select role from team_members where email='admin@demo.gr'").get().role === "admin");
@@ -1883,6 +1885,230 @@ section("25. Ρόλος ανά project: μέλος σε ένα project, editor �
   const legacyEmp = await post("emp_cc@demo.gr", "cc", "Υπάλληλος χωρίς migration");
   db.exec("ALTER TABLE team_project_editors_x RENAME TO team_project_editors");
   check("χωρίς το migration 0014: ο editor γράφει όπως πριν και ο υπάλληλος όχι (παλιό μοντέλο)", legacyWrite.status === 201 && legacyEmp.status === 403);
+}
+
+// ============================================================================ 26. Διαχείριση (UX)
+section("26. Διαχείριση (UX): μηνύματα με όνομα και ώρα, επιβεβαίωση στη γραμμή, κλείδωμα γραμμής");
+{
+  // Οι συνεδρίες των δύο admin πρέπει να ισχύουν (αν έληξαν από προηγούμενη ενότητα, ξανασυνδέονται).
+  for (const e of ["admin@demo.gr", "other@other.gr"]) {
+    if ((await call(e, "GET", "/team/me")).status !== 200) S[e] = (await login(e)).cookie;
+  }
+  const ctl = { hold: null, fail: false, patches: 0 }; // έλεγχος του ψεύτικου δικτύου της σελίδας
+  // Σελίδα admin με ΨΕΥΤΙΚΑ χρονόμετρα και ρολόι: το "5 δευτερόλεπτα" δεν περιμένει πραγματικά, και η ώρα είναι πάντα 12:51:28.
+  function adminPage(email) {
+    const jar = { value: S[email] };
+    const timers = [];
+    const bridge = async (input, init = {}) => {
+      const url = new URL(input, BASE); const method = init.method || "GET";
+      const headers = { "CF-Connecting-IP": `198.51.100.${(ipCounter++ % 250) + 1}`, ...(init.headers || {}) };
+      if (jar.value && url.pathname.startsWith("/team")) headers.Cookie = jar.value;
+      if (method !== "GET") headers.Origin = BASE;
+      if (method === "PATCH" && url.pathname.startsWith("/team/admin/members/")) {
+        ctl.patches++;
+        if (ctl.hold) await ctl.hold;
+        if (ctl.fail) throw new TypeError("network down");
+      }
+      return workerNew.fetch(new Request(url, { method, headers, body: init.body }), env);
+    };
+    const dom = new JSDOMu(readFileSync(join(REPO, "public", "team-admin.html"), "utf8"), {
+      url: BASE + "/team-admin.html", runScripts: "dangerously", pretendToBeVisual: true, virtualConsole: new VCu(),
+      beforeParse(w) {
+        w.fetch = bridge; w.TextDecoder = TextDecoder;
+        const RealDate = w.Date;
+        w.Date = class extends RealDate {
+          constructor(...a) { if (a.length) super(...a); else super(2026, 9, 1, 12, 51, 28); }
+          static now() { return new RealDate(2026, 9, 1, 12, 51, 28).getTime(); }
+        };
+        w.setTimeout = (fn, ms) => { timers.push({ fn, ms, done: false }); return timers.length; };
+        w.clearTimeout = (id) => { if (timers[id - 1]) timers[id - 1].done = true; };
+      },
+    });
+    const live = (ms) => timers.filter((t) => !t.done && t.ms === ms);
+    const fire = (ms) => { for (const t of live(ms)) { t.done = true; t.fn(); } };
+    return { dom, live, fire };
+  }
+  const rowOf = (dom, email) => $$u(dom, ".member-row").find((r) => r.textContent.includes(email));
+  const pick = (dom, sel, value) => { sel.value = value; sel.dispatchEvent(new dom.window.Event("change", { bubbles: true })); };
+  const toastText = (dom) => { const t = $u(dom, ".toast"); return t ? t.textContent : null; };
+  const settle = (dom) => uiWait(() => $u(dom, ".member-row, .dept-row, .doc-row") && !$u(dom, ".busy")); // η λίστα ξαναχτίστηκε και καμία γραμμή δεν είναι κλειδωμένη
+  const roleOf = (id) => db.prepare("select role from team_members where id = ?").get(id).role;
+  const statusOf = (id) => db.prepare("select status from team_members where id = ?").get(id).status;
+  const allEnabled = (row) => [...row.querySelectorAll("select, button, input")].every((x) => !x.disabled);
+
+  const ccName = db.prepare("select name from departments where id = 'cc'").get().name;
+  const finName = db.prepare("select name from departments where id = 'fin'").get().name;
+  const mk = async (email, projectRoles) => (await readJson(await call("admin@demo.gr", "POST", "/team/admin/members", { email, role: "member", projectRoles, sendInvite: false }))).id;
+  const uxId = await mk("ux.agent@demo.gr", { cc: "member" });
+  await newDocU("ed_cc@demo.gr", "UX έγγραφο", "cc", "Κείμενο δοκιμής για τα μηνύματα της διαχείρισης.");
+
+  // ------------------------------------------------------------ (α) μήνυμα επιβεβαίωσης: ποιος, τι, πότε
+  const A = adminPage("admin@demo.gr");
+  clickU(A.dom, await uiWait(() => $u(A.dom, "#tab-members")));
+  await uiWait(() => rowOf(A.dom, "ux.agent@demo.gr"));
+  pick(A.dom, rowOf(A.dom, "ux.agent@demo.gr").querySelector(".proj-roles select[data-project=cc]"), "editor");
+  const t1 = await uiWait(() => $u(A.dom, ".toast.ok"));
+  check("μήνυμα: λέει ποιος, τι και πότε (email: project → ρόλος (ώρα))", !!t1 && t1.textContent === `ux.agent@demo.gr: ${ccName} → Editor (12:51:28)`);
+  check("μήνυμα: σταθερή περιοχή aria-live=polite, το μήνυμα επιτυχίας έχει role=status", !!t1 && $u(A.dom, "#notice").getAttribute("aria-live") === "polite" && t1.getAttribute("role") === "status");
+  await uiWait(() => $u(A.dom, ".member-row.changed"));
+  check("η γραμμή που άλλαξε επισημαίνεται, και η επισήμανση φεύγει με το χρονόμετρο του 1 δευτερολέπτου",
+    !!$u(A.dom, ".member-row.changed") && A.live(1000).length === 1 && (A.fire(1000), !$u(A.dom, ".member-row.changed")));
+  check("το μήνυμα φαίνεται μέχρι το χρονόμετρο των 5 δευτερολέπτων και μετά εξαφανίζεται μόνο του",
+    A.live(5000).length === 1 && !!$u(A.dom, ".toast") && (A.fire(5000), !$u(A.dom, ".toast")));
+
+  // ------------------------------------------------------------ (β) δύο διαδοχικές ενέργειες: νέο μήνυμα, το χρονόμετρο ξεκινά από την αρχή
+  pick(A.dom, rowOf(A.dom, "ux.agent@demo.gr").querySelector(".proj-roles select[data-project=cc]"), "member");
+  await uiWait(() => $u(A.dom, ".member-row.changed"));
+  A.fire(1000);
+  const first = toastText(A.dom);
+  pick(A.dom, rowOf(A.dom, "ux.agent@demo.gr").querySelector(".proj-roles select[data-project=fin]"), "member");
+  await uiWait(() => (toastText(A.dom) || "").includes(finName));
+  await uiWait(() => $u(A.dom, ".member-row.changed"));
+  check("δεύτερη ενέργεια: ένα μόνο μήνυμα, με νέο κείμενο (άλλο project), όχι το παλιό", $$u(A.dom, ".toast").length === 1 && toastText(A.dom) !== first && (toastText(A.dom) || "").includes(`${finName} → Μέλος`));
+  check("δεύτερη ενέργεια: το χρονόμετρο του πρώτου μηνύματος ακυρώθηκε και υπάρχει ΕΝΑ νέο (5 δευτερολέπτων)", A.live(5000).length === 1);
+  A.fire(1000); A.fire(5000);
+
+  // ------------------------------------------------------------ (γ) ίδια ενέργεια δύο φορές την ίδια στιγμή: διακριτό με μετρητή
+  clickU(A.dom, $u(A.dom, "#tab-departments"));
+  const deptRow = (n) => $$u(A.dom, ".dept-row").find((r) => r.querySelector("input[type=text]").value === n);
+  const saveBtn = (n) => [...deptRow(n).querySelectorAll("button")].find((b) => /Αποθήκευση ονόματος/.test(b.textContent));
+  clickU(A.dom, saveBtn(finName));
+  await uiWait(() => $u(A.dom, ".dept-row.changed"));
+  clickU(A.dom, saveBtn(finName));
+  const t2 = await uiWait(() => /×2/.test(toastText(A.dom) || "") && toastText(A.dom));
+  check("ίδιο μήνυμα την ίδια στιγμή: ένα μόνο toast, διακριτό με μετρητή ×2", t2 === `${finName}: μετονομάστηκε σε ${finName} (12:51:28) ×2` && $$u(A.dom, ".toast").length === 1);
+  A.fire(1000); A.fire(5000);
+
+  // ------------------------------------------------------------ (δ) το σφάλμα ΜΕΝΕΙ μέχρι την επόμενη ενέργεια
+  const B = adminPage("other@other.gr");
+  clickU(B.dom, await uiWait(() => $u(B.dom, "#tab-members")));
+  await uiWait(() => rowOf(B.dom, "other@other.gr"));
+  const onlyAdmin = db.prepare("select count(*) c from team_members where workspace_id = (select workspace_id from team_members where email = 'other@other.gr') and role = 'admin' and status = 'active'").get().c === 1;
+  pick(B.dom, rowOf(B.dom, "other@other.gr").querySelector("select"), "member");
+  const te = await uiWait(() => $u(B.dom, ".toast.err"));
+  await settle(B.dom);
+  check("σφάλμα (τελευταίος admin): μένει ορατό ΜΕΤΑ την ανανέωση, role=alert, χωρίς χρονόμετρο εξαφάνισης", onlyAdmin && !!te && /χωρίς ενεργό admin/.test(te.textContent) && te.getAttribute("role") === "alert" && B.live(5000).length === 0 && !!$u(B.dom, ".toast.err"));
+  clickU(B.dom, $u(B.dom, ".toast.err .x"));
+  check("σφάλμα: το κουμπί κλεισίματος το αφαιρεί", !$u(B.dom, ".toast"));
+  pick(B.dom, rowOf(B.dom, "other@other.gr").querySelector("select"), "member");
+  await uiWait(() => $u(B.dom, ".toast.err"));
+  await settle(B.dom);
+  clickU(B.dom, $u(B.dom, "#tab-departments"));
+  check("σφάλμα: φεύγει με την επόμενη ενέργεια (αλλαγή καρτέλας)", !$u(B.dom, ".toast"));
+  check("σφάλμα: ο τελευταίος admin παραμένει admin", roleOf(db.prepare("select id from team_members where email = 'other@other.gr'").get().id) === "admin");
+
+  // ------------------------------------------------------------ (ε) σφάλμα δικτύου: η γραμμή ΞΕΚΛΕΙΔΩΝΕΙ
+  clickU(A.dom, $u(A.dom, "#tab-members"));
+  await uiWait(() => rowOf(A.dom, "ux.agent@demo.gr"));
+  ctl.fail = true;
+  pick(A.dom, rowOf(A.dom, "ux.agent@demo.gr").querySelector(".proj-roles select[data-project=cc]"), "editor");
+  const tn = await uiWait(() => $u(A.dom, ".toast.err"));
+  await settle(A.dom);
+  ctl.fail = false;
+  check("σφάλμα δικτύου: μήνυμα, καμία αλλαγή στη βάση, και η γραμμή ξεκλειδώνει", !!tn && /Δεν υπάρχει σύνδεση/.test(tn.textContent) && allEnabled(rowOf(A.dom, "ux.agent@demo.gr")) && db.prepare("select count(*) c from team_project_editors where member_id = ?").get(uxId).c === 0);
+
+  // ------------------------------------------------------------ (στ) κλείδωμα γραμμής όσο τρέχει το αίτημα
+  clickU(A.dom, $u(A.dom, "#tab-departments"));
+  clickU(A.dom, $u(A.dom, "#tab-members"));
+  await uiWait(() => rowOf(A.dom, "ux.agent@demo.gr"));
+  let release; ctl.hold = new Promise((r) => { release = r; }); ctl.patches = 0;
+  pick(A.dom, rowOf(A.dom, "ux.agent@demo.gr").querySelector(".proj-roles select[data-project=cc]"), "editor");
+  const busyRow = $u(A.dom, ".member-row.busy");
+  check("κλείδωμα: όσο τρέχει το αίτημα η γραμμή είναι busy, aria-busy και ΟΛΑ τα χειριστήρια σβηστά", !!busyRow && busyRow.getAttribute("aria-busy") === "true" && [...busyRow.querySelectorAll("select, button")].every((x) => x.disabled));
+  pick(A.dom, busyRow.querySelector(".proj-roles select[data-project=fin]"), "editor"); // δεύτερη αλλαγή προγραμματιστικά (παρακάμπτει το disabled)
+  await new Promise((r) => setTimeout(r, 50));
+  check("κλείδωμα: δεύτερη αλλαγή στην ίδια γραμμή ΔΕΝ στέλνεται (ένα μόνο αίτημα)", ctl.patches === 1);
+  ctl.hold = null; release();
+  await uiWait(() => $u(A.dom, ".toast.ok") && !$u(A.dom, ".busy"));
+  check("κλείδωμα: μετά την απάντηση η γραμμή ξεκλειδώνει και η αλλαγή έγινε", allEnabled(rowOf(A.dom, "ux.agent@demo.gr")) && roleOf(uxId) === "editor");
+  A.fire(1000); A.fire(5000);
+
+  // ------------------------------------------------------------ (ζ) επιβεβαίωση ΜΟΝΟ για μεγάλο αντίκτυπο
+  await call("admin@demo.gr", "PATCH", `/team/admin/members/${uxId}`, { projectRoles: { cc: "member" } });
+  const C = adminPage("admin@demo.gr");
+  clickU(C.dom, await uiWait(() => $u(C.dom, "#tab-members")));
+  await uiWait(() => rowOf(C.dom, "ux.agent@demo.gr"));
+  const orgSel = () => rowOf(C.dom, "ux.agent@demo.gr").querySelector("select"); // το πρώτο select είναι ο ρόλος οργανισμού
+  const toggleOf = () => rowOf(C.dom, "ux.agent@demo.gr").querySelector(".status-toggle");
+  ctl.patches = 0;
+  pick(C.dom, orgSel(), "admin");
+  await uiWait(() => $u(C.dom, ".confirm"));
+  const cf = $u(C.dom, ".confirm");
+  check("προαγωγή σε Admin: ζητά «Σίγουρα;», δεν στέλνεται τίποτα και ο ρόλος δεν αλλάζει", !!cf && /Σίγουρα;/.test(cf.textContent) && ctl.patches === 0 && roleOf(uxId) !== "admin");
+  check("προαγωγή σε Admin: τα υπόλοιπα χειριστήρια σβήνουν, τα «Ναι»/«Όχι» μένουν ενεργά", [...rowOf(C.dom, "ux.agent@demo.gr").querySelectorAll("select, .status-toggle")].every((x) => x.disabled) && [...cf.querySelectorAll("button")].every((b) => !b.disabled));
+  clickU(C.dom, $u(C.dom, ".confirm-no"));
+  check("«Όχι»: επαναφέρει την επιλογή, κλείνει την ερώτηση, ξεκλειδώνει και δεν αλλάζει τίποτα", orgSel().value === "member" && !$u(C.dom, ".confirm") && ctl.patches === 0 && allEnabled(rowOf(C.dom, "ux.agent@demo.gr")) && roleOf(uxId) !== "admin");
+  pick(C.dom, orgSel(), "admin");
+  await uiWait(() => $u(C.dom, ".confirm"));
+  $u(C.dom, ".confirm-no").dispatchEvent(new C.dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  check("Escape ακυρώνει την ερώτηση", !$u(C.dom, ".confirm") && ctl.patches === 0 && orgSel().value === "member");
+  pick(C.dom, orgSel(), "admin");
+  await uiWait(() => $u(C.dom, ".confirm"));
+  clickU(C.dom, $u(C.dom, ".confirm-yes"));
+  await uiWait(() => roleOf(uxId) === "admin");
+  await settle(C.dom);
+  check("«Ναι»: ο ρόλος γίνεται Admin με ένα αίτημα και μήνυμα με όνομα", ctl.patches === 1 && /ux\.agent@demo\.gr: ρόλος Admin \(12:51:28\)/.test(toastText(C.dom) || ""));
+  ctl.patches = 0;
+  pick(C.dom, orgSel(), "member");
+  await uiWait(() => roleOf(uxId) !== "admin");
+  check("υποβάθμιση από Admin: ΧΩΡΙΣ επιβεβαίωση (ένα αίτημα)", ctl.patches === 1 && !$u(C.dom, ".confirm"));
+  await settle(C.dom);
+  ctl.patches = 0;
+  clickU(C.dom, toggleOf());
+  await uiWait(() => $u(C.dom, ".confirm"));
+  check("απενεργοποίηση μέλους: ζητά «Σίγουρα;», δεν στέλνεται τίποτα και το μέλος μένει ενεργό", /Σίγουρα;/.test(($u(C.dom, ".confirm") || {}).textContent || "") && ctl.patches === 0 && statusOf(uxId) === "active");
+  clickU(C.dom, $u(C.dom, ".confirm-no"));
+  check("«Όχι» στην απενεργοποίηση: μένει ενεργό και η γραμμή ξεκλειδώνει", statusOf(uxId) === "active" && !$u(C.dom, ".confirm") && allEnabled(rowOf(C.dom, "ux.agent@demo.gr")));
+  clickU(C.dom, toggleOf());
+  await uiWait(() => $u(C.dom, ".confirm"));
+  clickU(C.dom, $u(C.dom, ".confirm-yes"));
+  await uiWait(() => statusOf(uxId) === "disabled");
+  await settle(C.dom);
+  check("«Ναι» στην απενεργοποίηση: το μέλος απενεργοποιείται και φαίνεται ως τέτοιο", statusOf(uxId) === "disabled" && /απενεργοποιημένο/.test(rowOf(C.dom, "ux.agent@demo.gr").textContent) && /ux\.agent@demo\.gr: απενεργοποιήθηκε/.test(toastText(C.dom) || ""));
+  ctl.patches = 0;
+  clickU(C.dom, toggleOf());
+  await uiWait(() => statusOf(uxId) === "active");
+  check("ενεργοποίηση μέλους: ΧΩΡΙΣ επιβεβαίωση", ctl.patches === 1 && !$u(C.dom, ".confirm"));
+  await settle(C.dom);
+  C.fire(1000); C.fire(5000);
+
+  // ------------------------------------------------------------ (η) μηνύματα στις υπόλοιπες καρτέλες
+  clickU(C.dom, $u(C.dom, "#tab-departments"));
+  const cDept = (n) => $$u(C.dom, ".dept-row").find((r) => r.querySelector("input[type=text]").value === n);
+  const wasHidden = db.prepare("select hidden from departments where id = 'fin'").get().hidden === 1;
+  clickU(C.dom, cDept(finName).querySelector(".hide-toggle"));
+  await uiWait(() => $u(C.dom, ".dept-row.changed"));
+  check("τμήμα: μήνυμα με όνομα, κατάσταση και ώρα", toastText(C.dom) === `${finName}: ${wasHidden ? "ορατό" : "κρυφό"} τμήμα (12:51:28)`);
+  C.fire(1000);
+  clickU(C.dom, cDept(finName).querySelector(".hide-toggle")); // επαναφορά
+  await uiWait(() => $u(C.dom, ".dept-row.changed") && db.prepare("select hidden from departments where id = 'fin'").get().hidden === (wasHidden ? 1 : 0));
+  C.fire(1000);
+  $u(C.dom, "#new-dept").value = "UX Τμήμα";
+  $u(C.dom, "#add-dept").dispatchEvent(new C.dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  await uiWait(() => $u(C.dom, ".dept-row.changed"));
+  check("νέο τμήμα: μήνυμα «όνομα: νέο τμήμα (ώρα)» και επισημασμένη γραμμή", toastText(C.dom) === "UX Τμήμα: νέο τμήμα (12:51:28)" && !!cDept("UX Τμήμα"));
+  C.fire(1000);
+  clickU(C.dom, $u(C.dom, "#tab-documents"));
+  const docRow = await uiWait(() => $$u(C.dom, ".doc-row").find((r) => /UX έγγραφο/.test(r.textContent)));
+  clickU(C.dom, docRow.querySelector(".doc-hide-toggle"));
+  await uiWait(() => $u(C.dom, ".doc-row.changed"));
+  check("έγγραφο: μήνυμα «τίτλος: εμπιστευτικό (ώρα)» και επισημασμένη γραμμή", toastText(C.dom) === "UX έγγραφο: εμπιστευτικό (12:51:28)");
+  C.fire(1000);
+  clickU(C.dom, $$u(C.dom, ".doc-row").find((r) => /UX έγγραφο/.test(r.textContent)).querySelector(".doc-hide-toggle"));
+  await uiWait(() => /δεν είναι πια εμπιστευτικό/.test(toastText(C.dom) || ""));
+  check("έγγραφο: άρση: «τίτλος: δεν είναι πια εμπιστευτικό»", toastText(C.dom) === "UX έγγραφο: δεν είναι πια εμπιστευτικό (12:51:28)");
+  C.fire(1000);
+  clickU(C.dom, $u(C.dom, "#tab-members"));
+  await uiWait(() => rowOf(C.dom, "ux.agent@demo.gr"));
+  $u(C.dom, "#new-email").value = "ux.nea@demo.gr";
+  $u(C.dom, "#add-member").dispatchEvent(new C.dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  await uiWait(() => $u(C.dom, ".member-row.changed"));
+  check("νέο μέλος: μήνυμα «email: νέο μέλος (ώρα)» και επισημασμένη γραμμή", toastText(C.dom) === "ux.nea@demo.gr: νέο μέλος (12:51:28)" && !!rowOf(C.dom, "ux.nea@demo.gr"));
+
+  // ------------------------------------------------------------ (θ) το ιστορικό δείχνει ελληνική ετικέτα για τις αλλαγές ρόλων ανά project
+  clickU(C.dom, $u(C.dom, "#tab-audit"));
+  const auditText = await uiWait(() => { const x = $u(C.dom, "#app").textContent; return /Ιστορικό ενεργειών/.test(x) && x; });
+  check("ιστορικό: οι αλλαγές ρόλων ανά project έχουν ελληνική ετικέτα και όχι το τεχνικό όνομα", !!auditText && /αλλαγή ρόλων ανά project/.test(auditText) && !/member_project_roles_changed/.test(auditText));
 }
 
 // ============================================================================ Σύνοψη
