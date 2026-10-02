@@ -80,6 +80,13 @@
   var app = document.getElementById("app");
   var me = null;
   var data = null; // overview
+  // Η λέξη για το τμήμα: στο προφίλ «Εταιρεία» λέγεται «τμήμα», στο call center μένει «project».
+  // Μορφές: s = ενικός, g = γενική ενικού, p = πληθυντικός, gp = γενική πληθυντικού, S/P = με κεφαλαίο.
+  var WORDS = {
+    company: { s: "τμήμα", g: "τμήματος", p: "τμήματα", gp: "τμημάτων", S: "Τμήμα", P: "Τμήματα" },
+    multi_client: { s: "project", g: "project", p: "projects", gp: "projects", S: "Project", P: "Projects" }
+  };
+  function W() { return data && data.profile === "multi_client" ? WORDS.multi_client : WORDS.company; }
   var audit = null;
   var docsData = null;
   var tab = "departments";
@@ -185,11 +192,11 @@
     no.focus(); // ασφαλής προεπιλογή: το "Όχι"
   }
   var ERRORS = {
-    invalid_name: "Το όνομα είναι κενό ή πολύ μεγάλο.", name_taken: "Υπάρχει ήδη project με αυτό το όνομα.", invalid_email: "Το email δεν είναι σωστό.",
-    invalid_role: "Μη έγκυρος ρόλος.", invalid_departments: "Μη έγκυρα projects.", email_in_use: "Αυτό το email χρησιμοποιείται ήδη.",
+    invalid_name: "Το όνομα είναι κενό ή πολύ μεγάλο.", invalid_email: "Το email δεν είναι σωστό.",
+    invalid_role: "Μη έγκυρος ρόλος.", email_in_use: "Αυτό το email χρησιμοποιείται ήδη.",
     last_admin: "Ο χώρος δεν μπορεί να μείνει χωρίς ενεργό admin. Όρισε πρώτα άλλον admin.", forbidden: "Δεν έχεις δικαίωμα.", not_found: "Δεν βρέθηκε.",
     network: "Δεν υπάρχει σύνδεση με τον server. Η αλλαγή δεν έγινε, δοκίμασε ξανά.",
-    invalid_projects: "Ένα από τα projects δεν είναι έγκυρο.", invalid_changes: "Η αλλαγή δεν είναι έγκυρη.",
+    invalid_changes: "Η αλλαγή δεν είναι έγκυρη.",
     invalid_members: "Η επιλογή μελών δεν είναι έγκυρη.", invalid_emails: "Ένα από τα emails δεν είναι σωστό.",
     no_targets: "Δεν επιλέχθηκε κανένα μέλος.", too_many: "Πάρα πολλά μέλη σε ένα αίτημα. Το πολύ 100.",
     too_many_invites: "Για πάνω από 40 νέα μέλη δημιούργησέ τα χωρίς πρόσκληση.", invalid_status: "Η κατάσταση δεν είναι έγκυρη.",
@@ -201,27 +208,45 @@
   };
   function errText(r) {
     var e = r.data && r.data.error;
-    // Η μεταφορά project ανάμεσα σε πελάτες απορρίπτεται όσο μένουν κοινά έγγραφα πάνω από τον τοίχο: λέμε πόσα και τι να κάνει ο admin.
+    var w = W();
+    // Η μεταφορά project ανάμεσα σε πελάτες (ή από/προς τα εσωτερικά) απορρίπτεται όσο μένουν κοινά έγγραφα πάνω από τον τοίχο.
+    // Το κοινό μπορεί να είναι προς άλλον πελάτη ή προς τα εσωτερικά, όχι μόνο «του ίδιου πελάτη»: λέμε πόσα και τι να κάνει ο admin.
     if (e === "cross_client_shares") {
+      var docWord = function (n) { return n + (n === 1 ? " έγγραφο" : " έγγραφα"); };
+      var shareVerb = function (n) { return n === 1 ? "μοιράζεται" : "μοιράζονται"; };
+      var away = "που, μετά τη μεταφορά, θα είναι σε άλλον πελάτη ή στα εσωτερικά";
       var parts = [];
-      if (r.data.owned) parts.push(r.data.owned + (r.data.owned === 1 ? " έγγραφο του project μοιράζεται" : " έγγραφα του project μοιράζονται") + " με τμήματα του ίδιου πελάτη");
-      if (r.data.incoming) parts.push(r.data.incoming + (r.data.incoming === 1 ? " έγγραφο άλλου τμήματος μοιράζεται" : " έγγραφα άλλων τμημάτων μοιράζονται") + " προς αυτό");
+      if (r.data.owned) parts.push(docWord(r.data.owned) + " του " + w.g + " " + shareVerb(r.data.owned) + " με άλλα " + w.p + " " + away);
+      if (r.data.incoming) parts.push(docWord(r.data.incoming) + " από άλλα " + w.p + " (που θα είναι σε άλλον πελάτη ή στα εσωτερικά) " + shareVerb(r.data.incoming) + " προς αυτό");
       return "Δεν μεταφέρεται: " + parts.join(" και ") + ". Αφαίρεσε πρώτα τον διαμοιρασμό από την οθόνη του εγγράφου.";
     }
-    return ERRORS[e] || "Κάτι πήγε στραβά.";
+    var dyn = {
+      name_taken: "Υπάρχει ήδη " + w.s + " με αυτό το όνομα.",
+      invalid_departments: "Μη έγκυρα " + w.p + ".",
+      invalid_projects: "Ένα από τα " + w.p + " δεν είναι έγκυρο."
+    };
+    return dyn[e] || ERRORS[e] || "Κάτι πήγε στραβά.";
   }
   var ROLE_LABEL = { admin: "Admin", member: "Μέλος", editor: "Editor", employee: "Υπάλληλος" };
   var ACTION_LABEL = {
     login: "σύνδεση", document_hidden: "σήμανση εμπιστευτικού", document_unhidden: "άρση εμπιστευτικού", feedback_closed: "κλείσιμο αναφορών υπαλλήλων", rechecks_run: "εκτέλεση επανελέγχων", document_created: "νέο έγγραφο", document_updated: "αλλαγή εγγράφου", document_deleted: "διαγραφή εγγράφου",
     update_created: "νέο update", update_applied: "ενσωμάτωση update", update_rejected: "απόρριψη update", update_proposal_generated: "πρόταση ενσωμάτωσης",
     contradiction_dismissed: "«δεν είναι αντίφαση»", contradiction_reminder: "υπενθύμιση αντίφασης", contradiction_check: "έλεγχος αντιφάσεων",
-    contradiction_check_failed: "αποτυχία ελέγχου αντιφάσεων", department_created: "νέο project", department_renamed: "μετονομασία project",
-    department_hidden: "απόκρυψη project", department_unhidden: "εμφάνιση project", member_added: "νέο μέλος", member_role_changed: "αλλαγή ρόλου", member_project_roles_changed: "αλλαγή ρόλων ανά project",
-    member_disabled: "απενεργοποίηση μέλους", member_enabled: "ενεργοποίηση μέλους", member_departments_changed: "αλλαγή projects μέλους", question_dismissed: "παράβλεψη ερώτησης",
-    members_bulk_changed: "μαζική αλλαγή projects", members_bulk_status: "μαζική αλλαγή κατάστασης",
-    workspace_profile_changed: "αλλαγή τύπου χώρου", client_created: "νέος πελάτης", client_renamed: "μετονομασία πελάτη", client_deleted: "διαγραφή πελάτη",
-    project_client_changed: "μεταφορά project σε πελάτη"
+    contradiction_check_failed: "αποτυχία ελέγχου αντιφάσεων",     member_added: "νέο μέλος", member_role_changed: "αλλαγή ρόλου",     member_disabled: "απενεργοποίηση μέλους", member_enabled: "ενεργοποίηση μέλους", question_dismissed: "παράβλεψη ερώτησης",
+    members_bulk_status: "μαζική αλλαγή κατάστασης",
+    workspace_profile_changed: "αλλαγή τύπου χώρου", client_created: "νέος πελάτης", client_renamed: "μετονομασία πελάτη", client_deleted: "διαγραφή πελάτη"
   };
+
+  function actionLabel(a) {
+    var w = W();
+    var dyn = {
+      department_created: "νέο " + w.s, department_renamed: "μετονομασία " + w.g, department_hidden: "απόκρυψη " + w.g,
+      department_unhidden: "εμφάνιση " + w.g, member_project_roles_changed: "αλλαγή ρόλων ανά " + w.s,
+      member_departments_changed: "αλλαγή " + w.gp + " μέλους", members_bulk_changed: "μαζική αλλαγή " + w.gp,
+      project_client_changed: "μεταφορά " + w.g + " σε πελάτη"
+    };
+    return dyn[a] || ACTION_LABEL[a] || a;
+  }
 
   function load() {
     return api("/team/admin/overview").then(function (r) { if (r.status === 200) data = r.data; })
@@ -236,7 +261,7 @@
       h("h1", { text: (me.workspaceName || "") + " · Διαχείριση" }),
       h("div", null, [h("a", { href: "/team-editor.html", text: "Εισερχόμενα και έγγραφα" }), h("a", { href: "/portal.html", text: "← Αναζήτηση" })]),
     ]));
-    var tabs = [["departments", "Projects"], ["documents", "Έγγραφα"], ["members", "Άνθρωποι"], ["audit", "Ιστορικό ενεργειών"]];
+    var tabs = [["departments", W().P], ["documents", "Έγγραφα"], ["members", "Άνθρωποι"], ["audit", "Ιστορικό ενεργειών"]];
     app.appendChild(h("div", { class: "tabs", role: "tablist" }, tabs.map(function (t) {
       return h("button", { class: "tab" + (tab === t[0] ? " active" : ""), type: "button", role: "tab", id: "tab-" + t[0], text: t[1],
         onclick: function () { beginAction(); tab = t[0]; if (t[0] === "departments") proj.openId = null; render(); } });
@@ -249,7 +274,7 @@
   // κάθε πελάτης είναι ΤΟΙΧΟΣ (τίποτα δεν περνά από τον έναν πελάτη στον άλλον) και τα τμήματά του ζουν μέσα του.
   function deptRowFor(d, msg, inClient) {
     var shown = inClient ? (d.shortName || d.name) : d.name;
-    var name = h("input", { type: "text", value: shown, maxlength: "60", "aria-label": "Όνομα project " + d.name });
+    var name = h("input", { type: "text", value: shown, maxlength: "60", "aria-label": "Όνομα " + W().g + " " + d.name });
     var rename = h("button", { class: "btn secondary", type: "button", text: "Αποθήκευση ονόματος", onclick: function () {
       beginAction();
       var newNameText = name.value.trim().replace(/\s+/g, " ");
@@ -261,16 +286,16 @@
     function doToggleHidden() {
       beginAction();
       api("/team/admin/departments/" + encodeURIComponent(d.id), "PATCH", { hidden: !d.hidden }).then(function (r) {
-        if (r.status === 200) { ok(d.name + (d.hidden ? ": ορατό project" : ": κρυφό project")); changed("dept-" + d.id); load(); }
+        if (r.status === 200) { ok(d.name + (d.hidden ? ": ορατό " + W().s : ": κρυφό " + W().s)); changed("dept-" + d.id); load(); }
         else { msg.className = "note err"; msg.textContent = errText(r); }
       });
     }
-    var toggle = h("button", { class: "btn secondary hide-toggle", type: "button", text: d.hidden ? "Εμφάνιση project" : "Απόκρυψη project", onclick: function () {
+    var toggle = h("button", { class: "btn secondary hide-toggle", type: "button", text: d.hidden ? "Εμφάνιση " + W().g : "Απόκρυψη " + W().g, onclick: function () {
       // Ένα κρυφό project δεν μοιράζει έγγραφα: αν έχει κοινοποιημένα, τα επαναφέρει σε "μόνο μέλη του project". Προειδοποιούμε πριν.
       if (!d.hidden && d.sharedDocumentCount > 0) {
         confirmFirst(deptRow, deptControls, (d.sharedDocumentCount === 1
-          ? "Ένα έγγραφο του project μοιράζεται με άλλα projects. Θα σταματήσει να μοιράζεται και δεν θα επανέλθει μόνο του."
-          : d.sharedDocumentCount + " έγγραφα του project μοιράζονται με άλλα projects. Θα σταματήσουν να μοιράζονται και δεν θα επανέλθουν μόνα τους.") + " Σίγουρα;", doToggleHidden);
+          ? "Ένα έγγραφο του " + W().g + " μοιράζεται με άλλα " + W().p + ". Θα σταματήσει να μοιράζεται και δεν θα επανέλθει μόνο του."
+          : d.sharedDocumentCount + " έγγραφα του " + W().g + " μοιράζονται με άλλα " + W().p + ". Θα σταματήσουν να μοιράζονται και δεν θα επανέλθουν μόνα τους.") + " Σίγουρα;", doToggleHidden);
         return;
       }
       doToggleHidden();
@@ -310,8 +335,8 @@
 
   // Φόρμα νέου τμήματος: εσωτερικό (χωρίς πελάτη) ή μέσα σε πελάτη.
   function addDeptForm(msg, client) {
-    var label = client ? "Νέο τμήμα του πελάτη " + client.name : (data.profile === "multi_client" ? "Νέο εσωτερικό τμήμα" : "Όνομα νέου project");
-    var input = h("input", { type: "text", class: "grow", maxlength: "60", placeholder: client ? "Όνομα νέου τμήματος" : (data.profile === "multi_client" ? "Όνομα νέου εσωτερικού τμήματος" : "Όνομα νέου project"), "aria-label": label });
+    var label = client ? "Νέο τμήμα του πελάτη " + client.name : (data.profile === "multi_client" ? "Νέο εσωτερικό τμήμα" : "Όνομα νέου τμήματος");
+    var input = h("input", { type: "text", class: "grow", maxlength: "60", placeholder: client ? "Όνομα νέου τμήματος" : (data.profile === "multi_client" ? "Όνομα νέου εσωτερικού τμήματος" : "Όνομα νέου τμήματος"), "aria-label": label });
     if (!client) input.id = "new-dept";
     var form = h("form", { class: "add" + (client ? " add-in-client" : ""), id: client ? "add-dept-" + client.id : "add-dept", onsubmit: function (e) {
       e.preventDefault();
@@ -319,9 +344,9 @@
       var body = { name: input.value };
       if (client) body.clientId = client.id;
       api("/team/admin/departments", "POST", body).then(function (r) {
-        if (r.status === 201) { ok((r.data.name || input.value) + ": νέο project"); changed("dept-" + r.data.id); load(); } else { msg.className = "note err"; msg.textContent = errText(r); }
+        if (r.status === 201) { ok((r.data.name || input.value) + ": νέο " + W().s); changed("dept-" + r.data.id); load(); } else { msg.className = "note err"; msg.textContent = errText(r); }
       });
-    } }, [input, h("button", { class: "btn", type: "submit", text: client ? "Προσθήκη τμήματος" : (data.profile === "multi_client" ? "Προσθήκη εσωτερικού τμήματος" : "Προσθήκη project") })]);
+    } }, [input, h("button", { class: "btn", type: "submit", text: client ? "Προσθήκη τμήματος" : (data.profile === "multi_client" ? "Προσθήκη εσωτερικού τμήματος" : "Προσθήκη τμήματος") })]);
     return form;
   }
 
@@ -379,7 +404,7 @@
       if (hasClients) row.appendChild(h("span", { class: "muted", text: "Για επιστροφή σε «Εταιρεία» διέγραψε πρώτα όλους τους πελάτες (αφού μεταφέρεις ή αφαιρέσεις τα τμήματά τους)." }));
     } else {
       btn = h("button", { class: "btn secondary", type: "button", id: "profile-switch", text: "Αλλαγή σε «Call center (πολλοί πελάτες)»", onclick: function () {
-        confirmFirst(card, row, "Κάθε πελάτης θα γίνει τοίχος και τα έγγραφα δεν θα μοιράζονται ποτέ ανάμεσα σε πελάτες. Τα υπάρχοντα projects μένουν «εσωτερικά» μέχρι να τα μεταφέρεις σε πελάτες. Σίγουρα;", function () { switchProfile("multi_client"); });
+        confirmFirst(card, row, "Κάθε πελάτης θα γίνει τοίχος και τα έγγραφα δεν θα μοιράζονται ποτέ ανάμεσα σε πελάτες. Τα υπάρχοντα " + W().p + " μένουν «εσωτερικά» μέχρι να τα μεταφέρεις σε πελάτες. Σίγουρα;", function () { switchProfile("multi_client"); });
       } });
       row.appendChild(btn);
     }
@@ -400,10 +425,10 @@
     var multi = data.profile === "multi_client";
     var wrap = h("div", null);
     var box = h("div", { class: "card" }, [
-      h("h2", { text: multi ? "Πελάτες και projects" : "Projects" }),
+      h("h2", { text: multi ? "Πελάτες και projects" : "Τμήματα" }),
       h("p", { class: "hint", text: multi
         ? "Κάθε πελάτης είναι τοίχος: τα έγγραφά του δεν μοιράζονται ποτέ με άλλον πελάτη. Μέσα σε έναν πελάτη τα τμήματα μοιράζονται ελεύθερα έγγραφα. Ένα κρυφό project το βλέπουν μόνο τα μέλη του και οι admins. Με το «Μέλη» ανοίγεις τη σελίδα του project."
-        : "Ένα κρυφό project το βλέπουν μόνο τα μέλη του και οι admins: τα έγγραφά του δεν μοιράζονται με άλλα projects και μια αντίφαση μαζί του εμφανίζεται χωρίς περιεχόμενο. Με το «Μέλη» ανοίγεις τη σελίδα του project." }),
+        : "Ένα κρυφό τμήμα το βλέπουν μόνο τα μέλη του και οι admins: τα έγγραφά του δεν μοιράζονται με άλλα τμήματα και μια αντίφαση μαζί του εμφανίζεται χωρίς περιεχόμενο. Με το «Μέλη» ανοίγεις τη σελίδα του τμήματος." }),
     ]);
     var msg = h("p", { class: "note", role: "status", "aria-live": "polite" });
     box.appendChild(h("div", { class: "row" }, [
@@ -517,7 +542,7 @@
     if (m.role === "admin") return h("span", { class: "muted", text: "πρόσβαση παντού" });
     var mine = data.departments.filter(function (d) { return m.projectRoles && m.projectRoles[d.id]; });
     var wrap = h("span", { class: "chips" });
-    if (!mine.length) { wrap.appendChild(h("span", { class: "muted", text: "κανένα project" })); return wrap; }
+    if (!mine.length) { wrap.appendChild(h("span", { class: "muted", text: "κανένα " + W().s })); return wrap; }
     mine.slice(0, 2).forEach(function (d) {
       var ed = m.projectRoles[d.id] === "editor";
       wrap.appendChild(h("span", { class: "chip" + (ed ? " ed" : ""), text: d.name + (ed ? " · Editor" : "") }));
@@ -577,13 +602,13 @@
   function bulkPanel(ids) {
     var mode = people.bulk;
     var panel = h("div", { class: "bulkpanel", id: "bulk-panel" });
-    var project = mode === "disable" ? null : h("select", { id: "bulk-project", "aria-label": "Project" }, projectOptions("Διάλεξε project"));
-    var role = mode === "add" ? h("select", { id: "bulk-role", "aria-label": "Ρόλος στο project" }, [option("member", "Μέλος"), option("editor", "Editor")]) : null;
+    var project = mode === "disable" ? null : h("select", { id: "bulk-project", "aria-label": W().S }, projectOptions("Διάλεξε " + W().s));
+    var role = mode === "add" ? h("select", { id: "bulk-role", "aria-label": "Ρόλος στο " + W().s }, [option("member", "Μέλος"), option("editor", "Editor")]) : null;
     var apply = h("button", { class: "btn", id: "bulk-apply", type: "button", text: mode === "add" ? "Εφαρμογή" : mode === "remove" ? "Αφαίρεση" : "Απενεργοποίηση" });
     var cancel = h("button", { class: "btn secondary", id: "bulk-cancel", type: "button", text: "Άκυρο", onclick: function () { people.bulk = null; drawBulk(); } });
     apply.addEventListener("click", function () {
       if (panel.classList.contains("busy") || panel.querySelector(".confirm")) return;
-      if (project && !project.value) { fail("Διάλεξε project."); return; }
+      if (project && !project.value) { fail("Διάλεξε " + W().s + "."); return; }
       if (mode === "add") { runBulkMemberships(panel, ids, project.value, role.value); return; }
       if (mode === "remove") {
         var d = deptById(project.value);
@@ -609,8 +634,8 @@
     box.className = "bulkbar active";
     function mode(name) { return function () { beginAction(); people.bulk = people.bulk === name ? null : name; drawBulk(); }; }
     box.appendChild(h("strong", { id: "bulk-count", text: plural(ids.length, "επιλεγμένος", "επιλεγμένοι") }));
-    box.appendChild(h("button", { class: "btn secondary", id: "bulk-add", type: "button", text: "Προσθήκη σε project", onclick: mode("add") }));
-    box.appendChild(h("button", { class: "btn secondary", id: "bulk-remove", type: "button", text: "Αφαίρεση από project", onclick: mode("remove") }));
+    box.appendChild(h("button", { class: "btn secondary", id: "bulk-add", type: "button", text: "Προσθήκη σε " + W().s, onclick: mode("add") }));
+    box.appendChild(h("button", { class: "btn secondary", id: "bulk-remove", type: "button", text: "Αφαίρεση από " + W().s, onclick: mode("remove") }));
     box.appendChild(h("button", { class: "btn secondary", id: "bulk-disable", type: "button", text: "Απενεργοποίηση", onclick: mode("disable") }));
     box.appendChild(h("button", { class: "btn secondary", id: "bulk-clear", type: "button", text: "Καθαρισμός επιλογής", onclick: function () { people.selected = {}; people.bulk = null; drawPeople(); } }));
     if (people.bulk) box.appendChild(bulkPanel(ids));
@@ -660,11 +685,11 @@
       controls,
     ]));
     if (m.role === "admin") {
-      card.appendChild(h("p", { class: "hint", text: "Ο admin έχει πρόσβαση σε όλα τα projects." }));
+      card.appendChild(h("p", { class: "hint", text: "Ο admin έχει πρόσβαση σε όλα τα " + W().p + "." }));
       return card;
     }
     var mine = data.departments.filter(function (d) { return m.projectRoles && m.projectRoles[d.id]; });
-    if (!mine.length) card.appendChild(h("p", { class: "hint", text: "Δεν ανήκει σε κανένα project." }));
+    if (!mine.length) card.appendChild(h("p", { class: "hint", text: "Δεν ανήκει σε κανένα " + W().s + "." }));
     mine.forEach(function (d) {
       card.appendChild(h("div", { class: "prow", "data-project": d.id }, [
         h("span", null, [document.createTextNode(d.name), d.hidden ? h("span", { class: "pill hid", text: "κρυφό", style: "margin-left:8px;" }) : null]),
@@ -676,7 +701,7 @@
     });
     var rest = data.departments.filter(function (d) { return !(m.projectRoles && m.projectRoles[d.id]); });
     if (rest.length) {
-      var add = h("select", { id: "detail-add-project", "aria-label": "Προσθήκη σε project" }, [option("", "+ Προσθήκη σε project")].concat(rest.map(function (d) { return option(d.id, d.name); })));
+      var add = h("select", { id: "detail-add-project", "aria-label": "Προσθήκη σε " + W().s }, [option("", "+ Προσθήκη σε " + W().s)].concat(rest.map(function (d) { return option(d.id, d.name); })));
       add.addEventListener("change", function () { if (add.value) changeProjectRole(m, deptById(add.value), "member", card, "member-" + m.id); });
       card.appendChild(h("div", { class: "prow" }, [add]));
     }
@@ -699,7 +724,7 @@
         h("span", { class: "s-state", text: plural(docs.length, "έγγραφο", "έγγραφα") + (docs.length ? " · " + own + " δικά του · " + shared + " κοινά · " + company + " εταιρικά" : "") }),
       ])]);
       var body = h("div", { class: "audience-body" });
-      if (!docs.length) body.appendChild(h("p", { class: "hint", text: "Δεν διαβάζει κανένα έγγραφο ακόμα (δεν ανήκει σε project με έγγραφα)." }));
+      if (!docs.length) body.appendChild(h("p", { class: "hint", text: "Δεν διαβάζει κανένα έγγραφο ακόμα (δεν ανήκει σε " + W().s + " με έγγραφα)." }));
       docs.forEach(function (x) {
         body.appendChild(h("div", { class: "reading-row" }, [
           h("span", null, [document.createTextNode(x.title), x.confidential ? h("span", { class: "pill hid", text: "εμπιστευτικό", style: "margin-left:8px;" }) : null]),
@@ -751,10 +776,10 @@
   function membersView() {
     var box = h("div", { class: "card" }, [
       h("h2", { text: "Άνθρωποι" }),
-      h("p", { class: "hint", text: "Κάθε άτομο έχει ρόλο ανά project: Μέλος (ρωτά και διαβάζει) ή Editor (γράφει στο συγκεκριμένο project). Ο ρόλος οργανισμού Admin δίνει πρόσβαση παντού. Άνοιξε ένα άτομο για να αλλάξεις τα projects του, ή επίλεξε πολλούς για μαζική αλλαγή." }),
+      h("p", { class: "hint", text: "Κάθε άτομο έχει ρόλο ανά " + W().s + ": Μέλος (ρωτά και διαβάζει) ή Editor (γράφει στο συγκεκριμένο " + W().s + "). Ο ρόλος οργανισμού Admin δίνει πρόσβαση παντού. Άνοιξε ένα άτομο για να αλλάξεις τα " + W().p + " του, ή επίλεξε πολλούς για μαζική αλλαγή." }),
     ]);
     var q = h("input", { type: "text", id: "people-q", placeholder: "Αναζήτηση email", "aria-label": "Αναζήτηση email", value: people.q });
-    var pj = h("select", { id: "people-project", "aria-label": "Φίλτρο project" }, projectOptions("Όλα τα projects"));
+    var pj = h("select", { id: "people-project", "aria-label": "Φίλτρο " + W().g }, projectOptions("Όλα τα " + W().p));
     pj.value = people.project;
     var rf = h("select", { id: "people-role", "aria-label": "Φίλτρο ρόλου" }, [option("", "Όλοι οι ρόλοι"), option("editor", "Editor"), option("admin", "Admin"), option("disabled", "Απενεργοποιημένοι")]);
     rf.value = people.roleFilter;
@@ -783,8 +808,8 @@
     var msg = h("p", { class: "note", role: "status", "aria-live": "polite" });
     var email = h("input", { type: "email", class: "grow", id: "new-email", placeholder: "email νέου ατόμου", "aria-label": "Email νέου ατόμου" });
     var role = h("select", { id: "new-role", "aria-label": "Ρόλος οργανισμού νέου ατόμου" }, ["member", "admin"].map(function (r) { return option(r, ROLE_LABEL[r]); }));
-    var newProject = h("select", { id: "new-project", "aria-label": "Project νέου ατόμου" }, projectOptions("Κανένα project ακόμα"));
-    var newRole = h("select", { id: "new-project-role", "aria-label": "Ρόλος στο project" }, [option("member", "Μέλος"), option("editor", "Editor")]);
+    var newProject = h("select", { id: "new-project", "aria-label": W().S + " νέου ατόμου" }, projectOptions("Κανένα " + W().s + " ακόμα"));
+    var newRole = h("select", { id: "new-project-role", "aria-label": "Ρόλος στο " + W().s }, [option("member", "Μέλος"), option("editor", "Editor")]);
     var invite = h("input", { type: "checkbox", id: "new-invite", checked: true, "aria-label": "Στείλε πρόσκληση με email" });
     box.appendChild(h("form", { class: "add", id: "add-member", onsubmit: function (e) {
       e.preventDefault();
@@ -809,11 +834,11 @@
     var members = proj.showDisabled ? everyone : activeOnly;
     var editors = activeOnly.filter(function (m) { return m.projectRoles[d.id] === "editor"; }).length;
     var box = h("div", { class: "card", id: "project-page" });
-    box.appendChild(h("button", { class: "backlink", id: "project-back", type: "button", text: "← Όλα τα projects", onclick: function () { beginAction(); proj.openId = null; render(); } }));
+    box.appendChild(h("button", { class: "backlink", id: "project-back", type: "button", text: "← Όλα τα " + W().p, onclick: function () { beginAction(); proj.openId = null; render(); } }));
     box.appendChild(h("h2", null, [document.createTextNode(d.name), d.hidden ? h("span", { class: "pill hid", text: " κρυφό" }) : null]));
     box.appendChild(h("p", { class: "hint", id: "project-meta", text: plural(activeOnly.length, "μέλος", "μέλη") + " · " + plural(editors, "editor", "editors") + " · " + plural(d.documentCount, "έγγραφο", "έγγραφα") }));
 
-    var q = h("input", { type: "text", id: "proj-q", placeholder: "Αναζήτηση μέσα στο project", "aria-label": "Αναζήτηση μέσα στο project", value: proj.q });
+    var q = h("input", { type: "text", id: "proj-q", placeholder: "Αναζήτηση μέσα στο " + W().s, "aria-label": "Αναζήτηση μέσα στο " + W().s, value: proj.q });
     var list = h("div", { id: "proj-list" });
     var pg = h("div", { id: "proj-pager" });
     function drawProject() {
@@ -851,7 +876,7 @@
 
     // προσθήκη πολλών ανθρώπων με επικόλληση emails (ο συνηθισμένος τρόπος σε BPO: μια ομάδα νέων πρακτόρων μπαίνει μαζί)
     var paste = h("textarea", { id: "paste-emails", "aria-label": "Emails, ένα ανά γραμμή", placeholder: "nikos@bpo.gr\nmaria@bpo.gr" });
-    var pasteRole = h("select", { id: "paste-role", "aria-label": "Ρόλος στο project" }, [option("member", "Μέλος"), option("editor", "Editor")]);
+    var pasteRole = h("select", { id: "paste-role", "aria-label": "Ρόλος στο " + W().s }, [option("member", "Μέλος"), option("editor", "Editor")]);
     // Οι επιλογές μένουν όπως τις άφησες και μετά από μια προσθήκη (ο χρήστης συνήθως προσθέτει πολλές παρτίδες με τον ίδιο τρόπο).
     var create = h("input", { type: "checkbox", id: "paste-create", "aria-label": "Δημιουργία νέων μελών" });
     create.checked = !!proj.create;
@@ -891,7 +916,7 @@
     });
     box.appendChild(h("div", { class: "pastebox" }, [
       h("div", { class: "name", text: "Προσθήκη ανθρώπων" }),
-      h("p", { class: "hint", text: "Επικόλλησε emails, ένα ανά γραμμή (ή χωρισμένα με κόμμα). Όσοι είναι ήδη στον οργανισμό μπαίνουν στο project." }),
+      h("p", { class: "hint", text: "Επικόλλησε emails, ένα ανά γραμμή (ή χωρισμένα με κόμμα). Όσοι είναι ήδη στον οργανισμό μπαίνουν στο " + W().s + "." }),
       paste,
       h("div", { class: "controls", style: "margin-top:8px;" }, [pasteRole, h("label", { class: "checks" }, [create, document.createTextNode("Δημιουργία νέων μελών για emails που δεν υπάρχουν")]),
         h("label", { class: "checks" }, [invite, document.createTextNode("Στείλε πρόσκληση στους νέους")]), add]),
@@ -905,14 +930,14 @@
   function documentsView() {
     var box = h("div", { class: "card" }, [
       h("h2", { text: "Έγγραφα" }),
-      h("p", { class: "hint", text: "Ένα εμπιστευτικό έγγραφο το διαβάζουν μόνο οι admins και τα μέλη του ίδιου project: δεν μοιράζεται με άλλα projects και μια αντίφαση μαζί του εμφανίζεται χωρίς περιεχόμενο. Η κοινή χρήση ενός εγγράφου με άλλα projects ορίζεται από την οθόνη επεξεργασίας του εγγράφου. Έγγραφα «όλης της εταιρείας» δεν μπορούν να γίνουν εμπιστευτικά." }),
+      h("p", { class: "hint", text: "Ένα εμπιστευτικό έγγραφο το διαβάζουν μόνο οι admins και τα μέλη του ίδιου " + W().g + ": δεν μοιράζεται με άλλα " + W().p + " και μια αντίφαση μαζί του εμφανίζεται χωρίς περιεχόμενο. Η κοινή χρήση ενός εγγράφου με άλλα " + W().p + " ορίζεται από την οθόνη επεξεργασίας του εγγράφου. Έγγραφα «όλης της εταιρείας» δεν μπορούν να γίνουν εμπιστευτικά." }),
     ]);
     var msg = h("p", { class: "note", role: "status", "aria-live": "polite" });
     var docs = (docsData && docsData.documents) || [];
     if (!docs.length) box.appendChild(h("div", { class: "hint", text: "Κανένα έγγραφο ακόμα." }));
     docs.forEach(function (d) {
       var docRow, docControls;
-      var sharedWith = (d.audienceProjectIds || []).map(function (id) { var x = deptById(id); return x ? x.name : "άγνωστο project"; });
+      var sharedWith = (d.audienceProjectIds || []).map(function (id) { var x = deptById(id); return x ? x.name : "άγνωστο " + W().s; });
       function doToggleDoc() {
         beginAction();
         api("/team/admin/documents/" + encodeURIComponent(d.id), "PATCH", { hidden: !d.hidden }).then(function (r) {
@@ -923,7 +948,7 @@
       var toggle = h("button", { class: "btn secondary doc-hide-toggle", type: "button", text: d.hidden ? "Άρση εμπιστευτικού" : "Σήμανση ως εμπιστευτικό", onclick: function () {
         // Ένα εμπιστευτικό έγγραφο δεν μοιράζεται: η σήμανση αφαιρεί το ακροατήριο και η άρση δεν το επαναφέρει. Προειδοποιούμε πριν.
         if (!d.hidden && sharedWith.length) {
-          confirmFirst(docRow, docControls, "Το έγγραφο μοιράζεται με " + plural(sharedWith.length, "project", "projects") + ". Αν γίνει εμπιστευτικό θα σταματήσει να μοιράζεται και δεν επανέρχεται μόνο του. Σίγουρα;", doToggleDoc);
+          confirmFirst(docRow, docControls, "Το έγγραφο μοιράζεται με " + plural(sharedWith.length, W().s, W().p) + ". Αν γίνει εμπιστευτικό θα σταματήσει να μοιράζεται και δεν επανέρχεται μόνο του. Σίγουρα;", doToggleDoc);
           return;
         }
         doToggleDoc();
@@ -961,7 +986,7 @@
     if (!entries.length) box.appendChild(h("div", { class: "hint", text: "Καμία ενέργεια ακόμα." }));
     entries.forEach(function (e) {
       box.appendChild(h("div", { class: "row log" }, [
-        h("span", null, [h("span", { class: "a", text: e.actor }), document.createTextNode(" · " + (ACTION_LABEL[e.action] || e.action) + (e.target ? " · " + (e.targetLabel || e.target) : "") + (e.detail && typeof e.detail.count === "number" && /^members_bulk_/.test(e.action) ? " · " + plural(e.detail.count, "μέλος", "μέλη") : ""))]),
+        h("span", null, [h("span", { class: "a", text: e.actor }), document.createTextNode(" · " + actionLabel(e.action) + (e.target ? " · " + (e.targetLabel || e.target) : "") + (e.detail && typeof e.detail.count === "number" && /^members_bulk_/.test(e.action) ? " · " + plural(e.detail.count, "μέλος", "μέλη") : ""))]),
         h("span", { class: "t", text: new Date(e.at).toLocaleString("el-GR") }),
       ]));
     });

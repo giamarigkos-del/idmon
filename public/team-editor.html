@@ -52,6 +52,13 @@
   "use strict";
   var app = document.getElementById("app");
   var me = null;
+  // Η λέξη για το τμήμα: στο προφίλ «Εταιρεία» λέγεται «τμήμα», στο call center μένει «project».
+  // Μορφές: s = ενικός, g = γενική ενικού, p = πληθυντικός, gp = γενική πληθυντικού, S/P = με κεφαλαίο.
+  var WORDS = {
+    company: { s: "τμήμα", g: "τμήματος", p: "τμήματα", gp: "τμημάτων", S: "Τμήμα", P: "Τμήματα" },
+    multi_client: { s: "project", g: "project", p: "projects", gp: "projects", S: "Project", P: "Projects" }
+  };
+  function W() { return me && me.profile === "multi_client" ? WORDS.multi_client : WORDS.company; }
   var departments = [];
   var docs = [];
   var inbox = null;
@@ -86,18 +93,24 @@
     forbidden: "Δεν έχεις δικαίωμα για αυτή την ενέργεια.", invalid_title: "Ο τίτλος είναι κενός ή πολύ μεγάλος.",
     text_required: "Γράψε κείμενο.", text_too_long: "Το κείμενο είναι πολύ μεγάλο.", invalid_text: "Το κείμενο είναι κενό ή πολύ μεγάλο.",
     ai_unavailable: "Ο πάροχος AI δεν είναι διαθέσιμος. Δοκίμασε ξανά σε λίγο.", bad_proposal: "Η πρόταση δεν ήταν χρήσιμη. Δοκίμασε ξανά ή γράψε το κείμενο μόνος σου.",
-    cooldown: "Έχει ήδη σταλεί υπενθύμιση πρόσφατα.", has_pending_updates: "Το project ή ο κύκλος αναγνωστών του εγγράφου δεν αλλάζει όσο υπάρχουν updates που δεν έχουν ενσωματωθεί. Ενσωμάτωσέ τα ή απόρριψέ τα πρώτα.",
-    not_found: "Δεν βρέθηκε (ίσως άλλαξε στο μεταξύ).", not_open: "Έχει ήδη επιλυθεί.",
-    invalid_audience: "Η επιλογή projects για κοινή χρήση δεν είναι έγκυρη. Ξαναφόρτωσε τη σελίδα και δοκίμασε ξανά.",
-    audience_too_large: "Ένα έγγραφο μπορεί να μοιραστεί με το πολύ 10 projects συνολικά (μαζί με αυτό που το κατέχει).",
-    audience_forbidden: "Μπορείς να μοιράσεις το έγγραφο μόνο με projects στα οποία ανήκεις και εσύ.",
-    audience_not_allowed: "Ένα έγγραφο όλης της εταιρείας το βλέπουν ήδη όλοι: δεν μοιράζεται ξεχωριστά.",
-    hidden_cannot_have_audience: "Ένα εμπιστευτικό έγγραφο, ή έγγραφο κρυφού project, δεν μοιράζεται με άλλα projects.",
-    audience_unavailable: "Η κοινή χρήση εγγράφων δεν είναι ακόμα διαθέσιμη σε αυτόν τον χώρο (λείπει μια ενημέρωση βάσης). Ειδοποίησε τον διαχειριστή.",
+    cooldown: "Έχει ήδη σταλεί υπενθύμιση πρόσφατα.",     not_found: "Δεν βρέθηκε (ίσως άλλαξε στο μεταξύ).", not_open: "Έχει ήδη επιλυθεί.",
+                audience_not_allowed: "Ένα έγγραφο όλης της εταιρείας το βλέπουν ήδη όλοι: δεν μοιράζεται ξεχωριστά.",
+        audience_unavailable: "Η κοινή χρήση εγγράφων δεν είναι ακόμα διαθέσιμη σε αυτόν τον χώρο (λείπει μια ενημέρωση βάσης). Ειδοποίησε τον διαχειριστή.",
     audience_cross_client: "Ένα έγγραφο μοιράζεται μόνο με τμήματα του ΙΔΙΟΥ πελάτη, ποτέ με άλλον πελάτη ή με τα εσωτερικά του call center.",
     cross_client_move: "Ένα έγγραφο δεν μετακινείται σε project άλλου πελάτη ή σε «όλη η εταιρεία». Δημιούργησε νέο έγγραφο εκεί και σβήσε το παλιό αν χρειάζεται."
   };
-  function errText(r) { return ERRORS[r.data && r.data.error] || "Κάτι πήγε στραβά."; }
+  function errText(r) {
+    var e = r.data && r.data.error;
+    var w = W();
+    var dyn = {
+      has_pending_updates: "Το " + w.s + " ή ο κύκλος αναγνωστών του εγγράφου δεν αλλάζει όσο υπάρχουν updates που δεν έχουν ενσωματωθεί. Ενσωμάτωσέ τα ή απόρριψέ τα πρώτα.",
+      invalid_audience: "Η επιλογή " + w.gp + " για κοινή χρήση δεν είναι έγκυρη. Ξαναφόρτωσε τη σελίδα και δοκίμασε ξανά.",
+      audience_too_large: "Ένα έγγραφο μπορεί να μοιραστεί με το πολύ 10 " + w.p + " συνολικά (μαζί με αυτό που το κατέχει).",
+      audience_forbidden: "Μπορείς να μοιράσεις το έγγραφο μόνο με " + w.p + " στα οποία ανήκεις και εσύ.",
+      hidden_cannot_have_audience: "Ένα εμπιστευτικό έγγραφο, ή έγγραφο κρυφού " + w.g + ", δεν μοιράζεται με άλλα " + w.p + "."
+    };
+    return dyn[e] || ERRORS[e] || "Κάτι πήγε στραβά.";
+  }
 
   // Διαφορά κειμένου σε επίπεδο προτάσεων (LCS). Επιστρέφει [{type: same|del|add, text}].
   function units(text) {
@@ -334,8 +347,8 @@
     ]));
     docs.forEach(function (d) {
       // UX-5: φαίνεται ποιος το κατέχει και αν μοιράζεται. Ο ιδιοκτήτης βλέπει "κοινό με N projects", ο αναγνώστης "κοινό με το project σου".
-      var sharedOut = d.editable && d.audienceCount ? " · κοινό με " + d.audienceCount + (d.audienceCount === 1 ? " project" : " projects") : "";
-      var sharedIn = !d.editable && isForeign(d.departmentId) ? " · κοινό με το project σου" : "";
+      var sharedOut = d.editable && d.audienceCount ? " · κοινό με " + d.audienceCount + (d.audienceCount === 1 ? " " + W().s : " " + W().p) : "";
+      var sharedIn = !d.editable && isForeign(d.departmentId) ? " · κοινό με το " + W().s + " σου" : "";
       var extra = (d.editable ? "" : " · μόνο ανάγνωση") + sharedIn + sharedOut + (d.hidden ? " · εμπιστευτικό" : "") + (d.pendingUpdates ? " · " + d.pendingUpdates.count + " update" : "");
       list.appendChild(h("button", { class: "item" + (currentId === d.id ? " active" : ""), type: "button", onclick: function () { currentId = d.id; renderDocs(); } }, [
         h("span", { class: "t", text: d.title }), h("span", { class: "m", text: d.departmentName + extra }),
@@ -390,28 +403,28 @@
       var title = node.querySelector(".s-title");
       if (ownerId() === "_all") {
         state.textContent = "όλη η εταιρεία";
-        body.appendChild(h("p", { class: "hint", text: "Ένα έγγραφο όλης της εταιρείας το βλέπουν ήδη όλοι. Για να το μοιραστείς μόνο με συγκεκριμένα projects, διάλεξε πρώτα το project που το κατέχει." }));
+        body.appendChild(h("p", { class: "hint", text: "Ένα έγγραφο όλης της εταιρείας το βλέπουν ήδη όλοι. Για να το μοιραστείς μόνο με συγκεκριμένα " + W().p + ", διάλεξε πρώτα το " + W().s + " που το κατέχει." }));
         return;
       }
       if (doc && doc.hidden) {
         state.textContent = "εμπιστευτικό";
-        body.appendChild(h("p", { class: "hint", text: "Ένα εμπιστευτικό έγγραφο το διαβάζουν μόνο τα μέλη του project και οι admins. Δεν μοιράζεται με άλλα projects." }));
+        body.appendChild(h("p", { class: "hint", text: "Ένα εμπιστευτικό έγγραφο το διαβάζουν μόνο τα μέλη του " + W().g + " και οι admins. Δεν μοιράζεται με άλλα " + W().p + "." }));
         return;
       }
       var options = pickable();
       var picked = chosen();
       var total = 1 + picked.length + hiddenCount;
       var others = picked.length + hiddenCount;
-      state.textContent = ownerName() + (others ? " + " + others + (others === 1 ? " project" : " projects") : " μόνο");
+      state.textContent = ownerName() + (others ? " + " + others + (others === 1 ? " " + W().s : " " + W().p) : " μόνο");
       title.textContent = "Ποιος άλλος το διαβάζει;";
       if (!options.length && !hiddenCount) {
         body.appendChild(h("p", { class: "hint", text: me.profile === "multi_client"
           ? "Δεν υπάρχουν άλλα τμήματα του ίδιου πελάτη για κοινή χρήση. Το έγγραφο το διαβάζουν μόνο τα μέλη του τμήματος που το κατέχει. Σε άλλον πελάτη δεν μοιράζεται ποτέ."
-          : "Δεν υπάρχουν άλλα projects για κοινή χρήση. Το έγγραφο το διαβάζουν μόνο τα μέλη του project που το κατέχει." }));
+          : "Δεν υπάρχουν άλλα " + W().p + " για κοινή χρήση. Το έγγραφο το διαβάζουν μόνο τα μέλη του " + W().g + " που το κατέχει." }));
         return;
       }
-      body.appendChild(h("p", { class: "hint", text: "Όσοι ανήκουν σε αυτά τα projects διαβάζουν το έγγραφο (και ο βοηθός το χρησιμοποιεί για αυτούς), αλλά δεν μπορούν να το αλλάξουν." + (me.profile === "multi_client" ? " Προσφέρονται μόνο τμήματα του ίδιου πελάτη." : "") }));
-      var list = h("div", { class: "pick-list", role: "group", "aria-label": "Projects που διαβάζουν το έγγραφο" });
+      body.appendChild(h("p", { class: "hint", text: "Όσοι ανήκουν σε αυτά τα " + W().p + " διαβάζουν το έγγραφο (και ο βοηθός το χρησιμοποιεί για αυτούς), αλλά δεν μπορούν να το αλλάξουν." + (me.profile === "multi_client" ? " Προσφέρονται μόνο τμήματα του ίδιου πελάτη." : "") }));
+      var list = h("div", { class: "pick-list", role: "group", "aria-label": W().P + " που διαβάζουν το έγγραφο" });
       options.forEach(function (d) {
         var on = !!selected[d.id];
         var cb = h("input", { type: "checkbox", "data-project": d.id });
@@ -421,8 +434,8 @@
         list.appendChild(h("label", { class: cb.disabled ? "off" : "" }, [cb, h("span", { text: d.name })]));
       });
       body.appendChild(list);
-      if (hiddenCount) body.appendChild(h("p", { class: "audience-foot", text: "+ " + hiddenCount + (hiddenCount === 1 ? " ακόμα project" : " ακόμα projects") + " (ορίστηκαν από τον admin, δεν εμφανίζονται και δεν αλλάζουν από εδώ)." }));
-      body.appendChild(h("p", { class: "audience-foot", id: "audience-count", text: "Το διαβάζουν: " + ownerName() + (others ? " + " + others + (others === 1 ? " project" : " projects") : "") + " · μέχρι " + MAX_AUDIENCE + " projects συνολικά" + (total >= MAX_AUDIENCE ? " (έφτασες το όριο)" : "") + "." }));
+      if (hiddenCount) body.appendChild(h("p", { class: "audience-foot", text: "+ " + hiddenCount + (hiddenCount === 1 ? " ακόμα " + W().s : " ακόμα " + W().p) + " (ορίστηκαν από τον admin, δεν εμφανίζονται και δεν αλλάζουν από εδώ)." }));
+      body.appendChild(h("p", { class: "audience-foot", id: "audience-count", text: "Το διαβάζουν: " + ownerName() + (others ? " + " + others + (others === 1 ? " " + W().s : " " + W().p) : "") + " · μέχρι " + MAX_AUDIENCE + " " + W().p + " συνολικά" + (total >= MAX_AUDIENCE ? " (έφτασες το όριο)" : "") + "." }));
     }
     redraw();
     return { node: node, redraw: redraw, applicable: applicable, values: chosen };
@@ -436,11 +449,11 @@
       panel.appendChild(h("p", { class: "ro", text: doc.departmentId === "_all"
         ? "Όλη η εταιρεία · μόνο ανάγνωση"
         : isForeign(doc.departmentId)
-          ? doc.departmentName + " · μόνο ανάγνωση. Έγγραφο άλλου project, κοινό με το δικό σου: δεν μπορείς να το αλλάξεις."
-          : doc.departmentName + " · μόνο ανάγνωση. Είσαι μέλος αυτού του project αλλά όχι editor του: δεν μπορείς να το αλλάξεις." }));
+          ? doc.departmentName + " · μόνο ανάγνωση. Έγγραφο άλλου " + W().g + ", κοινό με το δικό σου: δεν μπορείς να το αλλάξεις."
+          : doc.departmentName + " · μόνο ανάγνωση. Είσαι μέλος αυτού του " + W().g + " αλλά όχι editor του: δεν μπορείς να το αλλάξεις." }));
       if (doc.departmentId !== "_all" && doc.audience && (doc.audience.projects.length || doc.audience.hiddenCount)) {
         panel.appendChild(h("p", { class: "ro", text: "Το διαβάζουν και: " + doc.audience.projects.map(function (x) { return x.name; }).join(", ")
-          + (doc.audience.hiddenCount ? (doc.audience.projects.length ? " και " : "") + doc.audience.hiddenCount + (doc.audience.hiddenCount === 1 ? " ακόμα project" : " ακόμα projects") : "") + "." }));
+          + (doc.audience.hiddenCount ? (doc.audience.projects.length ? " και " : "") + doc.audience.hiddenCount + (doc.audience.hiddenCount === 1 ? " ακόμα " + W().s : " ακόμα " + W().p) : "") + "." }));
       }
       var pb = pendingBlock(doc.pendingUpdates); if (pb) panel.appendChild(pb);
       panel.appendChild(h("div", { class: "readonly-text", text: doc.fullText }));
