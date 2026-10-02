@@ -40,6 +40,7 @@ import {
   handleRunRechecks,
   handleUpdateDepartment,
   handleUpdateMember,
+  handleMemberReading,
 } from "./admin.js";
 import { handleCloseFeedback, handleCreateFeedback } from "./feedback.js";
 
@@ -49,6 +50,7 @@ const CONTRADICTION_RE = /^\/team\/contradictions\/(\d+)\/(dismiss|remind)$/;
 const UPDATE_RE = /^\/team\/updates\/(\d+)\/(propose|apply|reject)$/;
 const ADMIN_DEPT_RE = /^\/team\/admin\/departments\/([^/]+)$/;
 const ADMIN_MEMBER_RE = /^\/team\/admin\/members\/([^/]+)$/;
+const ADMIN_MEMBER_READING_RE = /^\/team\/admin\/members\/([^/]+)\/reading$/;
 const ADMIN_DOC_RE = /^\/team\/admin\/documents\/([^/]+)$/;
 
 // Προστασία από cross-site αιτήματα: ένα αίτημα που αλλάζει κάτι πρέπει να έρχεται από
@@ -164,6 +166,8 @@ async function routeTeamRequest(request, env, url, deps, ctx) {
     if (path === "/team/admin/members/bulk-status" && method === "POST") return handleBulkStatus(request, rc);
     const mMatch = path.match(ADMIN_MEMBER_RE);
     if (mMatch && method === "PATCH") return handleUpdateMember(request, rc, decodeURIComponent(mMatch[1]));
+    const readMatch = path.match(ADMIN_MEMBER_READING_RE);
+    if (readMatch && method === "GET") return handleMemberReading(env, member, decodeURIComponent(readMatch[1]));
     if (path === "/team/admin/audit" && method === "GET") return handleAdminAudit(env, member);
     if (path === "/team/admin/documents" && method === "GET") return handleAdminDocuments(env, member);
     const docAdminMatch = path.match(ADMIN_DOC_RE);

@@ -8,7 +8,7 @@
 
 import { json, loadWorkspaceDepartments, normalizeEmail } from "./auth.js";
 import { AUDIT_RETENTION_DAYS, recordAudit } from "./audit.js";
-import { COMPANY_WIDE, ROLES } from "./access.js";
+import { COMPANY_WIDE, ROLES, canReadDocument } from "./access.js";
 import { DOC_ID_RE, departmentName, listDocIndex, pendingUpdateSummary, readDoc, resetDocumentAudience, writeDocRecord } from "./store.js";
 import { runDueRechecks } from "./contradictions.js";
 import { pendingUpdatesForDocument } from "./updates.js";
@@ -119,11 +119,46 @@ export async function handleAdminOverview(env, member) {
       id: d.id,
       name: d.name,
       hidden: !!d.hidden,
-      memberCount: members.filter((m) => m.departmentIds.includes(d.id)).length,
+      // Μόνο ενεργά μέλη στο πλήθος (οι απενεργοποιημένοι δεν είναι πια "μέλη" για τον admin). Χωριστά το πλήθος των ανενεργών.
+      memberCount: members.filter((m) => m.status === "active" && m.departmentIds.includes(d.id)).length,
+      disabledCount: members.filter((m) => m.status !== "active" && m.departmentIds.includes(d.id)).length,
       documentCount: docs.filter((x) => x.departmentId === d.id).length,
+      // Πόσα έγγραφα του project μοιράζονται με άλλα projects (για την προειδοποίηση πριν την απόκρυψη).
+      sharedDocumentCount: docs.filter((x) => x.departmentId === d.id && x.audienceProjectIds.length > 0).length,
     })),
     companyWideDocumentCount: docs.filter((x) => x.departmentId === "_all").length,
     members,
+  });
+}
+
+// ------------------------------------------------------------------ GET /team/admin/members/{id}/reading
+// "Τι διαβάζει αυτός ο άνθρωπος": τα projects του και τα έγγραφα που μπορεί να διαβάσει, με την ΙΔΙΑ συνάρτηση που αποφασίζει στην πράξη
+// (canReadDocument), άρα ό,τι δείχνει εδώ είναι ακριβώς ό,τι θα έβλεπε. Μόνο ανάγνωση: δεν αλλάζει τίποτα και δεν συνδέεται ως αυτός.
+export async function handleMemberReading(env, admin, id) {
+  const numericId = parseInt(id, 10);
+  const all = await membersWithDepartments(env, admin.workspaceId);
+  const target = Number.isInteger(numericId) ? all.find((m) => m.id === numericId) : null;
+  if (!target) return json(404, { error: "not_found" });
+  if (target.role === "admin") return json(200, { admin: true, projects: [], documents: [] });
+  const departments = await loadWorkspaceDepartments(env, admin.workspaceId);
+  const asMember = {
+    role: "employee",
+    departmentIds: target.departmentIds,
+    editorProjectIds: target.departmentIds.filter((d) => target.projectRoles[d] === "editor"),
+  };
+  const index = await listDocIndex(env, admin.workspaceId);
+  const documents = [];
+  for (const d of index) {
+    if (!canReadDocument(asMember, departments, d.departmentId, d.hidden, d.audienceProjectIds)) continue;
+    const via = d.departmentId === COMPANY_WIDE ? "company" : asMember.departmentIds.includes(d.departmentId) ? "own" : "shared";
+    documents.push({ id: d.id, title: d.title, projectName: departmentName(departments, d.departmentId), via, confidential: !!d.hidden });
+  }
+  documents.sort((a, b) => String(a.projectName).localeCompare(String(b.projectName), "el") || String(a.title).localeCompare(String(b.title), "el"));
+  return json(200, {
+    admin: false,
+    projects: departments.filter((d) => target.projectRoles[d.id]).map((d) => ({ id: d.id, name: d.name, role: target.projectRoles[d.id] })),
+    documents: documents.slice(0, 300),
+    truncated: documents.length > 300,
   });
 }
 

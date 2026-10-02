@@ -8,6 +8,7 @@
 <title>Διαχείριση · Idmon για ομάδες</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/shared.css">
+<link rel="stylesheet" href="/team.css">
 <style>
   /* Section W (30 Σεπ 2026): οθόνη διαχείρισης του admin ("Idmon για ομάδες"): τμήματα (και κρυφά),
      μέλη και ρόλοι, ιστορικό ενεργειών. Κάθε αλλαγή ισχύει αμέσως. Ο έλεγχος πρόσβασης γίνεται
@@ -19,83 +20,47 @@
      ΑΝΘΡΩΠΟΙ ΚΑΙ PROJECTS (1 Οκτ 2026): ο πίνακας "άνθρωποι × projects" με ένα select ανά project δεν κλιμακώνεται (200 πράκτορες και
      20 projects θα ήταν 4.000 dropdowns). Τώρα: λίστα ανθρώπων με αναζήτηση, φίλτρα, σελιδοποίηση και μαζικές ενέργειες (επιλογή πολλών),
      καρτέλα ατόμου για τον ρόλο οργανισμού και τα projects του, και σελίδα project με τα μέλη του και προσθήκη με επικόλληση emails. */
-  :root{--accent:#D97757;--accent-soft:rgba(217,119,87,.16);}
-  .wrap{max-width:1000px;margin:0 auto;padding:0 16px 56px;}
-  .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
-    padding:14px 0;border-bottom:1px solid var(--border);margin-bottom:18px;}
-  .topbar h1{font-size:16px;margin:0;font-weight:600;}
-  .topbar a{color:var(--text-soft);font-size:13px;margin-left:14px;}
-  .tabs{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap;}
-  .tab{background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:8px;
-    padding:8px 16px;font-size:14px;cursor:pointer;font-family:inherit;}
-  .tab.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600;}
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:14px;}
-  .card h2{font-size:15px;margin:0 0 4px;font-weight:600;}
-  .hint{font-size:12.5px;color:var(--text-soft);margin:0 0 10px;}
-  .row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--border);font-size:14px;}
-  .row .name{font-weight:600;} .row .meta{font-size:12px;color:var(--text-soft);}
-  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
-  .pill{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--surface-2);color:var(--text-soft);white-space:nowrap;display:inline-block;}
-  .pill.hid{background:var(--warn-bg);color:var(--warn-border);}
-  .pill.off{background:rgba(229,100,107,.14);color:var(--danger);}
-  input[type=text],input[type=email],select{padding:9px 12px;border-radius:8px;border:1px solid var(--border);
-    background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;}
-  .btn{height:36px;padding:0 14px;border-radius:8px;border:none;background:var(--accent);color:var(--on-accent);font-size:13px;font-weight:600;cursor:pointer;}
-  .btn.secondary{background:var(--surface-2);color:var(--text);border:1px solid var(--border);}
-  .btn.danger{background:none;color:var(--danger);border:1px solid var(--danger);}
-  .btn:disabled{opacity:.55;cursor:default;}
-  .note{font-size:13px;margin-top:8px;min-height:16px;} .note.ok{color:var(--ok);} .note.err{color:var(--danger);}
-  .checks{display:flex;gap:10px;flex-wrap:wrap;font-size:13px;}
-  .checks label{display:inline-flex;align-items:center;gap:5px;cursor:pointer;}
-  .proj-roles{display:flex;gap:10px;flex-wrap:wrap;font-size:12.5px;color:var(--text-soft);}
-  .proj-role select{margin-left:4px;}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--border);font-size:var(--fs-md);}
+  .row .name{font-weight:600;} .row .meta{font-size:var(--fs-xs);color:var(--text-soft);}
+  .proj-roles{display:flex;gap:10px;flex-wrap:wrap;font-size:var(--fs-sm);color:var(--text-soft);}
   form.add{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
   form.add .grow{flex:1;min-width:200px;}
-  .log{font-size:12.5px;line-height:1.5;}
+  .log{font-size:var(--fs-sm);line-height:1.5;}
   .log .a{font-weight:600;} .log .t{color:var(--text-soft);}
   .row{transition:background .6s ease;}
   .row.changed{background:var(--accent-soft);}
   .row.busy{opacity:.6;}
-  .confirm{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--danger);}
-  .notice-region{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:50;display:flex;flex-direction:column;
-    gap:8px;align-items:center;max-width:min(92vw,720px);pointer-events:none;}
-  .toast{pointer-events:auto;display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-radius:10px;
-    border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:13.5px;
-    box-shadow:0 6px 24px rgba(0,0,0,.35);animation:toast-in .18s ease-out;}
-  .toast.ok{border-color:var(--ok);}
-  .toast.err{border-color:var(--danger);color:var(--danger);}
-  .toast .x{background:none;border:none;color:inherit;font-size:16px;line-height:1;cursor:pointer;padding:0 2px;}
-  @keyframes toast-in{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
-  @media (prefers-reduced-motion:reduce){.toast{animation:none;}.row{transition:none;}}
-  .busy{opacity:.6;}
-  .muted{color:var(--text-soft);font-size:12.5px;}
-  textarea{width:100%;min-height:96px;padding:9px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;}
+  .toast .x{padding:0 2px;}
   .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0 10px;}
-  .toolbar input[type=text]{flex:1;min-width:180px;}
-  .bulkbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:8px 10px;border-radius:8px;background:var(--surface-2);font-size:13px;margin-bottom:8px;}
+  .toolbar input[type=text]{flex:1;min-width:180px;width:auto;}
+  .bulkbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:8px 10px;border-radius:var(--r);background:var(--surface-2);font-size:var(--fs-sm);margin-bottom:8px;}
   .bulkbar.idle{color:var(--text-soft);}
   .bulkpanel{flex-basis:100%;display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding-top:8px;border-top:1px solid var(--border);}
-  .listhead{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:13px;color:var(--text-soft);padding:6px 0;}
+  .listhead{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:var(--fs-sm);color:var(--text-soft);padding:6px 0;}
   .who{display:flex;align-items:center;gap:10px;min-width:0;}
-  .av{width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex:none;}
-  .linkrow{background:none;border:none;color:var(--text);font-weight:600;font-size:14px;cursor:pointer;padding:0;font-family:inherit;text-align:left;}
+  .av{width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-xs);font-weight:600;flex:none;}
+  .linkrow{background:none;border:none;color:var(--text);font-weight:600;font-size:var(--fs-md);cursor:pointer;padding:2px 0;font-family:inherit;text-align:left;}
   .linkrow:hover{text-decoration:underline;}
   .chips{display:inline-flex;gap:4px;flex-wrap:wrap;margin-top:3px;}
-  .chip{font-size:11.5px;padding:2px 8px;border-radius:999px;background:var(--surface-2);color:var(--text-soft);border:1px solid var(--border);}
-  .chip.ed{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);}
-  .row.open{background:var(--surface-2);border-radius:8px;}
+  .row.open{background:var(--surface-2);border-radius:var(--r);}
   .detail{margin-top:12px;background:var(--surface-2);}
+  .detail:focus{outline:none;}
   .detail-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;}
-  .prow{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--border);font-size:14px;}
-  .seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;}
-  .seg button{border:none;background:var(--bg);color:var(--text-soft);padding:6px 12px;font-size:12.5px;cursor:pointer;font-family:inherit;}
+  .prow{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--border);font-size:var(--fs-md);}
+  .seg{display:inline-flex;border:1px solid var(--field-border);border-radius:var(--r);overflow:hidden;}
+  .seg button{border:none;background:var(--bg);color:var(--text-soft);padding:5px 12px;min-height:30px;font-size:var(--fs-sm);cursor:pointer;font-family:inherit;}
+  .seg button:hover{color:var(--text);}
   .seg button.on{background:var(--accent-soft);color:var(--accent);font-weight:600;}
-  .xbtn{background:none;border:none;color:var(--text-soft);font-size:18px;line-height:1;cursor:pointer;padding:0 4px;}
-  .pager{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;font-size:13px;color:var(--text-soft);}
+  .pager{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;font-size:var(--fs-sm);color:var(--text-soft);}
   .pager .grow{flex:1;}
-  .backlink{background:none;border:none;color:var(--text-soft);cursor:pointer;font-size:13px;padding:0;font-family:inherit;margin-bottom:8px;}
-  .backlink:hover{text-decoration:underline;}
+  .backlink{background:none;border:none;color:var(--text-soft);cursor:pointer;font-size:var(--fs-sm);padding:4px 0;font-family:inherit;margin-bottom:8px;}
+  .backlink:hover{text-decoration:underline;color:var(--text);}
   .pastebox{margin-top:14px;padding-top:12px;border-top:1px solid var(--border);}
+  .reading{margin-top:12px;}
+  .reading details.audience{margin:0;background:var(--bg);}
+  .reading-row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border);font-size:var(--fs-sm);}
+  .reading-row:first-child{border-top:none;}
+  .showdis{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:var(--fs-sm);color:var(--text-soft);margin:2px 0 4px;}
 </style>
 </head>
 <body>
@@ -262,11 +227,11 @@
     proj.openId = null;
     var box = h("div", { class: "card" }, [
       h("h2", { text: "Projects" }),
-      h("p", { class: "hint", text: "Ένα κρυφό project το βλέπουν μόνο τα μέλη του και οι admins. Οι editors των άλλων projects δεν διαβάζουν τα έγγραφά του, και μια αντίφαση μαζί του τους εμφανίζεται χωρίς περιεχόμενο. Με το «Μέλη» ανοίγεις τη σελίδα του project." }),
+      h("p", { class: "hint", text: "Ένα κρυφό project το βλέπουν μόνο τα μέλη του και οι admins: τα έγγραφά του δεν μοιράζονται με άλλα projects και μια αντίφαση μαζί του εμφανίζεται χωρίς περιεχόμενο. Με το «Μέλη» ανοίγεις τη σελίδα του project." }),
     ]);
     var msg = h("p", { class: "note", role: "status", "aria-live": "polite" });
     box.appendChild(h("div", { class: "row" }, [
-      h("div", null, [h("span", { class: "name", text: "Όλη η εταιρεία" }), h("div", { class: "meta", text: data.companyWideDocumentCount + " έγγραφα · ορατά σε όλους" })]),
+      h("div", null, [h("span", { class: "name", text: "Όλη η εταιρεία" }), h("div", { class: "meta", text: plural(data.companyWideDocumentCount, "έγγραφο", "έγγραφα") + " · ορατά σε όλους" })]),
     ]));
     data.departments.forEach(function (d) {
       var name = h("input", { type: "text", value: d.name, maxlength: "80", "aria-label": "Όνομα project " + d.name });
@@ -277,20 +242,33 @@
           if (r.status === 200) { ok(d.name + ": μετονομάστηκε σε " + newNameText); changed("dept-" + d.id); load(); } else { msg.className = "note err"; msg.textContent = errText(r); }
         });
       } });
-      var toggle = h("button", { class: "btn secondary hide-toggle", type: "button", text: d.hidden ? "Εμφάνιση project" : "Απόκρυψη project", onclick: function () {
+      var deptRow, deptControls;
+      function doToggleHidden() {
         beginAction();
         api("/team/admin/departments/" + encodeURIComponent(d.id), "PATCH", { hidden: !d.hidden }).then(function (r) {
           if (r.status === 200) { ok(d.name + (d.hidden ? ": ορατό project" : ": κρυφό project")); changed("dept-" + d.id); load(); }
           else { msg.className = "note err"; msg.textContent = errText(r); }
         });
+      }
+      var toggle = h("button", { class: "btn secondary hide-toggle", type: "button", text: d.hidden ? "Εμφάνιση project" : "Απόκρυψη project", onclick: function () {
+        // Ένα κρυφό project δεν μοιράζει έγγραφα: αν έχει κοινοποιημένα, τα επαναφέρει σε "μόνο μέλη του project". Προειδοποιούμε πριν.
+        if (!d.hidden && d.sharedDocumentCount > 0) {
+          confirmFirst(deptRow, deptControls, (d.sharedDocumentCount === 1
+            ? "Ένα έγγραφο του project μοιράζεται με άλλα projects. Θα σταματήσει να μοιράζεται και δεν θα επανέλθει μόνο του."
+            : d.sharedDocumentCount + " έγγραφα του project μοιράζονται με άλλα projects. Θα σταματήσουν να μοιράζονται και δεν θα επανέλθουν μόνα τους.") + " Σίγουρα;", doToggleHidden);
+          return;
+        }
+        doToggleHidden();
       } });
-      box.appendChild(h("div", { class: "row dept-row", "data-key": "dept-" + d.id }, [
+      deptControls = h("div", { class: "controls" }, [name, rename, toggle, h("button", { class: "btn secondary open-project", type: "button", text: "Μέλη", onclick: function () { beginAction(); proj.openId = d.id; proj.q = ""; proj.page = 0; proj.result = ""; proj.showDisabled = false; render(); } })]);
+      deptRow = h("div", { class: "row dept-row", "data-key": "dept-" + d.id }, [
         h("div", null, [
-          h("span", { class: "name", text: d.name }), d.hidden ? h("span", { class: "pill hid", text: " κρυφό" }) : null,
-          h("div", { class: "meta", text: d.memberCount + " μέλη · " + d.documentCount + " έγγραφα" }),
+          h("span", { class: "name", text: d.name }), d.hidden ? h("span", { class: "pill hid", text: "κρυφό" }) : null,
+          h("div", { class: "meta", text: plural(d.memberCount, "μέλος", "μέλη") + " · " + plural(d.documentCount, "έγγραφο", "έγγραφα") + (d.disabledCount ? " · +" + plural(d.disabledCount, "απενεργοποιημένο", "απενεργοποιημένα") : "") }),
         ]),
-        h("div", { class: "controls" }, [name, rename, toggle, h("button", { class: "btn secondary open-project", type: "button", text: "Μέλη", onclick: function () { beginAction(); proj.openId = d.id; proj.q = ""; proj.page = 0; proj.result = ""; render(); } })]),
-      ]));
+        deptControls,
+      ]);
+      box.appendChild(deptRow);
     });
     var newName = h("input", { type: "text", class: "grow", id: "new-dept", maxlength: "80", placeholder: "Όνομα νέου project", "aria-label": "Όνομα νέου project" });
     box.appendChild(h("form", { class: "add", id: "add-dept", onsubmit: function (e) {
@@ -310,8 +288,8 @@
   var PAGE_SIZE = 25;
   var MAX_BULK = 100;
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  var people = { q: "", project: "", roleFilter: "", page: 0, selected: {}, openId: null, bulk: null };
-  var proj = { openId: null, q: "", page: 0, result: "" }; // result: τα emails που δεν προστέθηκαν (μένει ορατό και μετά την ανανέωση της σελίδας)
+  var people = { q: "", project: "", roleFilter: "", page: 0, selected: {}, openId: null, bulk: null, focusDetail: false };
+  var proj = { openId: null, q: "", page: 0, result: "", showDisabled: false, create: false, invite: true }; // result: τα emails που δεν προστέθηκαν (μένει ορατό και μετά την ανανέωση της σελίδας)
 
   function memberById(id) { return data.members.filter(function (m) { return m.id === id; })[0] || null; }
   function deptById(id) { return data.departments.filter(function (d) { return d.id === id; })[0] || null; }
@@ -396,12 +374,12 @@
       if (cb.checked) people.selected[m.id] = true; else delete people.selected[m.id];
       drawPeople();
     });
-    var open = h("button", { class: "linkrow open-member", type: "button", text: m.email, onclick: function () { people.openId = m.id; drawPeople(); } });
+    var open = h("button", { class: "linkrow open-member", type: "button", text: m.email, onclick: function () { people.openId = m.id; people.focusDetail = true; drawPeople(); } });
     return h("div", { class: "row member-row" + (people.openId === m.id ? " open" : ""), "data-key": "member-" + m.id }, [
       h("div", { class: "who" }, [
         cb, h("span", { class: "av", "aria-hidden": "true", text: initials(m.email) }),
         h("div", null, [
-          h("div", null, [open, m.role === "admin" ? h("span", { class: "chip ed", text: "Admin" }) : null, m.status === "disabled" ? h("span", { class: "pill off", text: " απενεργοποιημένο" }) : null]),
+          h("div", null, [open, m.role === "admin" ? h("span", { class: "chip ed", text: "Admin" }) : null, m.status === "disabled" ? h("span", { class: "pill off", text: "απενεργοποιημένο" }) : null]),
           projectChips(m),
         ]),
       ]),
@@ -531,7 +509,7 @@
     if (!mine.length) card.appendChild(h("p", { class: "hint", text: "Δεν ανήκει σε κανένα project." }));
     mine.forEach(function (d) {
       card.appendChild(h("div", { class: "prow", "data-project": d.id }, [
-        h("span", null, [document.createTextNode(d.name), d.hidden ? h("span", { class: "pill hid", text: " κρυφό" }) : null]),
+        h("span", null, [document.createTextNode(d.name), d.hidden ? h("span", { class: "pill hid", text: "κρυφό", style: "margin-left:8px;" }) : null]),
         h("span", { class: "controls" }, [
           segControl(m.projectRoles[d.id], "Ρόλος στο " + d.name, function (role) { changeProjectRole(m, d, role, card, "member-" + m.id); }),
           h("button", { class: "xbtn remove-project", type: "button", "aria-label": "Αφαίρεση από " + d.name, text: "×", onclick: function () { changeProjectRole(m, d, null, card, "member-" + m.id); } }),
@@ -544,7 +522,37 @@
       add.addEventListener("change", function () { if (add.value) changeProjectRole(m, deptById(add.value), "member", card, "member-" + m.id); });
       card.appendChild(h("div", { class: "prow" }, [add]));
     }
+    card.appendChild(readingPanel(m));
     return card;
+  }
+
+  // "Τι διαβάζει": τα έγγραφα που θα έβλεπε αυτός ο άνθρωπος, με την ίδια συνάρτηση που αποφασίζει στην πράξη. Μόνο ανάγνωση.
+  function readingPanel(m) {
+    var host = h("div", { class: "reading", id: "member-reading" }, [h("p", { class: "hint", text: "Φόρτωση τι διαβάζει…" })]);
+    api("/team/admin/members/" + m.id + "/reading").then(function (r) {
+      clear(host);
+      if (r.status !== 200 || !r.data || r.data.admin) return;
+      var docs = r.data.documents || [];
+      var own = docs.filter(function (x) { return x.via === "own"; }).length;
+      var shared = docs.filter(function (x) { return x.via === "shared"; }).length;
+      var company = docs.filter(function (x) { return x.via === "company"; }).length;
+      var det = h("details", { class: "audience" }, [h("summary", null, [
+        h("span", { class: "s-title", text: "Τι διαβάζει" }),
+        h("span", { class: "s-state", text: plural(docs.length, "έγγραφο", "έγγραφα") + (docs.length ? " · " + own + " δικά του · " + shared + " κοινά · " + company + " εταιρικά" : "") }),
+      ])]);
+      var body = h("div", { class: "audience-body" });
+      if (!docs.length) body.appendChild(h("p", { class: "hint", text: "Δεν διαβάζει κανένα έγγραφο ακόμα (δεν ανήκει σε project με έγγραφα)." }));
+      docs.forEach(function (x) {
+        body.appendChild(h("div", { class: "reading-row" }, [
+          h("span", null, [document.createTextNode(x.title), x.confidential ? h("span", { class: "pill hid", text: "εμπιστευτικό", style: "margin-left:8px;" }) : null]),
+          h("span", { class: "controls" }, [h("span", { class: "muted", text: x.projectName }), x.via === "shared" ? h("span", { class: "pill shared", text: "κοινό" }) : null]),
+        ]));
+      });
+      if (r.data.truncated) body.appendChild(h("p", { class: "hint", text: "Εμφανίζονται τα πρώτα 300 έγγραφα." }));
+      det.appendChild(body);
+      host.appendChild(det);
+    });
+    return host;
   }
 
   // ---- η λίστα ανθρώπων (ξαναχτίζεται μόνο το περιεχόμενό της, ώστε η αναζήτηση να μη χάνει το πεδίο όταν πληκτρολογείς)
@@ -570,6 +578,16 @@
     clear(host);
     var open = people.openId ? memberById(people.openId) : null;
     if (open) host.appendChild(memberDetail(open)); else people.openId = null;
+    // Η καρτέλα ανοίγει κάτω από τη λίστα: όταν την ανοίγει ο χρήστης με κλικ, την φέρνουμε στο οπτικό πεδίο και της δίνουμε focus.
+    if (people.focusDetail) {
+      people.focusDetail = false;
+      var det = host.firstChild;
+      if (det) {
+        det.setAttribute("tabindex", "-1");
+        try { det.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+        if (det.scrollIntoView) det.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+    }
   }
 
   function membersView() {
@@ -626,12 +644,16 @@
 
   // ---------------------------------------------------------------- σελίδα project
   function projectView(d) {
-    var members = data.members.filter(function (m) { return m.projectRoles && m.projectRoles[d.id]; });
-    var editors = members.filter(function (m) { return m.projectRoles[d.id] === "editor"; }).length;
+    var everyone = data.members.filter(function (m) { return m.projectRoles && m.projectRoles[d.id]; });
+    // Οι απενεργοποιημένοι δεν είναι πια "μέλη" για τον admin: κρύβονται και δεν μετράνε, εκτός αν ζητηθούν ("Εμφάνιση απενεργοποιημένων").
+    var activeOnly = everyone.filter(function (m) { return m.status !== "disabled"; });
+    var disabledN = everyone.length - activeOnly.length;
+    var members = proj.showDisabled ? everyone : activeOnly;
+    var editors = activeOnly.filter(function (m) { return m.projectRoles[d.id] === "editor"; }).length;
     var box = h("div", { class: "card", id: "project-page" });
     box.appendChild(h("button", { class: "backlink", id: "project-back", type: "button", text: "← Όλα τα projects", onclick: function () { beginAction(); proj.openId = null; render(); } }));
     box.appendChild(h("h2", null, [document.createTextNode(d.name), d.hidden ? h("span", { class: "pill hid", text: " κρυφό" }) : null]));
-    box.appendChild(h("p", { class: "hint", id: "project-meta", text: plural(members.length, "μέλος", "μέλη") + " · " + plural(editors, "editor", "editors") + " · " + plural(d.documentCount, "έγγραφο", "έγγραφα") }));
+    box.appendChild(h("p", { class: "hint", id: "project-meta", text: plural(activeOnly.length, "μέλος", "μέλη") + " · " + plural(editors, "editor", "editors") + " · " + plural(d.documentCount, "έγγραφο", "έγγραφα") }));
 
     var q = h("input", { type: "text", id: "proj-q", placeholder: "Αναζήτηση μέσα στο project", "aria-label": "Αναζήτηση μέσα στο project", value: proj.q });
     var list = h("div", { id: "proj-list" });
@@ -647,7 +669,7 @@
       all.slice(proj.page * PAGE_SIZE, (proj.page + 1) * PAGE_SIZE).forEach(function (m) {
         var rowEl = h("div", { class: "row proj-member-row", "data-key": "pm-" + m.id, "data-member": String(m.id) }, [
           h("div", { class: "who" }, [h("span", { class: "av", "aria-hidden": "true", text: initials(m.email) }), h("span", { class: "name", text: m.email }),
-            m.status === "disabled" ? h("span", { class: "pill off", text: " απενεργοποιημένο" }) : null]),
+            m.status === "disabled" ? h("span", { class: "pill off", text: "απενεργοποιημένο" }) : null]),
           h("div", { class: "controls" }, [
             segControl(m.projectRoles[d.id], "Ρόλος του " + m.email, function (role) { changeProjectRole(m, d, role, rowEl, "pm-" + m.id); }),
             h("button", { class: "xbtn remove-project", type: "button", "aria-label": "Αφαίρεση του " + m.email, text: "×", onclick: function () { changeProjectRole(m, d, null, rowEl, "pm-" + m.id); } }),
@@ -660,14 +682,25 @@
     }
     q.addEventListener("input", function () { proj.q = q.value; proj.page = 0; drawProject(); });
     box.appendChild(h("div", { class: "toolbar" }, [q]));
+    if (disabledN) {
+      var showDis = h("input", { type: "checkbox", id: "proj-show-disabled", "aria-label": "Εμφάνιση απενεργοποιημένων" });
+      showDis.checked = !!proj.showDisabled;
+      showDis.addEventListener("change", function () { proj.showDisabled = showDis.checked; proj.page = 0; render(); });
+      box.appendChild(h("label", { class: "showdis" }, [showDis, document.createTextNode("Εμφάνιση απενεργοποιημένων (" + disabledN + ")")]));
+    }
     box.appendChild(list);
     box.appendChild(pg);
 
     // προσθήκη πολλών ανθρώπων με επικόλληση emails (ο συνηθισμένος τρόπος σε BPO: μια ομάδα νέων πρακτόρων μπαίνει μαζί)
     var paste = h("textarea", { id: "paste-emails", "aria-label": "Emails, ένα ανά γραμμή", placeholder: "nikos@bpo.gr\nmaria@bpo.gr" });
     var pasteRole = h("select", { id: "paste-role", "aria-label": "Ρόλος στο project" }, [option("member", "Μέλος"), option("editor", "Editor")]);
+    // Οι επιλογές μένουν όπως τις άφησες και μετά από μια προσθήκη (ο χρήστης συνήθως προσθέτει πολλές παρτίδες με τον ίδιο τρόπο).
     var create = h("input", { type: "checkbox", id: "paste-create", "aria-label": "Δημιουργία νέων μελών" });
-    var invite = h("input", { type: "checkbox", id: "paste-invite", checked: true, "aria-label": "Πρόσκληση σε όσους δημιουργούνται" });
+    create.checked = !!proj.create;
+    create.addEventListener("change", function () { proj.create = create.checked; });
+    var invite = h("input", { type: "checkbox", id: "paste-invite", "aria-label": "Πρόσκληση σε όσους δημιουργούνται" });
+    invite.checked = proj.invite !== false;
+    invite.addEventListener("change", function () { proj.invite = invite.checked; });
     var result = h("p", { class: "note", id: "paste-result", role: "status", "aria-live": "polite", text: proj.result });
     var add = h("button", { class: "btn", id: "paste-add", type: "button", text: "Προσθήκη" });
     add.addEventListener("click", function () {
@@ -688,7 +721,9 @@
       api("/team/admin/memberships", "POST", { emails: emails, createMissing: create.checked, sendInvite: create.checked && invite.checked, changes: [{ projectId: d.id, role: pasteRole.value }] }).then(function (r) {
         add.disabled = false;
         if (r.status !== 200) { fail(errText(r)); return; }
-        ok(bulkSummary(r.data, d, roleWord(pasteRole.value)));
+        // Αν δεν προστέθηκε κανείς, δεν είναι επιτυχία: κόκκινο μήνυμα (μένει μέχρι την επόμενη ενέργεια).
+        if (!r.data.updated && !r.data.created) fail("Δεν προστέθηκε κανείς" + (r.data.notAdded && r.data.notAdded.length ? " · " + plural(r.data.notAdded.length, "δεν προστέθηκε", "δεν προστέθηκαν") : "") + ".");
+        else ok(bulkSummary(r.data, d, roleWord(pasteRole.value)));
         paste.value = "";
         proj.result = r.data.notAdded && r.data.notAdded.length
           ? "Δεν προστέθηκαν: " + r.data.notAdded.join(", ") + ". Αν είναι νέοι άνθρωποι, τσέκαρε «Δημιουργία νέων μελών» και ξαναδοκίμασε."
@@ -712,24 +747,36 @@
   function documentsView() {
     var box = h("div", { class: "card" }, [
       h("h2", { text: "Έγγραφα" }),
-      h("p", { class: "hint", text: "Ένα εμπιστευτικό έγγραφο το διαβάζουν μόνο οι admins και τα μέλη του ίδιου project. Οι editors άλλων projects δεν το βλέπουν, και μια αντίφαση μαζί του τους εμφανίζεται χωρίς περιεχόμενο. Έγγραφα «όλης της εταιρείας» δεν μπορούν να γίνουν εμπιστευτικά." }),
+      h("p", { class: "hint", text: "Ένα εμπιστευτικό έγγραφο το διαβάζουν μόνο οι admins και τα μέλη του ίδιου project: δεν μοιράζεται με άλλα projects και μια αντίφαση μαζί του εμφανίζεται χωρίς περιεχόμενο. Η κοινή χρήση ενός εγγράφου με άλλα projects ορίζεται από την οθόνη επεξεργασίας του εγγράφου. Έγγραφα «όλης της εταιρείας» δεν μπορούν να γίνουν εμπιστευτικά." }),
     ]);
     var msg = h("p", { class: "note", role: "status", "aria-live": "polite" });
     var docs = (docsData && docsData.documents) || [];
     if (!docs.length) box.appendChild(h("div", { class: "hint", text: "Κανένα έγγραφο ακόμα." }));
     docs.forEach(function (d) {
-      var toggle = h("button", { class: "btn secondary doc-hide-toggle", type: "button", text: d.hidden ? "Άρση εμπιστευτικού" : "Σήμανση ως εμπιστευτικό", onclick: function () {
+      var docRow, docControls;
+      var sharedWith = (d.audienceProjectIds || []).map(function (id) { var x = deptById(id); return x ? x.name : "άγνωστο project"; });
+      function doToggleDoc() {
         beginAction();
         api("/team/admin/documents/" + encodeURIComponent(d.id), "PATCH", { hidden: !d.hidden }).then(function (r) {
           if (r.status === 200) { ok(d.title + (d.hidden ? ": δεν είναι πια εμπιστευτικό" : ": εμπιστευτικό")); changed("doc-" + d.id); load(); }
           else { fail(r.data && r.data.error === "company_wide_cannot_hide" ? "Έγγραφα όλης της εταιρείας δεν μπορούν να γίνουν εμπιστευτικά." : errText(r)); load(); }
         });
+      }
+      var toggle = h("button", { class: "btn secondary doc-hide-toggle", type: "button", text: d.hidden ? "Άρση εμπιστευτικού" : "Σήμανση ως εμπιστευτικό", onclick: function () {
+        // Ένα εμπιστευτικό έγγραφο δεν μοιράζεται: η σήμανση αφαιρεί το ακροατήριο και η άρση δεν το επαναφέρει. Προειδοποιούμε πριν.
+        if (!d.hidden && sharedWith.length) {
+          confirmFirst(docRow, docControls, "Το έγγραφο μοιράζεται με " + plural(sharedWith.length, "project", "projects") + ". Αν γίνει εμπιστευτικό θα σταματήσει να μοιράζεται και δεν επανέρχεται μόνο του. Σίγουρα;", doToggleDoc);
+          return;
+        }
+        doToggleDoc();
       } });
-      var bits = d.departmentName + (d.pendingUpdates ? " · " + d.pendingUpdates + " update" : "") + (d.openContradictions ? " · " + d.openContradictions + (d.openContradictions === 1 ? " αντίφαση" : " αντιφάσεις") : "");
-      box.appendChild(h("div", { class: "row doc-row", "data-key": "doc-" + d.id }, [
-        h("div", null, [h("span", { class: "name", text: d.title }), d.hidden ? h("span", { class: "pill hid", text: " εμπιστευτικό" }) : null, h("div", { class: "meta", text: bits })]),
-        h("div", { class: "controls" }, [toggle]),
-      ]));
+      var bits = d.departmentName + (sharedWith.length ? " · κοινό με " + sharedWith.slice(0, 3).join(", ") + (sharedWith.length > 3 ? " +" + (sharedWith.length - 3) : "") : "") + (d.pendingUpdates ? " · " + d.pendingUpdates + " update" : "") + (d.openContradictions ? " · " + d.openContradictions + (d.openContradictions === 1 ? " αντίφαση" : " αντιφάσεις") : "");
+      docControls = h("div", { class: "controls" }, [toggle]);
+      docRow = h("div", { class: "row doc-row", "data-key": "doc-" + d.id }, [
+        h("div", null, [h("span", { class: "name", text: d.title }), d.hidden ? h("span", { class: "pill hid", text: "εμπιστευτικό" }) : null, h("div", { class: "meta", text: bits })]),
+        docControls,
+      ]);
+      box.appendChild(docRow);
     });
     box.appendChild(h("div", { class: "row" }, [
       h("div", null, [h("span", { class: "name", text: "Επανέλεγχος αντιφάσεων" }), h("div", { class: "meta", text: "Μετά από κάθε δημοσίευση προγραμματίζεται αυτόματα δεύτερος έλεγχος σε λίγα λεπτά. Εδώ μπορείς να τον τρέξεις αμέσως." })]),
@@ -756,7 +803,7 @@
     if (!entries.length) box.appendChild(h("div", { class: "hint", text: "Καμία ενέργεια ακόμα." }));
     entries.forEach(function (e) {
       box.appendChild(h("div", { class: "row log" }, [
-        h("span", null, [h("span", { class: "a", text: e.actor }), document.createTextNode(" · " + (ACTION_LABEL[e.action] || e.action) + (e.target ? " · " + (e.targetLabel || e.target) : ""))]),
+        h("span", null, [h("span", { class: "a", text: e.actor }), document.createTextNode(" · " + (ACTION_LABEL[e.action] || e.action) + (e.target ? " · " + (e.targetLabel || e.target) : "") + (e.detail && typeof e.detail.count === "number" && /^members_bulk_/.test(e.action) ? " · " + plural(e.detail.count, "μέλος", "μέλη") : ""))]),
         h("span", { class: "t", text: new Date(e.at).toLocaleString("el-GR") }),
       ]));
     });

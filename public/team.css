@@ -1,0 +1,135 @@
+/* public\team.css
+   Κοινό στυλ ΜΟΝΟ για τις τρεις σελίδες του "Idmon για ομάδες": portal.html, team-editor.html, team-admin.html.
+   Δεν φορτώνεται από καμία σελίδα του SMB και δεν αλλάζει το shared.css. Φορτώνεται ΜΕΤΑ το shared.css και το συμπληρώνει.
+
+   Αρχές (2 Οκτ 2026):
+   - ΜΙΑ κλίμακα γραμμάτων σε rem (κατώτατο όριο ~12,5px) και ΜΙΑ κλίμακα ύψους κουμπιών, αντί για διαφορετικά px σε κάθε σελίδα.
+   - Κουμπιά με σκούρο κείμενο πάνω στο ζεστό accent (5,8:1 αντίθεση, όπως το .cta-primary του SMB). Το λευκό είχε 2,9:1.
+   - Ορατός δακτύλιος focus για πληκτρολόγιο. Στόχοι κλικ τουλάχιστον 24x24px (WCAG 2.2, 2.5.8).
+   - Περίγραμμα πεδίων με αντίθεση ~3:1 (τα πεδία φαίνονται πού είναι).
+   - Σκούρο γκρι αντί καθαρού μαύρου, ανύψωση με ανοιχτότερες επιφάνειες, κείμενο σε τρία επίπεδα. */
+
+:root{
+  --accent:#D97757; --accent-soft:rgba(217,119,87,.16);
+  --on-accent:#15151c;            /* σκούρο κείμενο πάνω στο accent */
+  --field-border:#6f6f7d;         /* περίγραμμα πεδίων, ~3,4:1 πάνω στην επιφάνεια */
+  --focus:#F0A58B;                /* δακτύλιος focus, ανοιχτότερο από το accent για να φαίνεται και πάνω του */
+  --fs-xs:.78rem; --fs-sm:.84rem; --fs-md:.92rem; --fs-lg:1.06rem; --fs-xl:1.3rem; --fs-num:1.7rem;
+  --r:8px; --r-lg:10px;
+  --h-btn:36px; --h-input:40px;
+}
+
+html{-webkit-text-size-adjust:100%;}
+body{line-height:1.5;font-size:var(--fs-md);}
+h1,h2,h3{line-height:1.3;}
+a{color:var(--text-soft);}
+a:hover{color:var(--text);}
+
+/* ---- focus: ένας δακτύλιος παντού, μόνο για πληκτρολόγιο */
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px;}
+input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0;border-color:var(--focus);}
+
+/* ---- διάταξη */
+.wrap{max-width:1000px;margin:0 auto;padding:0 16px 56px;}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  padding:14px 0;border-bottom:1px solid var(--border);margin-bottom:18px;}
+.topbar h1{font-size:var(--fs-lg);margin:0;font-weight:600;}
+.topbar a{font-size:var(--fs-sm);margin-left:14px;}
+.tabs{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap;}
+.tab{background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:var(--r);
+  padding:8px 16px;min-height:var(--h-btn);font-size:var(--fs-md);cursor:pointer;font-family:inherit;}
+.tab:hover{border-color:var(--text-soft);}
+.tab.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600;}
+
+/* ---- κάρτες και κείμενα */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:14px;}
+.card h2{font-size:var(--fs-md);margin:0 0 4px;font-weight:600;}
+.card h3{font-size:var(--fs-md);margin:0 0 4px;font-weight:600;}
+.hint{font-size:var(--fs-sm);color:var(--text-soft);margin:0 0 10px;}
+.muted{color:var(--text-soft);font-size:var(--fs-sm);}
+.empty{font-size:var(--fs-sm);color:var(--text-soft);padding:10px 0;}
+.note{font-size:var(--fs-sm);margin-top:8px;min-height:1.2em;line-height:1.5;}
+.note.ok{color:var(--ok);} .note.err{color:var(--danger);}
+.name{font-weight:600;}
+
+/* ---- ετικέτες */
+.pill{font-size:var(--fs-xs);padding:2px 9px;border-radius:999px;background:var(--surface-2);color:var(--text-soft);white-space:nowrap;display:inline-block;}
+.pill.hid{background:var(--warn-bg);color:var(--warn-border);}
+.pill.off{background:rgba(229,100,107,.14);color:var(--danger);}
+.pill.you{background:var(--accent-soft);color:var(--accent);}
+.pill.shared{background:rgba(120,160,230,.14);color:#9db8ee;}
+.pill.muted{background:var(--surface-2);color:var(--text-soft);}
+.chip{font-size:var(--fs-xs);padding:2px 9px;border-radius:999px;background:var(--surface-2);color:var(--text-soft);border:1px solid var(--border);display:inline-block;}
+.chip.ed{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);}
+/* ετικέτα που ακολουθεί όνομα ή email: κενό από το CSS, όχι από κενά μέσα στο κείμενο */
+.linkrow + .chip,.linkrow + .pill,.name + .pill,.name + .chip{margin-left:8px;}
+
+/* ---- κουμπιά (ΜΙΑ κλίμακα) */
+.btn{min-height:var(--h-btn);padding:0 16px;border-radius:var(--r);border:1px solid transparent;background:var(--accent);
+  color:var(--on-accent);font-size:var(--fs-sm);font-weight:700;cursor:pointer;font-family:inherit;line-height:1.2;}
+.btn:hover{filter:brightness(1.08);}
+.btn.lg{min-height:48px;padding:0 22px;font-size:var(--fs-md);}
+.btn.secondary{background:var(--surface-2);color:var(--text);border-color:var(--border);font-weight:600;}
+.btn.secondary:hover{filter:none;border-color:var(--text-soft);}
+.btn.danger{background:none;color:var(--danger);border-color:var(--danger);font-weight:600;}
+.btn.danger:hover{filter:none;background:rgba(229,100,107,.12);}
+.btn:disabled{opacity:.55;cursor:default;filter:none;}
+.linkbtn{color:var(--text-soft);background:none;border:none;font-size:inherit;cursor:pointer;text-decoration:underline;padding:4px 2px;font-family:inherit;}
+.linkbtn:hover{color:var(--text);}
+.xbtn,.x{background:none;border:none;color:var(--text-soft);font-size:1.15rem;line-height:1;cursor:pointer;
+  min-width:28px;min-height:28px;border-radius:6px;font-family:inherit;}
+.xbtn:hover,.x:hover{color:var(--text);background:var(--surface-2);}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+
+/* ---- πεδία */
+label{display:block;font-size:var(--fs-sm);color:var(--text-soft);margin:12px 0 4px;}
+input[type=text],input[type=email],select,textarea{padding:9px 12px;min-height:var(--h-input);border-radius:var(--r);
+  border:1px solid var(--field-border);background:var(--bg);color:var(--text);font-size:var(--fs-md);font-family:inherit;}
+textarea{width:100%;min-height:240px;line-height:1.6;resize:vertical;}
+textarea.small{min-height:90px;}
+input::placeholder,textarea::placeholder{color:var(--text-soft);opacity:.75;}
+select{max-width:100%;}
+input[type=checkbox]{width:18px;height:18px;margin:3px;accent-color:var(--accent);cursor:pointer;flex:none;}
+.checks{display:flex;gap:10px;flex-wrap:wrap;font-size:var(--fs-sm);}
+.checks label,label.check{display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin:0;color:var(--text);font-size:var(--fs-sm);}
+
+/* ---- επιλογή ακροατηρίου ("Ποιος άλλος το διαβάζει;") */
+details.audience{border:1px solid var(--border);border-radius:var(--r);background:var(--surface-2);margin:14px 0 4px;}
+details.audience > summary{cursor:pointer;list-style:none;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;border-radius:var(--r);}
+details.audience > summary::-webkit-details-marker{display:none;}
+details.audience > summary::before{content:"▸";color:var(--text-soft);margin-right:2px;}
+details.audience[open] > summary::before{content:"▾";}
+details.audience > summary .s-title{font-weight:600;font-size:var(--fs-md);margin-right:auto;}
+details.audience > summary .s-state{font-size:var(--fs-sm);color:var(--text-soft);}
+.audience-body{padding:2px 14px 14px;}
+.pick-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:2px 14px;margin:8px 0;}
+.pick-list label{display:flex;align-items:center;gap:8px;margin:0;padding:4px 2px;color:var(--text);font-size:var(--fs-md);cursor:pointer;border-radius:6px;}
+.pick-list label:hover{background:var(--surface);}
+.pick-list label.off{opacity:.5;cursor:default;}
+.audience-foot{font-size:var(--fs-sm);color:var(--text-soft);margin:6px 0 0;}
+
+/* ---- διαφορές κειμένου */
+.diff{border:1px solid var(--border);border-radius:var(--r);overflow:hidden;font-size:var(--fs-sm);line-height:1.6;margin:10px 0;}
+.diff div{padding:4px 12px;}
+.diff .same{color:var(--text-soft);} .diff .del{background:rgba(229,100,107,.14);color:var(--danger);text-decoration:line-through;}
+.diff .add{background:rgba(79,174,124,.14);color:var(--ok);}
+
+/* ---- μηνύματα και επιβεβαιώσεις (admin) */
+.confirm{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:var(--fs-sm);color:var(--danger);}
+.notice-region{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:50;display:flex;flex-direction:column;
+  gap:8px;align-items:center;max-width:min(92vw,720px);pointer-events:none;}
+.toast{pointer-events:auto;display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-radius:var(--r-lg);
+  border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:var(--fs-sm);
+  box-shadow:0 6px 24px rgba(0,0,0,.35);animation:toast-in .18s ease-out;}
+.toast.ok{border-color:var(--ok);}
+.toast.err{border-color:var(--danger);color:var(--danger);}
+@keyframes toast-in{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+.busy{opacity:.6;}
+@media (prefers-reduced-motion:reduce){.toast{animation:none;}*{scroll-behavior:auto !important;transition:none !important;}}
+
+/* ---- μικρές οθόνες */
+@media (max-width:560px){
+  .topbar a{margin-left:0;margin-right:14px;}
+  .btn{min-height:40px;}
+}

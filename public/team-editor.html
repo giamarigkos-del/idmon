@@ -8,66 +8,39 @@
 <title>Εισερχόμενα και έγγραφα · Idmon για ομάδες</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/shared.css">
+<link rel="stylesheet" href="/team.css">
 <style>
-  /* Section W (30 Σεπ 2026): οθόνη editor του "Idmon για ομάδες". Δύο όψεις: Εισερχόμενα (αντιφάσεις,
-     updates προς ενσωμάτωση, αναπάντητες ερωτήσεις) και Έγγραφα. Οι editors γράφουν ΜΟΝΟ στο δικό
-     τους τμήμα, οι admins παντού. Ο έλεγχος γίνεται στον server, εδώ απλώς κρύβουμε ό,τι δεν
-     επιτρέπεται. Όλα τα δεδομένα μπαίνουν με textContent (ποτέ innerHTML). */
-  :root{--accent:#D97757;--accent-soft:rgba(217,119,87,.16);}
-  .wrap{max-width:1000px;margin:0 auto;padding:0 16px 56px;}
-  .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
-    padding:14px 0;border-bottom:1px solid var(--border);margin-bottom:18px;}
-  .topbar h1{font-size:16px;margin:0;font-weight:600;}
-  .topbar a{color:var(--text-soft);font-size:13px;margin-left:14px;}
-  .tabs{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap;}
-  .tab{background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:8px;
-    padding:8px 16px;font-size:14px;cursor:pointer;font-family:inherit;}
-  .tab.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600;}
+  /* Section W (30 Σεπ 2026): οθόνη editor του "Idmon για ομάδες". Δύο όψεις: Εισερχόμενα (αντιφάσεις, updates προς ενσωμάτωση, αναπάντητες
+     ερωτήσεις) και Έγγραφα. Οι editors γράφουν ΜΟΝΟ στο δικό τους project, οι admins παντού. Ο έλεγχος γίνεται στον server, εδώ απλώς
+     κρύβουμε ό,τι δεν επιτρέπεται. Όλα τα δεδομένα μπαίνουν με textContent (ποτέ innerHTML).
+     2 Οκτ 2026: τα κοινά στυλ ζουν στο team.css. Εδώ μένουν μόνο όσα αφορούν αυτή τη σελίδα. */
   .counts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:22px;}
-  .count{border-radius:10px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);}
-  .count .l{font-size:12px;color:var(--text-soft);} .count .n{font-size:26px;font-weight:600;line-height:1.2;}
+  .count{border-radius:var(--r-lg);padding:10px 14px;background:var(--surface);border:1px solid var(--border);}
+  .count .l{font-size:var(--fs-xs);color:var(--text-soft);} .count .n{font-size:var(--fs-num);font-weight:600;line-height:1.2;}
   .count.danger{background:rgba(229,100,107,.12);border-color:rgba(229,100,107,.4);} .count.danger .n,.count.danger .l{color:var(--danger);}
   .count.warn{background:var(--warn-bg);border-color:var(--warn-border);} .count.warn .n,.count.warn .l{color:var(--warn-border);}
-  h2.sec{font-size:15px;margin:26px 0 6px;font-weight:600;}
-  .hint{font-size:12.5px;color:var(--text-soft);margin:0 0 10px;}
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:12px;}
-  .card h3{font-size:14px;margin:0 0 4px;font-weight:600;}
+  h2.sec{font-size:var(--fs-md);margin:26px 0 6px;font-weight:600;}
   .sides{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin:10px 0;}
-  .side{border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
-  .side .who{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;color:var(--text-soft);margin-bottom:6px;}
-  .side .q{font-size:13.5px;line-height:1.6;}
+  .side{border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;}
+  .side .who{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:var(--fs-xs);color:var(--text-soft);margin-bottom:6px;}
+  .side .q{font-size:var(--fs-sm);line-height:1.6;}
+  .side.hidden-side{border-style:dashed;}
   mark{background:rgba(229,100,107,.22);color:var(--danger);padding:1px 4px;border-radius:4px;}
-  .pill{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--surface-2);color:var(--text-soft);white-space:nowrap;display:inline-block;}
-  .pill.you{background:var(--accent-soft);color:var(--accent);}
-  .status{font-size:12px;color:var(--text-soft);margin:6px 0;}
-  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
-  .btn{height:38px;padding:0 16px;border-radius:8px;border:none;background:var(--accent);color:var(--on-accent);font-size:13.5px;font-weight:600;cursor:pointer;}
-  .btn.secondary{background:var(--surface-2);color:var(--text);border:1px solid var(--border);}
-  .btn.danger{background:none;color:var(--danger);border:1px solid var(--danger);}
-  .btn:disabled{opacity:.55;cursor:default;}
-  .note{font-size:13px;margin-top:8px;min-height:16px;} .note.ok{color:var(--ok);} .note.err{color:var(--danger);}
-  .empty{font-size:13px;color:var(--text-soft);padding:10px 0;}
-  .diff{border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:13px;line-height:1.6;margin:10px 0;}
-  .diff div{padding:4px 12px;}
-  .diff .same{color:var(--text-soft);} .diff .del{background:rgba(229,100,107,.14);color:var(--danger);text-decoration:line-through;}
-  .diff .add{background:rgba(79,174,124,.14);color:var(--ok);}
-  .qrow{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 0;border-top:1px solid var(--border);font-size:14px;}
-  .qrow .c{font-size:12px;color:var(--text-soft);}
+  .status{font-size:var(--fs-xs);color:var(--text-soft);margin:6px 0;}
+  .qrow{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 0;border-top:1px solid var(--border);font-size:var(--fs-md);}
+  .qrow .c{font-size:var(--fs-xs);color:var(--text-soft);}
   /* έγγραφα */
   .grid{display:grid;grid-template-columns:minmax(240px,320px) 1fr;gap:22px;align-items:start;}
   @media (max-width:760px){.grid{grid-template-columns:1fr;}}
   .item{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;background:none;border:none;
-    border-top:1px solid var(--border);padding:9px 0;color:var(--text);cursor:pointer;font-family:inherit;}
-  .item .t{font-size:14px;} .item .m{font-size:12px;color:var(--text-soft);} .item.active .t{color:var(--accent);}
-  label{display:block;font-size:12.5px;color:var(--text-soft);margin:12px 0 4px;}
-  input[type=text],select,textarea{width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border);
-    background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;}
-  textarea{min-height:240px;line-height:1.6;resize:vertical;}
-  textarea.small{min-height:90px;}
-  .ro{font-size:12.5px;color:var(--text-soft);margin:0 0 6px;}
-  .readonly-text{white-space:pre-wrap;line-height:1.7;font-size:14.5px;margin:12px 0 0;}
-  .pending{border:1px dashed var(--warn-border);border-radius:8px;padding:8px 12px;margin:12px 0;font-size:13px;}
-  .pending .h{font-size:12px;color:var(--warn-border);margin-bottom:4px;}
+    border-top:1px solid var(--border);padding:9px 0;min-height:44px;color:var(--text);cursor:pointer;font-family:inherit;}
+  .item .t{font-size:var(--fs-md);} .item .m{font-size:var(--fs-xs);color:var(--text-soft);} .item.active .t{color:var(--accent);}
+  .item:hover .t{text-decoration:underline;}
+  #panel input[type=text],#panel select{width:100%;}
+  .ro{font-size:var(--fs-sm);color:var(--text-soft);margin:0 0 6px;}
+  .readonly-text{white-space:pre-wrap;line-height:1.7;font-size:var(--fs-md);margin:12px 0 0;}
+  .pending{border:1px dashed var(--warn-border);border-radius:var(--r);padding:8px 12px;margin:12px 0;font-size:var(--fs-sm);}
+  .pending .h{font-size:var(--fs-xs);color:var(--warn-border);margin-bottom:4px;}
   hr.sep{border:none;border-top:1px solid var(--border);margin:18px 0;}
 </style>
 </head>
@@ -113,8 +86,14 @@
     forbidden: "Δεν έχεις δικαίωμα για αυτή την ενέργεια.", invalid_title: "Ο τίτλος είναι κενός ή πολύ μεγάλος.",
     text_required: "Γράψε κείμενο.", text_too_long: "Το κείμενο είναι πολύ μεγάλο.", invalid_text: "Το κείμενο είναι κενό ή πολύ μεγάλο.",
     ai_unavailable: "Ο πάροχος AI δεν είναι διαθέσιμος. Δοκίμασε ξανά σε λίγο.", bad_proposal: "Η πρόταση δεν ήταν χρήσιμη. Δοκίμασε ξανά ή γράψε το κείμενο μόνος σου.",
-    cooldown: "Έχει ήδη σταλεί υπενθύμιση πρόσφατα.", has_pending_updates: "Ενσωμάτωσε ή απόρριψε πρώτα τα εκκρεμή updates του εγγράφου.",
-    not_found: "Δεν βρέθηκε (ίσως άλλαξε στο μεταξύ).", not_open: "Έχει ήδη επιλυθεί."
+    cooldown: "Έχει ήδη σταλεί υπενθύμιση πρόσφατα.", has_pending_updates: "Το project ή ο κύκλος αναγνωστών του εγγράφου δεν αλλάζει όσο υπάρχουν updates που δεν έχουν ενσωματωθεί. Ενσωμάτωσέ τα ή απόρριψέ τα πρώτα.",
+    not_found: "Δεν βρέθηκε (ίσως άλλαξε στο μεταξύ).", not_open: "Έχει ήδη επιλυθεί.",
+    invalid_audience: "Η επιλογή projects για κοινή χρήση δεν είναι έγκυρη. Ξαναφόρτωσε τη σελίδα και δοκίμασε ξανά.",
+    audience_too_large: "Ένα έγγραφο μπορεί να μοιραστεί με το πολύ 10 projects συνολικά (μαζί με αυτό που το κατέχει).",
+    audience_forbidden: "Μπορείς να μοιράσεις το έγγραφο μόνο με projects στα οποία ανήκεις και εσύ.",
+    audience_not_allowed: "Ένα έγγραφο όλης της εταιρείας το βλέπουν ήδη όλοι: δεν μοιράζεται ξεχωριστά.",
+    hidden_cannot_have_audience: "Ένα εμπιστευτικό έγγραφο, ή έγγραφο κρυφού project, δεν μοιράζεται με άλλα projects.",
+    audience_unavailable: "Η κοινή χρήση εγγράφων δεν είναι ακόμα διαθέσιμη σε αυτόν τον χώρο (λείπει μια ενημέρωση βάσης). Ειδοποίησε τον διαχειριστή."
   };
   function errText(r) { return ERRORS[r.data && r.data.error] || "Κάτι πήγε στραβά."; }
 
@@ -179,8 +158,8 @@
     var sides = h("div", { class: "sides" }, c.sides.map(function (s) {
       if (s.hidden) {
         return h("div", { class: "side hidden-side" }, [
-          h("div", { class: "who" }, [h("span", { text: "Έγγραφο κρυφού τμήματος" }), h("span", { class: "pill", text: "κρυφό" })]),
-          h("div", { class: "q", text: "Υπάρχει αντίφαση με έγγραφο που δεν έχεις πρόσβαση. Ο admin ειδοποιήθηκε." }),
+          h("div", { class: "who" }, [h("span", { text: "Έγγραφο που δεν έχεις πρόσβαση" }), h("span", { class: "pill hid", text: "χωρίς πρόσβαση" })]),
+          h("div", { class: "q", text: "Υπάρχει αντίφαση με έγγραφο που δεν έχεις πρόσβαση. Ειδοποιήθηκαν οι υπεύθυνοι. Μπορείς να στείλεις και υπενθύμιση." }),
         ]);
       }
       var q = h("div", { class: "q" }); highlight(q, s.quote);
@@ -329,6 +308,12 @@
   // ---------------------------------------------------------------- έγγραφα
   function openDoc(id) { currentId = id; view = "docs"; refreshDocs(); }
 
+  // Έγγραφο ΑΛΛΟΥ project (όχι δικό μου): το διαβάζω επειδή μοιράζεται με το project μου. Ο admin διαβάζει τα πάντα, άρα δεν χρειάζεται ετικέτα.
+  function isForeign(departmentId) {
+    if (me.role === "admin" || departmentId === "_all") return false;
+    return !(me.departments || []).some(function (d) { return d.id === departmentId; });
+  }
+
   function writableDepartments() {
     if (me.role === "admin") return [{ id: "_all", name: "Όλη η εταιρεία" }].concat(departments.map(function (d) { return { id: d.id, name: d.name }; }));
     // Ρόλος ανά project: γράφεις μόνο στα projects όπου είσαι editor (όχι σε όσα είσαι απλό μέλος).
@@ -346,7 +331,10 @@
       h("span", { class: "t", text: "+ Νέο έγγραφο" }),
     ]));
     docs.forEach(function (d) {
-      var extra = (d.editable ? "" : " · μόνο ανάγνωση") + (d.hidden ? " · εμπιστευτικό" : "") + (d.pendingUpdates ? " · " + d.pendingUpdates.count + " update" : "");
+      // UX-5: φαίνεται ποιος το κατέχει και αν μοιράζεται. Ο ιδιοκτήτης βλέπει "κοινό με N projects", ο αναγνώστης "κοινό με το project σου".
+      var sharedOut = d.editable && d.audienceCount ? " · κοινό με " + d.audienceCount + (d.audienceCount === 1 ? " project" : " projects") : "";
+      var sharedIn = !d.editable && isForeign(d.departmentId) ? " · κοινό με το project σου" : "";
+      var extra = (d.editable ? "" : " · μόνο ανάγνωση") + sharedIn + sharedOut + (d.hidden ? " · εμπιστευτικό" : "") + (d.pendingUpdates ? " · " + d.pendingUpdates.count + " update" : "");
       list.appendChild(h("button", { class: "item" + (currentId === d.id ? " active" : ""), type: "button", onclick: function () { currentId = d.id; renderDocs(); } }, [
         h("span", { class: "t", text: d.title }), h("span", { class: "m", text: d.departmentName + extra }),
       ]));
@@ -366,12 +354,83 @@
     return box;
   }
 
+  // ---------------------------------------------------------------- ακροατήριο ("Ποιος άλλος το διαβάζει;")
+  // Το έγγραφο ανήκει σε ένα project (εκεί γράφεται) και προαιρετικά το διαβάζουν και άλλα (μέχρι 10 projects συνολικά). Ο editor επιλέγει
+  // μόνο από τα projects όπου είναι ο ίδιος μέλος. Projects που έβαλε ο admin και ο editor δεν βλέπει μένουν ως έχουν (φαίνεται μόνο το πλήθος).
+  var MAX_AUDIENCE = 10;
+  function audienceBox(doc, ownerSelect) {
+    var selected = {};
+    ((doc && doc.audience && doc.audience.projects) || []).forEach(function (x) { selected[x.id] = true; });
+    var hiddenCount = (doc && doc.audience && doc.audience.hiddenCount) || 0;
+    var node = h("details", { class: "audience", id: "audience" });
+    if (Object.keys(selected).length || hiddenCount) node.setAttribute("open", "open");
+    var summary = h("summary", null, [h("span", { class: "s-title", text: "Ποιος άλλος το διαβάζει;" }), h("span", { class: "s-state", id: "audience-state" })]);
+    var body = h("div", { class: "audience-body" });
+    node.appendChild(summary); node.appendChild(body);
+    function ownerId() { return ownerSelect.value; }
+    function ownerName() { var o = ownerSelect.options[ownerSelect.selectedIndex]; return o ? o.text : ""; }
+    function pickable() {
+      var source = me.role === "admin" ? departments : (me.departments || []);
+      return source.filter(function (d) { return d.id !== ownerId() && d.id !== "_all"; });
+    }
+    function applicable() { return ownerId() !== "_all" && !(doc && doc.hidden); }
+    function chosen() { return pickable().map(function (d) { return d.id; }).filter(function (id) { return selected[id]; }); }
+    function redraw() {
+      clear(body);
+      var state = node.querySelector("#audience-state");
+      var title = node.querySelector(".s-title");
+      if (ownerId() === "_all") {
+        state.textContent = "όλη η εταιρεία";
+        body.appendChild(h("p", { class: "hint", text: "Ένα έγγραφο όλης της εταιρείας το βλέπουν ήδη όλοι. Για να το μοιραστείς μόνο με συγκεκριμένα projects, διάλεξε πρώτα το project που το κατέχει." }));
+        return;
+      }
+      if (doc && doc.hidden) {
+        state.textContent = "εμπιστευτικό";
+        body.appendChild(h("p", { class: "hint", text: "Ένα εμπιστευτικό έγγραφο το διαβάζουν μόνο τα μέλη του project και οι admins. Δεν μοιράζεται με άλλα projects." }));
+        return;
+      }
+      var options = pickable();
+      var picked = chosen();
+      var total = 1 + picked.length + hiddenCount;
+      var others = picked.length + hiddenCount;
+      state.textContent = ownerName() + (others ? " + " + others + (others === 1 ? " project" : " projects") : " μόνο");
+      title.textContent = "Ποιος άλλος το διαβάζει;";
+      if (!options.length && !hiddenCount) {
+        body.appendChild(h("p", { class: "hint", text: "Δεν υπάρχουν άλλα projects για κοινή χρήση. Το έγγραφο το διαβάζουν μόνο τα μέλη του project που το κατέχει." }));
+        return;
+      }
+      body.appendChild(h("p", { class: "hint", text: "Όσοι ανήκουν σε αυτά τα projects διαβάζουν το έγγραφο (και ο βοηθός το χρησιμοποιεί για αυτούς), αλλά δεν μπορούν να το αλλάξουν." }));
+      var list = h("div", { class: "pick-list", role: "group", "aria-label": "Projects που διαβάζουν το έγγραφο" });
+      options.forEach(function (d) {
+        var on = !!selected[d.id];
+        var cb = h("input", { type: "checkbox", "data-project": d.id });
+        cb.checked = on;
+        cb.disabled = !on && total >= MAX_AUDIENCE;
+        cb.addEventListener("change", function () { if (cb.checked) selected[d.id] = true; else delete selected[d.id]; redraw(); });
+        list.appendChild(h("label", { class: cb.disabled ? "off" : "" }, [cb, h("span", { text: d.name })]));
+      });
+      body.appendChild(list);
+      if (hiddenCount) body.appendChild(h("p", { class: "audience-foot", text: "+ " + hiddenCount + (hiddenCount === 1 ? " ακόμα project" : " ακόμα projects") + " (ορίστηκαν από τον admin, δεν εμφανίζονται και δεν αλλάζουν από εδώ)." }));
+      body.appendChild(h("p", { class: "audience-foot", id: "audience-count", text: "Το διαβάζουν: " + ownerName() + (others ? " + " + others + (others === 1 ? " project" : " projects") : "") + " · μέχρι " + MAX_AUDIENCE + " projects συνολικά" + (total >= MAX_AUDIENCE ? " (έφτασες το όριο)" : "") + "." }));
+    }
+    redraw();
+    return { node: node, redraw: redraw, applicable: applicable, values: chosen };
+  }
+
   function renderPanel(panel, doc) {
     clear(panel);
     var isNew = currentId === null;
     if (doc && !doc.editable) {
       panel.appendChild(h("h3", { text: doc.title }));
-      panel.appendChild(h("p", { class: "ro", text: doc.departmentName + " · μόνο ανάγνωση (ανήκει σε άλλο τμήμα)" }));
+      panel.appendChild(h("p", { class: "ro", text: doc.departmentId === "_all"
+        ? "Όλη η εταιρεία · μόνο ανάγνωση"
+        : isForeign(doc.departmentId)
+          ? doc.departmentName + " · μόνο ανάγνωση. Έγγραφο άλλου project, κοινό με το δικό σου: δεν μπορείς να το αλλάξεις."
+          : doc.departmentName + " · μόνο ανάγνωση. Είσαι μέλος αυτού του project αλλά όχι editor του: δεν μπορείς να το αλλάξεις." }));
+      if (doc.departmentId !== "_all" && doc.audience && (doc.audience.projects.length || doc.audience.hiddenCount)) {
+        panel.appendChild(h("p", { class: "ro", text: "Το διαβάζουν και: " + doc.audience.projects.map(function (x) { return x.name; }).join(", ")
+          + (doc.audience.hiddenCount ? (doc.audience.projects.length ? " και " : "") + doc.audience.hiddenCount + (doc.audience.hiddenCount === 1 ? " ακόμα project" : " ακόμα projects") : "") + "." }));
+      }
       var pb = pendingBlock(doc.pendingUpdates); if (pb) panel.appendChild(pb);
       panel.appendChild(h("div", { class: "readonly-text", text: doc.fullText }));
       return;
@@ -384,6 +443,8 @@
       var o = h("option", { value: d.id, text: d.name }); if (doc && doc.departmentId === d.id) o.selected = true; return o;
     }));
     var text = h("textarea", { id: "text", "aria-label": "Κείμενο" }); text.value = doc ? doc.fullText : "";
+    var aud = audienceBox(doc, dept);
+    dept.addEventListener("change", aud.redraw);
     var note = h("p", { class: "note", role: "status", "aria-live": "polite" });
     if (flash) { note.className = "note ok"; note.textContent = flash; flash = null; }
     var save = h("button", { class: "btn", type: "submit", text: isNew ? "Δημοσίευση" : "Αποθήκευση" });
@@ -392,6 +453,7 @@
       e.preventDefault();
       save.disabled = true; note.className = "note"; note.textContent = "Αποθήκευση και δημιουργία αναζήτησης…";
       var body = { title: title.value, departmentId: dept.value, text: text.value };
+      if (aud.applicable()) body.audienceProjectIds = aud.values();
       var req = isNew ? api("/team/documents", "POST", body) : api("/team/documents/" + encodeURIComponent(currentId), "PUT", body);
       req.then(function (r) {
         save.disabled = false;
@@ -404,7 +466,7 @@
       }).catch(function () { save.disabled = false; note.className = "note err"; note.textContent = "Δεν ήταν δυνατή η αποθήκευση."; });
     } }, [
       h("label", { for: "title", text: "Τίτλος" }), title, h("label", { for: "dept", text: "Τμήμα" }), dept,
-      h("label", { for: "text", text: "Κείμενο" }), text,
+      h("label", { for: "text", text: "Κείμενο" }), text, aud.node,
       h("div", { class: "actions" }, [save].concat(isNew ? [] : [
         h("button", { class: "btn secondary", type: "button", text: "Έλεγχος αντιφάσεων τώρα", onclick: function () {
           note.className = "note"; note.textContent = "Έλεγχος…";

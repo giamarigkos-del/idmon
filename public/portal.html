@@ -8,69 +8,56 @@
 <title>Idmon για ομάδες</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/shared.css">
+<link rel="stylesheet" href="/team.css">
 <style>
-  /* Section W (30 Σεπ 2026): πύλη υπαλλήλου του "Idmon για ομάδες". Ξεχωριστή σελίδα από το
-     home.html (απόφαση: δεν αγγίζουμε τη σελίδα των SMB). Αναζήτηση πρώτα, από κάτω τα
-     πρόσφατα updates και τα έγγραφα του τμήματος. Όλα τα δεδομένα μπαίνουν στη σελίδα με
-     textContent (ποτέ innerHTML), οπότε κανένα περιεχόμενο εγγράφου δεν εκτελείται ως HTML. */
-  :root{--accent:#D97757;--accent-soft:rgba(217,119,87,.16);}
+  /* Section W (30 Σεπ 2026): πύλη υπαλλήλου του "Idmon για ομάδες". Ξεχωριστή σελίδα από το home.html (απόφαση: δεν αγγίζουμε τη σελίδα
+     των SMB). Αναζήτηση πρώτα, από κάτω τα πρόσφατα updates και τα έγγραφα. Όλα τα δεδομένα μπαίνουν με textContent (ποτέ innerHTML),
+     οπότε κανένα περιεχόμενο εγγράφου δεν εκτελείται ως HTML.
+     2 Οκτ 2026: τα κοινά στυλ (κουμπιά, πεδία, ετικέτες, focus) ζουν στο team.css. Εδώ μένουν μόνο όσα αφορούν αυτή τη σελίδα. */
   body{min-height:100vh;}
-  .wrap{max-width:900px;margin:0 auto;padding:0 16px 48px;}
-  .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
-    padding:14px 0;border-bottom:1px solid var(--border);margin-bottom:22px;}
-  .brand{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:15px;font-weight:600;}
-  .pill{font-size:11.5px;font-weight:500;padding:2px 9px;border-radius:999px;
-    background:var(--accent-soft);color:var(--accent);white-space:nowrap;}
-  .pill.muted{background:var(--surface-2);color:var(--text-soft);}
-  .userbox{display:flex;align-items:center;gap:12px;font-size:13px;color:var(--text-soft);}
-  .userbox a,.linkbtn{color:var(--text-soft);background:none;border:none;font-size:13px;cursor:pointer;
-    text-decoration:underline;padding:0;font-family:inherit;}
+  .wrap{max-width:900px;}
+  .topbar{margin-bottom:22px;}
+  .brand{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:var(--fs-md);font-weight:600;}
+  .pill{background:var(--accent-soft);color:var(--accent);}
+  .userbox{display:flex;align-items:center;gap:12px;font-size:var(--fs-sm);color:var(--text-soft);}
+  .userbox a{color:var(--text-soft);text-decoration:underline;margin:0;}
   .avatar{width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent);
-    display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;}
-  .searchrow{display:flex;gap:8px;margin-bottom:14px;}
-  .searchrow input{flex:1;min-width:0;height:48px;font-size:16px;padding:0 14px;border-radius:8px;
-    border:1px solid var(--border);background:var(--surface);color:var(--text);}
-  .searchrow input:focus{outline:2px solid var(--accent);outline-offset:0;}
-  .btn{height:48px;padding:0 20px;border-radius:8px;border:none;background:var(--accent);
-    color:var(--on-accent);font-size:15px;font-weight:600;cursor:pointer;}
-  .btn:disabled{opacity:.55;cursor:default;}
-  .btn.secondary{background:var(--surface-2);color:var(--text);border:1px solid var(--border);}
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;}
+    display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-xs);font-weight:600;}
+  .searchrow{display:flex;gap:8px;margin-bottom:8px;}
+  .searchrow input{flex:1;min-width:0;height:48px;font-size:1rem;padding:0 14px;}
+  .searchrow .btn{height:48px;padding:0 22px;font-size:var(--fs-md);}
+  .ai-note{margin:0 0 16px;}
+  .card{padding:14px 16px;}
   .answer{margin-bottom:22px;}
-  .answer .label{font-size:12px;color:var(--text-soft);margin:0 0 6px;}
-  .answer .body{font-size:15px;line-height:1.65;white-space:pre-wrap;word-wrap:break-word;margin:0 0 10px;}
-  .answer .source{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12.5px;
-    color:var(--text-soft);}
-  .answer .handoff{margin:10px 0 0;padding-top:8px;border-top:1px solid var(--border);
-    font-size:12.5px;color:var(--text-soft);}
+  .answer .label{font-size:var(--fs-xs);color:var(--text-soft);margin:0 0 6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .answer .body{font-size:var(--fs-md);line-height:1.65;white-space:pre-wrap;word-wrap:break-word;margin:0 0 10px;}
+  .answer .source{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:var(--fs-sm);color:var(--text-soft);}
+  .answer .handoff{margin:10px 0 0;padding-top:8px;border-top:1px solid var(--border);font-size:var(--fs-sm);color:var(--text-soft);}
   .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:22px;}
-  .cols h2{font-size:14px;margin:0 0 6px;font-weight:600;}
-  .row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;
-    border-top:1px solid var(--border);font-size:14px;width:100%;background:none;border-left:none;
-    border-right:none;border-bottom:none;color:var(--text);text-align:left;cursor:pointer;}
+  .cols h2{font-size:var(--fs-md);margin:0 0 6px;font-weight:600;}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;min-height:44px;
+    border-top:1px solid var(--border);font-size:var(--fs-md);width:100%;background:none;border-left:none;
+    border-right:none;border-bottom:none;color:var(--text);text-align:left;cursor:pointer;font-family:inherit;}
   .row:hover .title{text-decoration:underline;}
-  .row .meta{font-size:12px;color:var(--text-soft);white-space:nowrap;}
-  .empty{font-size:13px;color:var(--text-soft);padding:9px 0;border-top:1px solid var(--border);}
-  .badge{font-size:11px;padding:2px 8px;border-radius:999px;white-space:nowrap;
-    background:var(--warn-bg);color:var(--warn-border);}
+  .row .title{min-width:0;}
+  .row .meta{font-size:var(--fs-xs);color:var(--text-soft);white-space:nowrap;display:inline-flex;align-items:center;gap:6px;}
+  .empty{padding:9px 0;border-top:1px solid var(--border);}
+  .badge{font-size:var(--fs-xs);padding:2px 8px;border-radius:999px;white-space:nowrap;background:var(--warn-bg);color:var(--warn-border);}
   .badge.new{background:rgba(79,174,124,.16);color:var(--ok);}
   /* σύνδεση */
   .loginbox{max-width:420px;margin:12vh auto 0;}
-  .loginbox h1{font-size:20px;margin:0 0 6px;}
-  .loginbox p{color:var(--text-soft);font-size:14px;line-height:1.55;margin:0 0 16px;}
-  .loginbox input{width:100%;height:46px;font-size:15px;padding:0 12px;border-radius:8px;
-    border:1px solid var(--border);background:var(--surface);color:var(--text);margin-bottom:12px;}
-  .loginbox .btn{width:100%;}
-  .note{font-size:13px;margin-top:12px;line-height:1.5;}
-  .note.ok{color:var(--ok);} .note.err{color:var(--danger);}
+  .loginbox h1{font-size:var(--fs-xl);margin:0 0 6px;}
+  .loginbox p{color:var(--text-soft);font-size:var(--fs-md);line-height:1.55;margin:0 0 16px;}
+  .loginbox input{width:100%;height:46px;margin-bottom:12px;}
+  .loginbox .btn{width:100%;height:46px;font-size:var(--fs-md);}
   /* αναγνώστης εγγράφου */
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;
     justify-content:center;padding:5vh 16px;overflow:auto;z-index:20;}
-  .reader{background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:760px;
-    width:100%;padding:20px 22px;}
-  .reader h2{margin:0 0 6px;font-size:19px;}
-  .reader .text{font-size:15px;line-height:1.7;white-space:pre-wrap;word-wrap:break-word;margin:14px 0 18px;}
-  @media (max-width:560px){.searchrow{flex-direction:column;}.btn{width:100%;}}
+  .reader{background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:760px;width:100%;padding:20px 22px;}
+  .reader h2{margin:0 0 6px;font-size:var(--fs-xl);}
+  .reader .facts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 4px;font-size:var(--fs-sm);color:var(--text-soft);}
+  .reader .text{font-size:var(--fs-md);line-height:1.7;white-space:pre-wrap;word-wrap:break-word;margin:14px 0 18px;}
+  @media (max-width:560px){.searchrow{flex-direction:column;}.searchrow .btn{width:100%;}}
 </style>
 </head>
 <body>
@@ -221,9 +208,14 @@
       function onKey(e) { if (e.key === "Escape") close(); }
       document.addEventListener("keydown", onKey);
       overlay.addEventListener("click", function (e) { if (e.target === overlay) close(); });
+      var facts = [h("span", { class: "pill", text: d.departmentName })];
+      if (d.audience && d.audience.projects && d.audience.projects.length && d.departmentId !== "_all") {
+        facts.push(h("span", { class: "pill shared", text: "κοινό με: " + d.audience.projects.map(function (x) { return x.name; }).join(", ") + (d.audience.hiddenCount ? " +" + d.audience.hiddenCount : "") }));
+      }
+      if (d.updatedAt && !isNaN(new Date(d.updatedAt).getTime())) facts.push(h("span", { text: "ενημερώθηκε " + new Date(d.updatedAt).toLocaleDateString("el-GR") }));
       overlay.appendChild(h("div", { class: "reader" }, [
         h("h2", { text: d.title }),
-        h("span", { class: "pill", text: d.departmentName }),
+        h("div", { class: "facts" }, facts),
         pendingUpdatesBlock(d.pendingUpdates),
         h("div", { class: "text", text: d.fullText }),
         h("button", { class: "btn secondary", type: "button", onclick: close, text: "Κλείσιμο" }),
@@ -256,13 +248,15 @@
     ]));
 
     var input = h("input", { type: "text", id: "q", placeholder: "Ρώτα για μια διαδικασία…", "aria-label": "Ερώτηση", autocomplete: "off", maxlength: "1000" });
-    var ask = h("button", { class: "btn", type: "submit", text: "Ρώτα" });
+    var ask = h("button", { class: "btn lg", type: "submit", text: "Ρώτα" });
     var answerBox = h("div", { class: "answer card", style: "display:none;", "aria-live": "polite" });
     app.appendChild(h("form", { class: "searchrow", onsubmit: function (e) { e.preventDefault(); askQuestion(input, ask, answerBox); } }, [input, ask]));
+    // Ο βοηθός είναι σύστημα AI και το δηλώνουμε καθαρά (άρθρο 50 του AI Act, σε ισχύ από 2 Αυγούστου 2026).
+    app.appendChild(h("p", { class: "hint ai-note", id: "ai-note", text: "Ο βοηθός είναι AI. Απαντά μόνο από έγγραφα που έχεις πρόσβαση και μπορεί να κάνει λάθη: έλεγξε την πηγή." }));
     app.appendChild(answerBox);
 
     var recent = h("div", null, [h("h2", { text: "Τι άλλαξε πρόσφατα" })]);
-    var docsCol = h("div", null, [h("h2", { text: me.role === "employee" ? "Έγγραφα του τμήματός σου" : "Όλα τα έγγραφα που βλέπεις" })]);
+    var docsCol = h("div", null, [h("h2", { text: "Έγγραφα που βλέπεις" })]);
     app.appendChild(h("div", { class: "cols" }, [recent, docsCol]));
     input.focus();
     loadDocuments(me, recent, docsCol);
@@ -287,10 +281,13 @@
         ]));
       });
       if (!docs.length) docsCol.appendChild(h("div", { class: "empty", text: "Δεν υπάρχουν έγγραφα ακόμα." }));
+      // "Κοινό": έγγραφο άλλου project που μοιράζεται με τα δικά σου (ο admin τα βλέπει όλα, άρα δεν χρειάζεται ετικέτα).
+      var own = {}; (me.departments || []).forEach(function (x) { own[x.id] = true; });
       docs.forEach(function (d) {
+        var shared = me.role !== "admin" && d.departmentId !== "_all" && !own[d.departmentId];
         docsCol.appendChild(h("button", { class: "row", type: "button", onclick: function () { openDocument(d.id); } }, [
           h("span", { class: "title", text: d.title }),
-          h("span", { class: "meta", text: d.departmentName }),
+          h("span", { class: "meta" }, [h("span", { text: d.departmentName }), shared ? h("span", { class: "pill shared", text: "κοινό" }) : null]),
         ]));
       });
     });
@@ -304,7 +301,7 @@
     clear(box);
     box.style.display = "";
     var body = h("p", { class: "body", text: "Ψάχνω…" });
-    box.appendChild(h("p", { class: "label", text: "Απάντηση" }));
+    box.appendChild(h("p", { class: "label" }, [h("span", { class: "pill muted", text: "AI" }), h("span", { text: "Απάντηση από AI, με βάση τα έγγραφα που έχεις πρόσβαση" })]));
     box.appendChild(body);
     var text = "";
 

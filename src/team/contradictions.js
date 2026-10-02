@@ -29,7 +29,9 @@ const MIN_QUOTE_CHARS = 8;
 const DEFAULT_MIN_SCORE = 0.7;
 const REMIND_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 const MAX_EMAIL_RECIPIENTS = 6;
-export const HIDDEN_TOPIC = "Πιθανή αντίφαση με έγγραφο κρυφού τμήματος";
+// Ουδέτερος γενικός τίτλος όταν μια πλευρά δεν είναι αναγνώσιμη για το μέλος: κρυφό project, εμπιστευτικό έγγραφο ή έγγραφο άλλου project χωρίς
+// ακροατήριο (κανόνας Β). Δεν αποκαλύπτει ποιο από αυτά ισχύει.
+export const HIDDEN_TOPIC = "Πιθανή αντίφαση με έγγραφο που δεν έχεις πρόσβαση";
 
 // ------------------------------------------------------------------ ο κριτής (LLM)
 function judgePrompt(newDoc, otherTitle, excerpts) {

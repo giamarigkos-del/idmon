@@ -843,7 +843,7 @@ const audit = async () => (await readJson(await call("admin@demo.gr", "GET", "/t
   const fin = list.find((c) => c.sides.some((s) => s.hidden) && c.sides.some((s) => s.editable && /εκατόν πενήντα/.test(s.quote)));
   check("βρέθηκε αντίφαση ανάμεσα σε CC και Finance", !!fin);
   const own = fin.sides.find((s) => s.editable), foreign = fin.sides.find((s) => !s.editable);
-  check("ο editor CC βλέπει την ξένη πλευρά ΚΡΥΜΜΕΝΗ (κανόνας Β): ούτε τίτλος, ούτε τμήμα, ούτε παράθεση, γενικός τίτλος", foreign && foreign.hidden === true && Object.keys(foreign).length === 2 && fin.topic === "Πιθανή αντίφαση με έγγραφο κρυφού τμήματος" && !JSON.stringify(fin).includes("Όρια έγκρισης") && !JSON.stringify(fin).includes("εκατό ευρώ"));
+  check("ο editor CC βλέπει την ξένη πλευρά ΚΡΥΜΜΕΝΗ (κανόνας Β): ούτε τίτλος, ούτε τμήμα, ούτε παράθεση, γενικός τίτλος", foreign && foreign.hidden === true && Object.keys(foreign).length === 2 && fin.topic === "Πιθανή αντίφαση με έγγραφο που δεν έχεις πρόσβαση" && !JSON.stringify(fin).includes("Όρια έγκρισης") && !JSON.stringify(fin).includes("εκατό ευρώ"));
   const finView = (await cList("ed_fin@demo.gr")).find((c) => c.sides.some((s) => s.hidden) && c.sides.some((s) => s.editable && s.title === "Όρια έγκρισης"));
   check("ο editor Finance τη βλέπει ανάποδα: δικό του Finance, η πλευρά του CC κρυμμένη", finView && finView.sides.find((s) => s.editable).title === "Όρια έγκρισης" && finView.sides.find((s) => !s.editable).hidden === true);
   const finMails = state.emails.slice(emailsBefore).filter((e) => e.to === "ed_fin@demo.gr");
@@ -864,7 +864,7 @@ const audit = async () => (await readJson(await call("admin@demo.gr", "GET", "/t
   check("ο editor CC βλέπει ότι υπάρχει αντίφαση με κρυφό έγγραφο", !!hrC && hrC.sides.some((s) => s.hidden === true));
   const hiddenSide = hrC.sides.find((s) => s.hidden);
   check("... η κρυφή πλευρά δεν έχει ΚΑΝΕΝΑ πεδίο εκτός από hidden/editable", JSON.stringify(Object.keys(hiddenSide).sort()) === JSON.stringify(["editable", "hidden"]));
-  check("... ο τίτλος της αντίφασης είναι ΓΕΝΙΚΟΣ (ο τίτλος του LLM θα μπορούσε να αποκαλύψει το θέμα του κρυφού εγγράφου)", hrC.topic === "Πιθανή αντίφαση με έγγραφο κρυφού τμήματος" && !rawText.includes("Ημέρες άδειας"));
+  check("... ο τίτλος της αντίφασης είναι ΓΕΝΙΚΟΣ (ο τίτλος του LLM θα μπορούσε να αποκαλύψει το θέμα του κρυφού εγγράφου)", hrC.topic === "Πιθανή αντίφαση με έγγραφο που δεν έχεις πρόσβαση" && !rawText.includes("Ημέρες άδειας"));
   check("... και η απάντηση δεν περιέχει τίτλο, κείμενο ή id του κρυφού εγγράφου", !/Πειθαρχικά|HR-MARK|είκοσι ημέρες|"doc-[a-f0-9]{16}"[^}]*Πειθαρχικά/.test(rawText) && !rawText.includes(DOC.hr));
   const adminHr = (await cList("admin@demo.gr")).find((c) => c.topic === "Ημέρες άδειας");
   check("ο admin βλέπει και τις δύο πλευρές (και την κρυφή) με πλήρες περιεχόμενο", adminHr && adminHr.sides.every((s) => !s.hidden) && adminHr.sides.some((s) => s.title === "Πειθαρχικά"));
@@ -1217,7 +1217,7 @@ section("16. team-editor (εισερχόμενα), team-admin και portal: π�
   const c0 = num(ed, ".count.danger .n");
   check("εισερχόμενα: εμφανίζονται κάρτες αντιφάσεων με επισημασμένη πρόταση", c0 > 0 && $$(ed, ".card.contradiction mark").length >= 1);
   const hiddenCard = $$(ed, ".hidden-side")[0];
-  check("κρυφό τμήμα: η κάρτα λέει μόνο ότι υπάρχει αντίφαση και ότι ειδοποιήθηκε ο admin", !!hiddenCard && /κρυφού τμήματος/.test(hiddenCard.textContent) && /admin ειδοποιήθηκε/.test(hiddenCard.textContent));
+  check("πλευρά χωρίς πρόσβαση: η κάρτα λέει μόνο ότι υπάρχει αντίφαση με έγγραφο που δεν έχεις πρόσβαση και ότι ειδοποιήθηκαν οι υπεύθυνοι", !!hiddenCard && /δεν έχεις πρόσβαση/.test(hiddenCard.textContent) && /Ειδοποιήθηκαν οι υπεύθυνοι/.test(hiddenCard.textContent) && !/κρυφού τμήματος/.test(hiddenCard.textContent));
   check("... και ΚΑΝΕΝΑ στοιχείο της σελίδας δεν περιέχει το κείμενο του κρυφού εγγράφου", !/Πειθαρχικά|HR-MARK|είκοσι ημέρες\./.test(ed.window.document.body.textContent));
   check("κάρτα με κρυφή πλευρά: έχει κουμπί υπενθύμισης και «Δεν είναι αντίφαση»", !!byText(ed, ".card.contradiction button", /Υπενθύμιση/) && !!byText(ed, ".card.contradiction button", /Δεν είναι αντίφαση/));
   click(ed, byText(ed, ".card.contradiction button", /Δεν είναι αντίφαση/));
@@ -1412,8 +1412,8 @@ section("18. Βελτιώσεις: τίτλος πρότασης, μήνυμα �
   // (3) ετικέτα στήλης εγγράφων ανά ρόλο
   const pEmp = browserFor("emp_cc@demo.gr")("portal.html");
   const pStaff = browserFor("ed_cc@demo.gr")("portal.html");
-  check("υπάλληλος: «Έγγραφα του τμήματός σου»", !!(await waitFor(() => $$(pEmp, "h2").some((h) => h.textContent === "Έγγραφα του τμήματός σου"))));
-  check("editor (βλέπει και άλλα τμήματα): «Όλα τα έγγραφα που βλέπεις»", !!(await waitFor(() => $$(pStaff, "h2").some((h) => h.textContent === "Όλα τα έγγραφα που βλέπεις"))) && !$$(pStaff, "h2").some((h) => h.textContent === "Έγγραφα του τμήματός σου"));
+  check("υπάλληλος: «Έγγραφα που βλέπεις» (ουδέτερος τίτλος, αφού φαίνονται και έγγραφα που μοιράζονται από άλλα projects)", !!(await waitFor(() => $$(pEmp, "h2").some((h) => h.textContent === "Έγγραφα που βλέπεις"))));
+  check("editor: ο ίδιος τίτλος «Έγγραφα που βλέπεις»", !!(await waitFor(() => $$(pStaff, "h2").some((h) => h.textContent === "Έγγραφα που βλέπεις"))) && !$$(pStaff, "h2").some((h) => h.textContent === "Έγγραφα του τμήματός σου" || h.textContent === "Όλα τα έγγραφα που βλέπεις"));
 
   // (4) markdown στις απαντήσεις: έντονα και κουκκίδες, χωρίς αστερίσκους και χωρίς HTML από το LLM
   state.md = true;
@@ -1606,12 +1606,12 @@ section("21. Εμπιστευτικά έγγραφα (σήμανση από το
   await newDocU("ed_fin@demo.gr", "Μισθοδοσία Finance", "fin", "Οι μισθοί πληρώνονται στις 30 του μήνα. MF-X");
   const rawFin = await (await call("ed_fin@demo.gr", "GET", "/team/contradictions?status=open")).text();
   const finView = JSON.parse(rawFin).contradictions.find((c) => c.sides.some((s) => s.hidden));
-  check("αντίφαση με εμπιστευτικό έγγραφο: ο editor Finance βλέπει «κρυφή» πλευρά και γενικό τίτλο", !!finView && finView.topic === "Πιθανή αντίφαση με έγγραφο κρυφού τμήματος");
+  check("αντίφαση με εμπιστευτικό έγγραφο: ο editor Finance βλέπει «κρυφή» πλευρά και γενικό τίτλο", !!finView && finView.topic === "Πιθανή αντίφαση με έγγραφο που δεν έχεις πρόσβαση");
   check("... και δεν διαρρέει τίτλος, κείμενο, id ή θέμα του εγγράφου", !/Μισθοδοσία ομάδας|στις 25|MS-X|Ημέρα πληρωμής/.test(rawFin) && !rawFin.includes(hid));
   const adminView = (await cList("admin@demo.gr")).find((c) => c.topic === "Ημέρα πληρωμής");
   check("ο admin βλέπει και τις δύο πλευρές με το πραγματικό θέμα", adminView && adminView.sides.every((s) => !s.hidden));
   const ccView = (await cList("ed_cc@demo.gr")).find((c) => c.sides.some((x) => x.hidden === true) && c.sides.some((x) => x.editable && x.title === "Μισθοδοσία ομάδας"));
-  check("κανόνας Β: ο editor του CC βλέπει την πλευρά του Finance ΚΡΥΜΜΕΝΗ (δεν διαβάζει το έγγραφο του Finance) και γενικό τίτλο", !!ccView && ccView.topic === "Πιθανή αντίφαση με έγγραφο κρυφού τμήματος" && ccView.sides.find((x) => !x.editable).hidden === true);
+  check("κανόνας Β: ο editor του CC βλέπει την πλευρά του Finance ΚΡΥΜΜΕΝΗ (δεν διαβάζει το έγγραφο του Finance) και γενικό τίτλο", !!ccView && ccView.topic === "Πιθανή αντίφαση με έγγραφο που δεν έχεις πρόσβαση" && ccView.sides.find((x) => !x.editable).hidden === true);
   state.judge = null;
 
   // επεξεργασία και μεταφορά
@@ -2398,8 +2398,8 @@ section("27b. Οθόνη διαχείρισης: λίστα ανθρώπων, μ
   const finRow = await uiWait(() => $$u(dom, ".dept-row").find((r) => r.querySelector("input[type=text]").value === finName));
   clickU(dom, finRow.querySelector(".open-project"));
   await uiWait(() => $u(dom, "#project-page"));
-  const finMembers = db.prepare("select count(*) c from member_departments md join team_members m on m.id = md.member_id where md.department_id = 'fin' and m.workspace_id = 'team-demo'").get().c;
-  const finEditors = db.prepare("select count(*) c from team_project_editors e join team_members m on m.id = e.member_id where e.project_id = 'fin' and m.workspace_id = 'team-demo'").get().c;
+  const finMembers = db.prepare("select count(*) c from member_departments md join team_members m on m.id = md.member_id where md.department_id = 'fin' and m.workspace_id = 'team-demo' and m.status = 'active'").get().c;
+  const finEditors = db.prepare("select count(*) c from team_project_editors e join team_members m on m.id = e.member_id where e.project_id = 'fin' and m.workspace_id = 'team-demo' and m.status = 'active'").get().c;
   const finDocs = db.prepare("select count(*) c from team_documents where workspace_id = 'team-demo' and department_id = 'fin'").get().c;
   check("σελίδα project: τίτλος και μετρητές μελών, editors και εγγράφων", new RegExp(finName).test($u(dom, "#project-page h2").textContent) && $u(dom, "#project-meta").textContent === `${pl(finMembers, "μέλος", "μέλη")} · ${pl(finEditors, "editor", "editors")} · ${pl(finDocs, "έγγραφο", "έγγραφα")}`, $u(dom, "#project-meta").textContent);
   check("σελίδα project: το πολύ 25 μέλη ανά σελίδα, με σελιδοποίηση", $$u(dom, ".proj-member-row").length === Math.min(25, finMembers) && new RegExp(`από ${finMembers} `).test($u(dom, "#proj-info").textContent));
@@ -2715,7 +2715,7 @@ const D = {};
   check("αντίφαση ανάμεσα σε έγγραφα δύο projects: βρέθηκε", found === 1);
   const cB = (await J(call("au_ed_b@demo.gr", "GET", "/team/contradictions"))).data.contradictions;
   const viewB = cB.find((c) => c.sides.some((s) => s.editable && /δύο υπογραφές/.test(s.quote)));
-  check("ο editor του tb ΔΕΝ βλέπει το κείμενο του εγγράφου του ta (Β): η πλευρά είναι κρυμμένη, γενικός τίτλος", !!viewB && viewB.sides.some((s) => s.hidden === true) && !JSON.stringify(viewB).includes("τρεις υπογραφές") && /κρυφού τμήματος/.test(viewB.topic));
+  check("ο editor του tb ΔΕΝ βλέπει το κείμενο του εγγράφου του ta (Β): η πλευρά είναι κρυμμένη, γενικός τίτλος", !!viewB && viewB.sides.some((s) => s.hidden === true) && !JSON.stringify(viewB).includes("τρεις υπογραφές") && /που δεν έχεις πρόσβαση/.test(viewB.topic));
   const sent = state.emails.slice(emailsBefore).map((e) => e.to).sort();
   check("ειδοποίηση: μόνο στους ΡΗΤΟΥΣ editors των projects (ο editor του tc που είναι απλό μέλος στο ta ΔΕΝ ειδοποιείται)", sent.includes("au_ed_a@demo.gr") && !sent.includes("au_mixed@demo.gr") && !sent.includes("au_a@demo.gr"));
   await putDoc(A, ra.data.id, { title: "Άδειες Α", departmentId: "ta", text: "Η έγκριση ειδικής άδειας τηλεπικοινωνιών απαιτεί τρεις υπογραφές. ΑΔΕΙΑ-ΑΑ", audienceProjectIds: ["tb"] });
@@ -2796,6 +2796,185 @@ const D = {};
   const x2 = await putDoc(A, saved.doc, { ...body, audienceProjectIds: ["tb"] });
   check("μετά την εφαρμογή του migration 0015 η αλλαγή ακροατηρίου δουλεύει", x2.status === 200 && audRows(saved.doc).length === 1);
 }
+
+// ---- Πακέτο Β (backend): πλήθη στην επισκόπηση, «Τι διαβάζει» ανά άνθρωπο
+{
+  mkProject("rp", "Reading P"); mkProject("rq", "Reading Q"); mkProject("rr", "Reading R");
+  const r1 = await mkMember("rd_1@demo.gr", ["rp"]);
+  const r2 = await mkMember("rd_2@demo.gr", ["rp"]);
+  const r3 = await mkMember("rd_3@demo.gr", ["rq"], ["rq"]);
+  db.prepare("update team_members set status = 'disabled' where id = ?").run(r2);
+  const mkDoc = async (title, dept, extra = {}) => (await J(call(A, "POST", "/team/documents", { title, departmentId: dept, text: `Κείμενο του ${title}. ${title}-X`, ...extra }))).data.id;
+  const dA = await mkDoc("RD-A", "rp", { audienceProjectIds: ["rq"] });
+  const dB = await mkDoc("RD-B", "rr");
+  const dC = await mkDoc("RD-C", "rp");
+  const dAll = await mkDoc("RD-ALL", "_all");
+  await J(call(A, "PATCH", `/team/admin/documents/${dC}`, { hidden: true }));
+  const reading = async (id, who = A) => J(call(who, "GET", `/team/admin/members/${id}/reading`));
+  const mine = (r) => (r.data.documents || []).filter((d) => /^RD-/.test(d.title));
+
+  const ov = (await J(call(A, "GET", "/team/admin/overview"))).data;
+  const rp = ov.departments.find((d) => d.id === "rp");
+  check("επισκόπηση: το πλήθος μελών μετράει ΜΟΝΟ τους ενεργούς, οι απενεργοποιημένοι φαίνονται χωριστά", rp.memberCount === 1 && rp.disabledCount === 1, rp);
+  check("επισκόπηση: πόσα έγγραφα του project μοιράζονται με άλλα projects (sharedDocumentCount)", rp.sharedDocumentCount === 1 && ov.departments.find((d) => d.id === "rr").sharedDocumentCount === 0, rp);
+  check("«Τι διαβάζει»: μόνο admin (editor 403)", (await reading(r1, "au_ed_a@demo.gr")).status === 403 && (await reading(r1, "rd_3@demo.gr")).status === 403);
+
+  const x1 = await reading(r1);
+  check("μέλος του rp: διαβάζει RD-A και το εμπιστευτικό RD-C του δικού του project (own), το εταιρικό RD-ALL (company), ΟΧΙ το RD-B", x1.status === 200 && mine(x1).map((d) => d.title + ":" + d.via).sort().join() === "RD-A:own,RD-ALL:company,RD-C:own" && mine(x1).find((d) => d.title === "RD-C").confidential === true, mine(x1));
+  const x3 = await reading(r3);
+  check("μέλος του rq: διαβάζει το RD-A ως «κοινό» (shared) και το εταιρικό RD-ALL, ΟΧΙ το RD-B, ΟΧΙ το εμπιστευτικό RD-C", mine(x3).map((d) => d.title + ":" + d.via).sort().join() === "RD-A:shared,RD-ALL:company" && !JSON.stringify(x3.data).includes("RD-C"), mine(x3));
+  check("«Τι διαβάζει»: τα projects του με ρόλο, και το όνομα του project-ιδιοκτήτη στα έγγραφα", JSON.stringify(x3.data.projects) === JSON.stringify([{ id: "rq", name: "Reading Q", role: "editor" }]) && mine(x3).find((d) => d.title === "RD-A").projectName === "Reading P");
+  check("«Τι διαβάζει»: ανενεργό μέλος: δείχνει κανονικά τι θα διάβαζε (ο admin ετοιμάζει πρόσβαση)", mine(await reading(r2)).length === 3);
+  check("«Τι διαβάζει»: τα εταιρικά έγγραφα μετράνε ως «company» και ΔΕΝ εμφανίζονται ως κοινά", (x3.data.documents || []).filter((d) => d.via === "company").length >= 1 && (x3.data.documents || []).filter((d) => d.via === "company").every((d) => d.title !== "RD-A"));
+  const adminId = memberId("admin@demo.gr");
+  check("«Τι διαβάζει»: για admin = πρόσβαση παντού, καμία λίστα", JSON.stringify((await reading(adminId)).data) === JSON.stringify({ admin: true, projects: [], documents: [] }));
+  check("«Τι διαβάζει»: άγνωστο ή άκυρο id: 404", (await reading(999999)).status === 404 && (await reading("abc")).status === 404);
+  const otherId = memberId("other@other.gr");
+  check("«Τι διαβάζει»: μέλος ΑΛΛΟΥ οργανισμού: 404 (δεν διαρρέει)", (await reading(otherId)).status === 404);
+  check("«Τι διαβάζει»: η λίστα είναι ΑΚΡΙΒΩΣ ό,τι επιστρέφει η πραγματική ανάγνωση (μέλος rq: GET /team/documents)", JSON.stringify(mine(x3).map((d) => d.id)) === JSON.stringify(((await J(call("rd_3@demo.gr", "GET", "/team/documents"))).data.documents || []).filter((d) => /^RD-/.test(d.title)).map((d) => d.id)));
+
+  // άμυνα σε βάθος: ακόμα κι αν μείνει (λάθος, π.χ. μισοτελειωμένη ενέργεια) γραμμή ακροατηρίου σε ΕΜΠΙΣΤΕΥΤΙΚΟ έγγραφο, δεν διαρρέει
+  db.prepare("insert into team_audience_groups (id, workspace_id, created_at) values ('ag-00000000000000c1', 'team-demo', ?)").run(nowIso());
+  for (const pid of ["rp", "rq"]) db.prepare("insert into team_audience_group_projects (group_id, project_id) values ('ag-00000000000000c1', ?)").run(pid);
+  db.prepare("insert into team_document_audience (workspace_id, document_id, group_id) values ('team-demo', ?, 'ag-00000000000000c1')").run(dC);
+  check("εμπιστευτικό έγγραφο με «ξεχασμένη» γραμμή ακροατηρίου: δεν διαρρέει ούτε στο «Τι διαβάζει» ούτε στην ανάγνωση", !JSON.stringify((await reading(r3)).data).includes("RD-C") && (await J(call("rd_3@demo.gr", "GET", `/team/documents/${dC}`))).status === 404);
+  db.prepare("delete from team_document_audience where document_id = ?").run(dC);
+  await putDoc(A, dA, { title: "RD-A", departmentId: "rp", text: "Κείμενο του RD-A. RD-A-X", audienceProjectIds: [] });
+  check("αφαίρεση ακροατηρίου: το RD-A φεύγει από το «Τι διαβάζει» του rq (μένει μόνο το εταιρικό) και το sharedDocumentCount μηδενίζεται", mine(await reading(r3)).map((d) => d.title).join() === "RD-ALL" && (await J(call(A, "GET", "/team/admin/overview"))).data.departments.find((d) => d.id === "rp").sharedDocumentCount === 0);
+}
+}
+
+// ============================================================================ 29. Οθόνες ακροατηρίου και διαχείρισης (jsdom)
+section("29. Οθόνες: επιλογή ακροατηρίου, ετικέτες «κοινό», «Τι διαβάζει», επιβεβαιώσεις, μετρητές χωρίς ανενεργούς, ετικέτα AI");
+{ // ένα μπλοκ: δικά του δεδομένα (νέα projects και μέλη), ανεξάρτητα από τις προηγούμενες ενότητες
+  const setU = (dom, el, v) => { el.value = v; el.dispatchEvent(new dom.window.Event("input", { bubbles: true })); el.dispatchEvent(new dom.window.Event("change", { bubbles: true })); };
+  const tickU = (dom, el, on) => { el.checked = on; el.dispatchEvent(new dom.window.Event("change", { bubbles: true })); };
+  const submitU = (dom, sel) => $u(dom, sel).dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  const adm = async (method, path, body) => { const res = await call("admin@demo.gr", method, path, body); return { status: res.status, data: await readJson(res) }; };
+  const proj = async (name) => (await adm("POST", "/team/admin/departments", { name })).data;
+  const person = async (email, projectRoles) => { const r = await adm("POST", "/team/admin/members", { email, role: "member", projectRoles, sendInvite: false }); S[email] = (await login(email)).cookie; return r.data.id; };
+  const pA = await proj("UI Άλφα"), pB = await proj("UI Βήτα"), pG = await proj("UI Γάμμα");
+  const idEd = await person("ui_ed@demo.gr", { [pA.id]: "editor", [pB.id]: "member" });
+  const idAgent = await person("ui_agent@demo.gr", { [pB.id]: "member" });
+  const idOff = await person("ui_off@demo.gr", { [pA.id]: "member" });
+  await adm("PATCH", `/team/admin/members/${idOff}`, { status: "disabled" });
+  const mkd = async (title, dept, extra = {}) => (await adm("POST", "/team/documents", { title, departmentId: dept, text: `Κείμενο: ${title}. ${title.replace(/\s/g, "")}-X`, ...extra })).data.id;
+  const dShared = await mkd("UI κοινό", pA.id, { audienceProjectIds: [pB.id] });
+  await mkd("UI μόνο Άλφα", pA.id);
+  await mkd("UI από Γάμμα", pG.id, { audienceProjectIds: [pA.id] });
+  await mkd("UI Βήτα έγγραφο", pB.id);
+  const audRowsOf = (title) => db.prepare("select gp.project_id p from team_documents d join team_document_audience da on da.document_id = d.id and da.workspace_id = d.workspace_id join team_audience_group_projects gp on gp.group_id = da.group_id where d.title = ? order by gp.project_id").all(title).map((r) => r.p);
+
+  // ------------------------------------------------------------ editor: λίστα, ετικέτες, φόρμα ακροατηρίου
+  const ed = uiFor("ui_ed@demo.gr")("team-editor.html");
+  clickU(ed, await uiWait(() => $u(ed, "#tab-docs")));
+  await uiWait(() => $$u(ed, ".item").length > 3);
+  const itemOf = (re) => $$u(ed, ".item").find((i) => re.test(i.textContent));
+  check("editor: ο ιδιοκτήτης βλέπει στη λίστα «κοινό με 1 project»", /UI κοινό.*κοινό με 1 project/.test((itemOf(/UI κοινό/) || {}).textContent || ""), (itemOf(/UI κοινό/) || {}).textContent);
+  check("editor: έγγραφο ΑΛΛΟΥ project που μοιράζεται με το δικό του: «μόνο ανάγνωση · κοινό με το project σου»", /μόνο ανάγνωση · κοινό με το project σου/.test((itemOf(/UI από Γάμμα/) || {}).textContent || ""), (itemOf(/UI από Γάμμα/) || {}).textContent);
+  check("editor: έγγραφο του δικού του project όπου είναι απλό μέλος: μόνο «μόνο ανάγνωση» (ΟΧΙ «κοινό με το project σου»)", /UI Βήτα έγγραφο.*μόνο ανάγνωση/.test((itemOf(/UI Βήτα έγγραφο/) || {}).textContent || "") && !/κοινό με το project σου/.test((itemOf(/UI Βήτα έγγραφο/) || {}).textContent || ""));
+  clickU(ed, itemOf(/UI από Γάμμα/));
+  await uiWait(() => $u(ed, ".readonly-text"));
+  check("editor: το πάνελ μόνο ανάγνωσης λέει ότι είναι έγγραφο άλλου project, κοινό με το δικό του, και ΔΕΝ έχει φόρμα", /Έγγραφο άλλου project, κοινό με το δικό σου/.test($u(ed, "#panel").textContent) && !$u(ed, "#panel form"));
+  clickU(ed, itemOf(/UI κοινό/));
+  await uiWait(() => $u(ed, "#audience"));
+  check("editor: η ενότητα «Ποιος άλλος το διαβάζει;» είναι ανοιχτή όταν το έγγραφο μοιράζεται, με το project επιλεγμένο", $u(ed, "#audience").hasAttribute("open") && $u(ed, `#audience input[data-project="${pB.id}"]`).checked === true, $u(ed, "#audience-state").textContent);
+  check("editor: η περίληψη λέει «<project> + 1 project»", new RegExp("UI Άλφα \\+ 1 project").test($u(ed, "#audience-state").textContent), $u(ed, "#audience-state").textContent);
+  check("editor: ΜΟΝΟ τα projects όπου είναι ο ίδιος μέλος προσφέρονται (όχι το «UI Γάμμα» ούτε άλλα)", $$u(ed, "#audience input[type=checkbox]").map((c) => c.getAttribute("data-project")).join() === pB.id);
+
+  // νέο έγγραφο με ακροατήριο από τη φόρμα
+  clickU(ed, itemOf(/Νέο έγγραφο/));
+  await uiWait(() => $u(ed, "#panel form"));
+  check("editor (νέο έγγραφο): η ενότητα είναι κλειστή όταν δεν υπάρχει ακροατήριο", !$u(ed, "#audience").hasAttribute("open"));
+  setU(ed, $u(ed, "#title"), "UI νέο κοινό"); setU(ed, $u(ed, "#text"), "Κείμενο νέου κοινού εγγράφου. UINEO-X");
+  tickU(ed, $u(ed, `#audience input[data-project="${pB.id}"]`), true);
+  check("editor: μετά την επιλογή η περίληψη ενημερώνεται «UI Άλφα + 1 project»", /UI Άλφα \+ 1 project/.test($u(ed, "#audience-state").textContent));
+  submitU(ed, "#panel form");
+  check("editor: η αποθήκευση περνά και η βάση έχει ομάδα ακροατηρίου {Άλφα, Βήτα}", !!(await uiWait(() => audRowsOf("UI νέο κοινό").join() === [pA.id, pB.id].sort().join())), audRowsOf("UI νέο κοινό"));
+
+  // ------------------------------------------------------------ admin: ετικέτες, μετρητές, «Τι διαβάζει», επιβεβαιώσεις
+  const ad = uiFor("admin@demo.gr")("team-admin.html");
+  await uiWait(() => $$u(ad, ".dept-row").length >= 3);
+  const deptRowOf = (name) => $$u(ad, ".dept-row").find((r) => r.querySelector("input[type=text]").value === name);
+  check("Projects: πληθυντικός και ανενεργοί χωριστά («1 μέλος · … · +1 απενεργοποιημένο»)", /^1 μέλος · \d+ έγγραφ(ο|α) · \+1 απενεργοποιημένο$/.test(deptRowOf("UI Άλφα").querySelector(".meta").textContent), deptRowOf("UI Άλφα").querySelector(".meta").textContent);
+  clickU(ad, deptRowOf("UI Άλφα").querySelector(".open-project"));
+  await uiWait(() => $u(ad, "#project-page"));
+  check("σελίδα project: οι απενεργοποιημένοι δεν μετράνε και κρύβονται από προεπιλογή", /^1 μέλος · 1 editor · /.test($u(ad, "#project-meta").textContent) && $$u(ad, ".proj-member-row").length === 1, $u(ad, "#project-meta").textContent);
+  check("σελίδα project: «Εμφάνιση απενεργοποιημένων (1)»", /Εμφάνιση απενεργοποιημένων \(1\)/.test($u(ad, "#proj-show-disabled").parentNode.textContent));
+  tickU(ad, $u(ad, "#proj-show-disabled"), true);
+  await uiWait(() => $$u(ad, ".proj-member-row").length === 2);
+  check("... και τους δείχνει με ετικέτα «απενεργοποιημένο»", $$u(ad, ".proj-member-row").length === 2 && /απενεργοποιημένο/.test($$u(ad, ".proj-member-row").map((r) => r.textContent).join(" ")));
+  // επικόλληση: κανείς δεν προστέθηκε = σφάλμα (κόκκινο), όχι επιτυχία
+  const pasteBox0 = $u(ad, "#paste-emails");
+  setU(ad, pasteBox0, "ghost@nowhere.gr");
+  clickU(ad, $u(ad, "#paste-add"));
+  const errToast = await uiWait(() => $u(ad, ".toast.err"));
+  await uiWait(() => $u(ad, "#paste-emails") && $u(ad, "#paste-emails") !== pasteBox0 && !$u(ad, ".busy")); // η σελίδα ξαναχτίστηκε
+  check("επικόλληση που δεν προσθέτει κανέναν: κόκκινο μήνυμα «Δεν προστέθηκε κανείς»", !!errToast && /Δεν προστέθηκε κανείς/.test(errToast.textContent) && !$u(ad, ".toast.ok"), errToast && errToast.textContent);
+  // οι επιλογές μένουν μετά από προσθήκη
+  tickU(ad, $u(ad, "#paste-create"), true);
+  const pasteBox1 = $u(ad, "#paste-emails");
+  setU(ad, pasteBox1, "ui_agent@demo.gr");
+  clickU(ad, $u(ad, "#paste-add"));
+  await uiWait(() => db.prepare("select 1 from member_departments md join team_members m on m.id = md.member_id where m.email = 'ui_agent@demo.gr' and md.department_id = ?").get(pA.id));
+  await uiWait(() => $u(ad, "#paste-emails") && $u(ad, "#paste-emails") !== pasteBox1 && !$u(ad, ".busy")); // η σελίδα ξαναχτίστηκε
+  check("η επιλογή «Δημιουργία νέων μελών» ΜΕΝΕΙ μετά την προσθήκη", $u(ad, "#paste-create").checked === true);
+  clickU(ad, $u(ad, "#project-back"));
+
+  // «Τι διαβάζει»
+  clickU(ad, await uiWait(() => $u(ad, "#tab-members")));
+  await uiWait(() => $u(ad, "#people-q"));
+  setU(ad, $u(ad, "#people-q"), "ui_agent@demo.gr");
+  const arow = await uiWait(() => { const rs = $$u(ad, ".member-row"); return rs.length === 1 ? rs[0] : null; });
+  clickU(ad, arow.querySelector(".open-member"));
+  const rd = await uiWait(() => $u(ad, "#member-reading details"));
+  check("καρτέλα ατόμου: «Τι διαβάζει» με περίληψη εγγράφων", !!rd && /Τι διαβάζει/.test(rd.textContent) && /έγγραφ/.test($u(ad, "#member-reading .s-state").textContent), rd && rd.textContent);
+  check("«Τι διαβάζει»: έγγραφο άλλου project που μοιράζεται με το project του εμφανίζεται με ετικέτα «κοινό»", $$u(ad, "#member-reading .reading-row").some((r) => /UI από Γάμμα/.test(r.textContent) && !!r.querySelector(".pill.shared")), $$u(ad, "#member-reading .reading-row").map((r) => r.textContent));
+  check("καρτέλα ατόμου μετά το κλικ: παίρνει focus και tabindex (ώστε να φέρνεται στο οπτικό πεδίο)", $u(ad, "#member-detail").getAttribute("tabindex") === "-1");
+
+  // έγγραφα: φαίνεται με ποιον μοιράζεται, και επιβεβαίωση πριν γίνει εμπιστευτικό
+  clickU(ad, $u(ad, "#tab-documents"));
+  const docRow = await uiWait(() => $$u(ad, ".doc-row").find((r) => /UI κοινό/.test(r.textContent)));
+  check("Έγγραφα: φαίνεται «κοινό με UI Βήτα»", /κοινό με UI Βήτα/.test(docRow.querySelector(".meta").textContent), docRow.querySelector(".meta").textContent);
+  clickU(ad, docRow.querySelector(".doc-hide-toggle"));
+  check("σήμανση εμπιστευτικού σε έγγραφο που μοιράζεται: ζητά επιβεβαίωση και δεν αλλάζει τίποτα ακόμα", !!(await uiWait(() => $u(ad, ".confirm"))) && /μοιράζεται με 1 project/.test($u(ad, ".confirm").textContent) && db.prepare("select hidden from team_documents where id = ?").get(dShared).hidden === 0);
+  clickU(ad, $u(ad, ".confirm-no"));
+  check("«Όχι»: το έγγραφο μένει όπως ήταν, με το ακροατήριό του", !$u(ad, ".confirm") && db.prepare("select hidden from team_documents where id = ?").get(dShared).hidden === 0 && audRowsOf("UI κοινό").length === 2);
+  clickU(ad, $$u(ad, ".doc-row").find((r) => /UI κοινό/.test(r.textContent)).querySelector(".doc-hide-toggle"));
+  await uiWait(() => $u(ad, ".confirm-yes"));
+  clickU(ad, $u(ad, ".confirm-yes"));
+  check("«Ναι»: γίνεται εμπιστευτικό και το ακροατήριο σβήνει", !!(await uiWait(() => db.prepare("select hidden from team_documents where id = ?").get(dShared).hidden === 1)) && audRowsOf("UI κοινό").length === 0);
+  // απόκρυψη project με κοινοποιημένα έγγραφα: επιβεβαίωση
+  clickU(ad, $u(ad, "#tab-departments"));
+  await uiWait(() => $$u(ad, ".dept-row").length >= 3);
+  clickU(ad, deptRowOf("UI Γάμμα").querySelector(".hide-toggle"));
+  check("απόκρυψη project με κοινοποιημένο έγγραφο: ζητά επιβεβαίωση, δεν κρύβεται ακόμα", !!(await uiWait(() => $u(ad, ".confirm"))) && /μοιράζεται με άλλα projects/.test($u(ad, ".confirm").textContent) && db.prepare("select hidden from departments where id = ?").get(pG.id).hidden === 0);
+  clickU(ad, $u(ad, ".confirm-no"));
+  clickU(ad, deptRowOf("UI Βήτα").querySelector(".hide-toggle"));
+  check("απόκρυψη project ΧΩΡΙΣ κοινοποιημένα έγγραφα: εφαρμόζεται αμέσως, χωρίς επιβεβαίωση", !!(await uiWait(() => db.prepare("select hidden from departments where id = ?").get(pB.id).hidden === 1)));
+  await uiWait(() => deptRowOf("UI Βήτα") && /κρυφό/.test(deptRowOf("UI Βήτα").textContent) && !$u(ad, ".busy")); // ξαναχτίστηκε η γραμμή
+  clickU(ad, deptRowOf("UI Βήτα").querySelector(".hide-toggle"));
+  await uiWait(() => db.prepare("select hidden from departments where id = ?").get(pB.id).hidden === 0);
+
+  // ------------------------------------------------------------ portal: τίτλος, ετικέτα AI, «κοινό»
+  const pt = uiFor("ui_ed@demo.gr")("portal.html");
+  await uiWait(() => $u(pt, "#q"));
+  check("portal: μόνιμη σημείωση ότι ο βοηθός είναι AI (άρθρο 50 του AI Act)", !!$u(pt, "#ai-note") && /AI/.test($u(pt, "#ai-note").textContent));
+  await uiWait(() => $$u(pt, ".row").length > 0);
+  check("portal: τίτλος στήλης «Έγγραφα που βλέπεις»", $$u(pt, "h2").some((h) => h.textContent === "Έγγραφα που βλέπεις"));
+  // Τα έγγραφα του τεστ είναι φρέσκα, άρα εμφανίζονται ΚΑΙ στη στήλη «Τι άλλαξε πρόσφατα» (χωρίς ετικέτα «κοινό»). Ψάχνουμε μόνο στη στήλη εγγράφων.
+  const docsColumn = $$u(pt, "h2").find((h) => h.textContent === "Έγγραφα που βλέπεις").parentNode;
+  const docRowsP = Array.from(docsColumn.querySelectorAll(".row"));
+  const sharedRow = docRowsP.find((r) => /UI από Γάμμα/.test(r.textContent));
+  const ownRowP = docRowsP.find((r) => /UI μόνο Άλφα/.test(r.textContent));
+  check("portal: έγγραφο άλλου project που μοιράζεται δείχνει «κοινό», τα δικά του όχι", !!sharedRow && !!ownRowP && !!sharedRow.querySelector(".pill.shared") && !ownRowP.querySelector(".pill.shared"), docRowsP.map((r) => r.textContent));
+  setU(pt, $u(pt, "#q"), "Ποιο είναι το κείμενο του εγγράφου UI μόνο Άλφα;");
+  submitU(pt, ".searchrow");
+  await uiWait(() => $u(pt, ".answer .source"));
+  check("portal: η απάντηση φέρει ετικέτα «Απάντηση από AI»", /Απάντηση από AI/.test($u(pt, ".answer .label").textContent) && !!$u(pt, ".answer .label .pill"), $u(pt, ".answer .label").textContent);
+  clickU(pt, sharedRow);
+  const rdr = await uiWait(() => $u(pt, ".overlay .reader"));
+  check("portal: ο αναγνώστης δείχνει project, «κοινό με …» και ημερομηνία ενημέρωσης", !!rdr && /UI Γάμμα/.test(rdr.querySelector(".facts").textContent) && /κοινό με: UI Άλφα/.test(rdr.querySelector(".facts").textContent) && /ενημερώθηκε/.test(rdr.querySelector(".facts").textContent), rdr && rdr.querySelector(".facts").textContent);
 }
 
 // ============================================================================ Σύνοψη
