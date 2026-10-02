@@ -7,7 +7,7 @@
 // Το Vectorize επιτρέπει μία τιμή string ανά metadata πεδίο (βλ. store.js: ομάδα ακροατηρίου).
 
 import { json, loadWorkspaceDepartments } from "./auth.js";
-import { COMPANY_WIDE, MAX_AUDIENCE_PROJECTS, canReadDocument, canWriteDepartment } from "./access.js";
+import { COMPANY_WIDE, INTERNAL_WALL, MAX_AUDIENCE_PROJECTS, canReadDocument, canWriteDepartment, scopeMemberToWall, wallOf } from "./access.js";
 import {
   DOC_ID_RE, audienceAvailable, deleteDocRecord, departmentName, listDocIndex, pendingUpdateSummary, persistDocument, readDoc,
 } from "./store.js";
@@ -19,18 +19,26 @@ import { closeFeedbackForDeletedDoc } from "./feedback.js";
 const MAX_TITLE_CHARS = 200;
 
 // ------------------------------------------------------------------ GET /team/documents
-export async function handleListDocuments(env, member) {
+export async function handleListDocuments(env, member, wallId) {
   const departments = await loadWorkspaceDepartments(env, member.workspaceId);
   const index = await listDocIndex(env, member.workspaceId);
   const pending = await pendingUpdateSummary(env, member.workspaceId);
+  // Προαιρετικά: λίστα για έναν μόνο πελάτη (τοίχο), όπως ψάχνει και ο βοηθός. Μόνο στο call center· άγνωστος ή ξένος τοίχος = 403.
+  let reader = member;
+  if (wallId && member.profile === "multi_client") {
+    reader = scopeMemberToWall(member, departments, wallId);
+    if (!reader) return json(403, { error: "client_forbidden" });
+  }
   const docs = [];
   for (const d of index) {
-    if (!canReadDocument(member, departments, d.departmentId, d.hidden, d.audienceProjectIds)) continue;
+    if (!canReadDocument(reader, departments, d.departmentId, d.hidden, d.audienceProjectIds)) continue;
     const p = pending.get(d.id);
+    const dept = departments.find((x) => x.id === d.departmentId);
     docs.push({
       id: d.id,
       title: d.title,
       departmentId: d.departmentId,
+      clientId: dept ? dept.clientId : null,
       departmentName: departmentName(departments, d.departmentId),
       updatedAt: d.updatedAt,
       editable: canWriteDepartment(member, departments, d.departmentId),
@@ -112,6 +120,12 @@ export async function handleSaveDocument(request, rc, existingId) {
     if (!canWriteDepartment(member, departments, existing.departmentId)) return json(403, { error: "forbidden" });
     // Ένα εμπιστευτικό έγγραφο δεν μεταφέρεται σε "όλη την εταιρεία" (θα γινόταν ορατό σε όλους μέσω αναζήτησης).
     if (existing.hidden && departmentId === COMPANY_WIDE) return json(409, { error: "hidden_cannot_be_company_wide" });
+    // ΤΟΙΧΟΣ (call center): ένα έγγραφο δεν μετακινείται σε project άλλου πελάτη ούτε στα εσωτερικά ή στο "όλη η εταιρεία" (θα περνούσε από τον
+    // τοίχο). Αντιγράφεται ως νέο έγγραφο στον προορισμό. Μόνο από "όλη η εταιρεία" προς ένα project (στένεμα) επιτρέπεται.
+    if (member.profile === "multi_client" && existing.departmentId !== departmentId && existing.departmentId !== COMPANY_WIDE) {
+      const wallOfDep = (id) => (id === COMPANY_WIDE ? "_all" : wallOf(departments, id));
+      if (wallOfDep(existing.departmentId) !== wallOfDep(departmentId)) return json(409, { error: "cross_client_move" });
+    }
   }
 
   // ---- ακροατήριο
@@ -131,6 +145,11 @@ export async function handleSaveDocument(request, rc, existingId) {
       finalExtras = [...new Set([...audienceRequest.filter((p) => p !== departmentId), ...preserved])].sort();
       if (finalExtras.length + 1 > MAX_AUDIENCE_PROJECTS) return json(400, { error: "audience_too_large" });
       const owner = known.get(departmentId);
+      // ΤΟΙΧΟΣ: το ακροατήριο μένει μέσα στον ίδιο πελάτη. Ό,τι ζητήθηκε από άλλον τοίχο απορρίπτεται, ρητά (όχι σιωπηλά). Παλιές εγγραφές
+      // άλλου τοίχου που μένουν από πριν αφαιρούνται (δεν ίσχυαν ήδη στην ανάγνωση).
+      const ownerWall = owner ? owner.clientId || INTERNAL_WALL : undefined;
+      if (audienceRequest.some((p) => (known.get(p).clientId || INTERNAL_WALL) !== ownerWall)) return json(400, { error: "audience_cross_client" });
+      finalExtras = finalExtras.filter((p) => (known.get(p).clientId || INTERNAL_WALL) === ownerWall);
       // Εμπιστευτικό έγγραφο και έγγραφο κρυφού project δεν έχουν ακροατήριο (θα διέρρεαν σε άλλα projects).
       if (finalExtras.length && ((existing && existing.hidden) || (owner && owner.hidden))) return json(409, { error: "hidden_cannot_have_audience" });
     }

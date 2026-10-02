@@ -208,13 +208,30 @@ export async function getSession(request, env) {
   if (row.member_workspace_id !== row.workspace_id) return null;
   if (!isTeamWorkspaceId(row.workspace_id)) return null;
 
-  const deptRows = await env.DB.prepare(
-    `SELECT d.id, d.name, d.hidden
-       FROM member_departments md JOIN departments d ON d.id = md.department_id
-      WHERE md.member_id = ? AND d.workspace_id = ?`
-  ).bind(row.member_id, row.workspace_id).all();
-  const departments = (deptRows && deptRows.results) || [];
+  // Τα projects του μέλους, με τον πελάτη (τοίχο) στον οποίο ανήκει το καθένα. Αν το migration 0016 δεν έχει εφαρμοστεί, χωρίς πελάτες.
+  let deptRows;
+  try {
+    deptRows = await env.DB.prepare(
+      `SELECT d.id, d.name, d.hidden, pc.client_id AS clientId, c.name AS clientName, pc.short_name AS shortName
+         FROM member_departments md JOIN departments d ON d.id = md.department_id
+         LEFT JOIN team_project_clients pc ON pc.project_id = d.id
+         LEFT JOIN team_clients c ON c.id = pc.client_id
+        WHERE md.member_id = ? AND d.workspace_id = ?`
+    ).bind(row.member_id, row.workspace_id).all();
+  } catch (err) {
+    if (!/no such table/i.test(String((err && err.message) || err))) throw err;
+    deptRows = await env.DB.prepare(
+      `SELECT d.id, d.name, d.hidden
+         FROM member_departments md JOIN departments d ON d.id = md.department_id
+        WHERE md.member_id = ? AND d.workspace_id = ?`
+    ).bind(row.member_id, row.workspace_id).all();
+  }
+  const departments = ((deptRows && deptRows.results) || []).map((d) => ({
+    id: d.id, name: d.name, hidden: d.hidden,
+    clientId: d.clientId || null, clientName: d.clientName || null, shortName: d.shortName || null,
+  }));
   const departmentIds = departments.map((d) => d.id);
+  const profile = await loadWorkspaceProfile(env, row.workspace_id);
 
   // Ρόλος ανά project: editor μόνο στα projects που έχει ρητή ανάθεση ΚΑΙ είναι μέλος. Ο ρόλος του μέλους είναι παράγωγος.
   // Αν το migration 0014 δεν έχει εφαρμοστεί ακόμα (λείπει ο πίνακας), ισχύει το παλιό μοντέλο (ένας ρόλος ανά άνθρωπο),
@@ -238,6 +255,7 @@ export async function getSession(request, env) {
     departmentIds,
     editorProjectIds,
     departments,
+    profile,
   };
 }
 
@@ -251,10 +269,36 @@ export async function handleLogout(request, env) {
   return json(200, { ok: true }, { "Set-Cookie": cookie });
 }
 
-// Όλα τα τμήματα του workspace (id, name, hidden), για τους κανόνες πρόσβασης.
+// Όλα τα τμήματα του workspace για τους κανόνες πρόσβασης: id, name (για project πελάτη: "<πελάτης> · <τμήμα>"), hidden και ο πελάτης (τοίχος)
+// του καθενός (clientId null = χωρίς πελάτη). Αν το migration 0016 δεν έχει εφαρμοστεί: κανένα project δεν έχει πελάτη.
 export async function loadWorkspaceDepartments(env, workspaceId) {
-  const res = await env.DB.prepare(
-    "SELECT id, name, hidden FROM departments WHERE workspace_id = ? ORDER BY name"
-  ).bind(workspaceId).all();
-  return (res && res.results) || [];
+  let res;
+  try {
+    res = await env.DB.prepare(
+      `SELECT d.id, d.name, d.hidden, pc.client_id AS clientId, c.name AS clientName, pc.short_name AS shortName
+         FROM departments d
+         LEFT JOIN team_project_clients pc ON pc.project_id = d.id
+         LEFT JOIN team_clients c ON c.id = pc.client_id
+        WHERE d.workspace_id = ? ORDER BY d.name`
+    ).bind(workspaceId).all();
+  } catch (err) {
+    if (!/no such table/i.test(String((err && err.message) || err))) throw err;
+    res = await env.DB.prepare("SELECT id, name, hidden FROM departments WHERE workspace_id = ? ORDER BY name").bind(workspaceId).all();
+  }
+  return ((res && res.results) || []).map((d) => ({
+    id: d.id, name: d.name, hidden: d.hidden,
+    clientId: d.clientId || null, clientName: d.clientName || null, shortName: d.shortName || null,
+  }));
+}
+
+// Προφίλ του χώρου: "company" (μία εταιρεία, χωρίς τοίχους) ή "multi_client" (call center, κάθε πελάτης είναι τοίχος). Χωρίς γραμμή ή χωρίς
+// το migration 0016: "company", όπως δούλευε πάντα.
+export async function loadWorkspaceProfile(env, workspaceId) {
+  try {
+    const r = await env.DB.prepare("SELECT profile FROM team_workspace_settings WHERE workspace_id = ?").bind(workspaceId).first();
+    return r && r.profile === "multi_client" ? "multi_client" : "company";
+  } catch (err) {
+    if (!/no such table/i.test(String((err && err.message) || err))) throw err;
+    return "company";
+  }
 }

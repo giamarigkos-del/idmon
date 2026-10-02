@@ -93,7 +93,9 @@
     audience_forbidden: "Μπορείς να μοιράσεις το έγγραφο μόνο με projects στα οποία ανήκεις και εσύ.",
     audience_not_allowed: "Ένα έγγραφο όλης της εταιρείας το βλέπουν ήδη όλοι: δεν μοιράζεται ξεχωριστά.",
     hidden_cannot_have_audience: "Ένα εμπιστευτικό έγγραφο, ή έγγραφο κρυφού project, δεν μοιράζεται με άλλα projects.",
-    audience_unavailable: "Η κοινή χρήση εγγράφων δεν είναι ακόμα διαθέσιμη σε αυτόν τον χώρο (λείπει μια ενημέρωση βάσης). Ειδοποίησε τον διαχειριστή."
+    audience_unavailable: "Η κοινή χρήση εγγράφων δεν είναι ακόμα διαθέσιμη σε αυτόν τον χώρο (λείπει μια ενημέρωση βάσης). Ειδοποίησε τον διαχειριστή.",
+    audience_cross_client: "Ένα έγγραφο μοιράζεται μόνο με τμήματα του ΙΔΙΟΥ πελάτη, ποτέ με άλλον πελάτη ή με τα εσωτερικά του call center.",
+    cross_client_move: "Ένα έγγραφο δεν μετακινείται σε project άλλου πελάτη ή σε «όλη η εταιρεία». Δημιούργησε νέο έγγραφο εκεί και σβήσε το παλιό αν χρειάζεται."
   };
   function errText(r) { return ERRORS[r.data && r.data.error] || "Κάτι πήγε στραβά."; }
 
@@ -369,9 +371,16 @@
     node.appendChild(summary); node.appendChild(body);
     function ownerId() { return ownerSelect.value; }
     function ownerName() { var o = ownerSelect.options[ownerSelect.selectedIndex]; return o ? o.text : ""; }
+    // Στο call center κάθε πελάτης είναι τοίχος: ένα έγγραφο μοιράζεται ΜΟΝΟ με τμήματα του ίδιου πελάτη (ο server το επιβάλλει επίσης).
+    function ownerClient() {
+      var all = me.role === "admin" ? departments : (me.departments || []);
+      var o = all.filter(function (d) { return d.id === ownerId(); })[0];
+      return o ? (o.clientId || null) : null;
+    }
     function pickable() {
       var source = me.role === "admin" ? departments : (me.departments || []);
-      return source.filter(function (d) { return d.id !== ownerId() && d.id !== "_all"; });
+      var wall = ownerClient();
+      return source.filter(function (d) { return d.id !== ownerId() && d.id !== "_all" && (d.clientId || null) === wall; });
     }
     function applicable() { return ownerId() !== "_all" && !(doc && doc.hidden); }
     function chosen() { return pickable().map(function (d) { return d.id; }).filter(function (id) { return selected[id]; }); }
@@ -396,10 +405,12 @@
       state.textContent = ownerName() + (others ? " + " + others + (others === 1 ? " project" : " projects") : " μόνο");
       title.textContent = "Ποιος άλλος το διαβάζει;";
       if (!options.length && !hiddenCount) {
-        body.appendChild(h("p", { class: "hint", text: "Δεν υπάρχουν άλλα projects για κοινή χρήση. Το έγγραφο το διαβάζουν μόνο τα μέλη του project που το κατέχει." }));
+        body.appendChild(h("p", { class: "hint", text: me.profile === "multi_client"
+          ? "Δεν υπάρχουν άλλα τμήματα του ίδιου πελάτη για κοινή χρήση. Το έγγραφο το διαβάζουν μόνο τα μέλη του τμήματος που το κατέχει. Σε άλλον πελάτη δεν μοιράζεται ποτέ."
+          : "Δεν υπάρχουν άλλα projects για κοινή χρήση. Το έγγραφο το διαβάζουν μόνο τα μέλη του project που το κατέχει." }));
         return;
       }
-      body.appendChild(h("p", { class: "hint", text: "Όσοι ανήκουν σε αυτά τα projects διαβάζουν το έγγραφο (και ο βοηθός το χρησιμοποιεί για αυτούς), αλλά δεν μπορούν να το αλλάξουν." }));
+      body.appendChild(h("p", { class: "hint", text: "Όσοι ανήκουν σε αυτά τα projects διαβάζουν το έγγραφο (και ο βοηθός το χρησιμοποιεί για αυτούς), αλλά δεν μπορούν να το αλλάξουν." + (me.profile === "multi_client" ? " Προσφέρονται μόνο τμήματα του ίδιου πελάτη." : "") }));
       var list = h("div", { class: "pick-list", role: "group", "aria-label": "Projects που διαβάζουν το έγγραφο" });
       options.forEach(function (d) {
         var on = !!selected[d.id];

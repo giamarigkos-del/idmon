@@ -2977,6 +2977,441 @@ section("29. Οθόνες: επιλογή ακροατηρίου, ετικέτε
   check("portal: ο αναγνώστης δείχνει project, «κοινό με …» και ημερομηνία ενημέρωσης", !!rdr && /UI Γάμμα/.test(rdr.querySelector(".facts").textContent) && /κοινό με: UI Άλφα/.test(rdr.querySelector(".facts").textContent) && /ενημερώθηκε/.test(rdr.querySelector(".facts").textContent), rdr && rdr.querySelector(".facts").textContent);
 }
 
+// ============================================================================ 30. Προφίλ χώρου και τοίχοι πελατών (API)
+section("30. Προφίλ χώρου και τοίχοι: call center με πολλούς πελάτες (τίποτα δεν περνά από τον έναν πελάτη στον άλλον)");
+{ // ένα μπλοκ: δικός του οργανισμός (team-bpo), ανεξάρτητος από τους υπόλοιπους
+  const nowIso = () => new Date().toISOString();
+  const J = async (pending) => { const res = await pending; return { status: res.status, data: await readJson(res) }; };
+  const BPO = "bpo_admin@demo.gr";
+  db.prepare("insert into team_workspaces (id,name,status,created_at) values ('team-bpo','BPO Demo','pilot',?)").run(nowIso());
+  db.prepare("insert into team_members (workspace_id,email,role,status,created_at) values ('team-bpo',?,'admin','active',?)").run(BPO, nowIso());
+  S[BPO] = (await login(BPO)).cookie;
+  const adm = (method, path, body) => J(call(BPO, method, path, body));
+  const person = async (email, projectRoles) => {
+    const r = await adm("POST", "/team/admin/members", { email, role: "member", projectRoles, sendInvite: false });
+    S[email] = (await login(email)).cookie;
+    return r.data.id;
+  };
+  const put = (id, body) => adm("PUT", `/team/documents/${id}`, body);
+  const mkdoc = async (title, departmentId, text, extra = {}) => (await adm("POST", "/team/documents", { title, departmentId, text, ...extra })).data.id;
+  const ask = async (email, body) => {
+    state.prompts.length = 0;
+    const res = await call(email, "POST", "/team/query/stream", body);
+    if (res.status !== 200) return { status: res.status, data: await readJson(res), prompt: "" };
+    await readSse(res);
+    return { status: 200, prompt: state.prompts.join("\n") };
+  };
+  const usage = (email) => db.prepare("select coalesce(sum(count), 0) c from team_usage where member_id = ?").get(memberId(email)).c;
+  const overview = async () => (await adm("GET", "/team/admin/overview")).data;
+  const deptName = async (id) => (await overview()).departments.find((d) => d.id === id).name;
+  const wallsOf = (r) => (r.data.walls || []).map((w) => w.name).join();
+
+  // ---------------------------------------------------------------- 30.1 προφίλ χώρου
+  {
+    const o = await overview();
+    check("προφίλ: ένας νέος χώρος είναι «company» και δεν έχει πελάτες", o.profile === "company" && o.clientsAvailable === true && o.clients.length === 0, o);
+    check("company: δημιουργία πελάτη απορρίπτεται (409 profile_company)", (await adm("POST", "/team/admin/clients", { name: "Apple" })).data.error === "profile_company");
+    check("προφίλ: άκυρη τιμή: 400 invalid_profile", (await adm("PATCH", "/team/admin/workspace", { profile: "bogus" })).data.error === "invalid_profile" && (await adm("PATCH", "/team/admin/workspace", {})).status === 400);
+    const probe = await J(call("giamarigkos_nobody@demo.gr", "PATCH", "/team/admin/workspace", { profile: "multi_client" }));
+    check("προφίλ: χωρίς σύνδεση: 401", probe.status === 401);
+    const chg = await adm("PATCH", "/team/admin/workspace", { profile: "multi_client" });
+    check("προφίλ: αλλαγή σε «multi_client»: 200", chg.status === 200 && chg.data.profile === "multi_client");
+    check("προφίλ: ξανά η ίδια τιμή = χωρίς αλλαγή (200)", (await adm("PATCH", "/team/admin/workspace", { profile: "multi_client" })).status === 200);
+    check("προφίλ: καταγράφεται στο ιστορικό ΜΙΑ φορά", db.prepare("select count(*) c from team_audit_log where action = 'workspace_profile_changed' and workspace_id = 'team-bpo'").get().c === 1);
+    check("προφίλ: ο χώρος team-demo ΔΕΝ επηρεάζεται (ακόμα «company»)", (await J(call("admin@demo.gr", "GET", "/team/admin/overview"))).data.profile === "company");
+  }
+
+  // ---------------------------------------------------------------- 30.2 πελάτες και τμήματα
+  const apple = (await adm("POST", "/team/admin/clients", { name: "Apple" })).data;
+  const efood = (await adm("POST", "/team/admin/clients", { name: "eFood" })).data;
+  check("πελάτης: δημιουργία: 201 με id c-… και όνομα", /^c-[0-9a-f]{8}$/.test(apple.id || "") && apple.name === "Apple" && efood.name === "eFood");
+  check("πελάτης: ίδιο όνομα (και με άλλα κεφαλαία): 409 name_taken", (await adm("POST", "/team/admin/clients", { name: "APPLE" })).data.error === "name_taken");
+  check("πελάτης: κενό, πολύ μεγάλο ή με το «·»: 400 invalid_name", (await adm("POST", "/team/admin/clients", { name: "  " })).status === 400 && (await adm("POST", "/team/admin/clients", { name: "x".repeat(61) })).status === 400 && (await adm("POST", "/team/admin/clients", { name: "A · B" })).status === 400);
+  await person("bpo_probe_ed@demo.gr", {});
+  check("πελάτης: ένας μη admin δεν δημιουργεί πελάτη (403)", (await J(call("bpo_probe_ed@demo.gr", "POST", "/team/admin/clients", { name: "Nope" }))).status === 403);
+
+  const appleCC = (await adm("POST", "/team/admin/departments", { name: "Customer Care", clientId: apple.id })).data;
+  const appleTech = (await adm("POST", "/team/admin/departments", { name: "Technical", clientId: apple.id })).data;
+  const efoodCC = (await adm("POST", "/team/admin/departments", { name: "Customer Care", clientId: efood.id })).data;
+  const training = (await adm("POST", "/team/admin/departments", { name: "BPO Training" })).data;
+  check("τμήμα σε πελάτη: το όνομα γράφεται «πελάτης · τμήμα»", appleCC.name === "Apple · Customer Care" && efoodCC.name === "eFood · Customer Care" && appleCC.clientId === apple.id && appleCC.shortName === "Customer Care");
+  check("... δύο πελάτες έχουν και οι δύο «Customer Care» χωρίς σύγκρουση", appleCC.id !== efoodCC.id && /^d-/.test(appleCC.id));
+  check("τμήμα χωρίς πελάτη = εσωτερικό του call center (όνομα όπως δόθηκε)", training.name === "BPO Training" && training.clientId === null);
+  check("τμήμα: ίδιο όνομα στον ίδιο πελάτη: 409 name_taken", (await adm("POST", "/team/admin/departments", { name: "Customer Care", clientId: apple.id })).data.error === "name_taken");
+  check("τμήμα: άγνωστος πελάτης: 404 client_not_found, καθόλου project", (await adm("POST", "/team/admin/departments", { name: "Ghost", clientId: "c-zzzzzzzz" })).data.error === "client_not_found" && db.prepare("select count(*) c from departments where name like '%Ghost%'").get().c === 0);
+  check("τμήμα: πελάτης που δεν είναι string: 400 invalid_client", (await adm("POST", "/team/admin/departments", { name: "Bad", clientId: 5 })).data.error === "invalid_client");
+  const ov = await overview();
+  check("επισκόπηση: πελάτες με πλήθος τμημάτων και τα τμήματα με clientId, shortName", JSON.stringify(ov.clients.map((c) => [c.name, c.projectCount])) === JSON.stringify([["Apple", 2], ["eFood", 1]]) && ov.departments.find((d) => d.id === appleTech.id).clientId === apple.id);
+
+  // ---------------------------------------------------------------- μέλη και έγγραφα
+  const aAgent = "bpo_apple_agent@demo.gr", fAgent = "bpo_efood_agent@demo.gr", bothAgent = "bpo_both_agent@demo.gr", aEd = "bpo_apple_ed@demo.gr", aMulti = "bpo_apple_multi@demo.gr", tAgent = "bpo_train_agent@demo.gr";
+  await person(aAgent, { [appleCC.id]: "member" });
+  await person(fAgent, { [efoodCC.id]: "member" });
+  await person(bothAgent, { [appleCC.id]: "member", [efoodCC.id]: "member" });
+  await person(aEd, { [appleCC.id]: "editor", [appleTech.id]: "member" });
+  await person(aMulti, { [appleCC.id]: "member", [appleTech.id]: "member" });
+  await person(tAgent, { [training.id]: "member" });
+  const dA = await mkdoc("Apple πολιτική", appleCC.id, "Η πολιτική επιστροφών της Apple διαρκεί δεκατέσσερις ημέρες. APL-MARK");
+  const dT = await mkdoc("Apple τεχνικό", appleTech.id, "Οδηγίες επανεκκίνησης συσκευής Apple. APLT-MARK");
+  const dF = await mkdoc("eFood πολιτική", efoodCC.id, "Η πολιτική επιστροφών της eFood διαρκεί επτά ημέρες. EFD-MARK");
+  const dI = await mkdoc("Εσωτερικό εκπαίδευσης", training.id, "Οδηγίες εκπαίδευσης νέων πρακτόρων. INT-MARK");
+  const dAll = await mkdoc("Εσωτερικοί κανόνες BPO", "_all", "Το διάλειμμα των πρακτόρων διαρκεί δέκα λεπτά. ALL-MARK");
+  check("έγγραφα: δημιουργήθηκαν σε όλους τους τοίχους", [dA, dT, dF, dI, dAll].every((x) => /^doc-/.test(x || "")));
+  const Q = "Ποια είναι η πολιτική επιστροφών;";
+
+  // ---------------------------------------------------------------- 30.3 κανόνας ακροατηρίου: μόνο μέσα στον ίδιο πελάτη
+  {
+    const base = { title: "Apple πολιτική", departmentId: appleCC.id, text: "Η πολιτική επιστροφών της Apple διαρκεί δεκατέσσερις ημέρες. APL-MARK" };
+    let x = await put(dA, { ...base, audienceProjectIds: [appleTech.id] });
+    check("ακροατήριο: τμήμα του ΙΔΙΟΥ πελάτη: επιτρέπεται (200)", x.status === 200);
+    check("... και το διαβάζει όποιος ανήκει στο τμήμα εκείνο", (await J(call(aMulti, "GET", `/team/documents/${dA}`))).status === 200);
+    x = await put(dA, { ...base, audienceProjectIds: [efoodCC.id] });
+    check("ακροατήριο: τμήμα ΑΛΛΟΥ πελάτη: 400 audience_cross_client", x.status === 400 && x.data.error === "audience_cross_client");
+    x = await put(dA, { ...base, audienceProjectIds: [training.id] });
+    check("ακροατήριο: εσωτερικό του call center για έγγραφο πελάτη: 400 audience_cross_client", x.data.error === "audience_cross_client");
+    x = await put(dA, { ...base, audienceProjectIds: [appleTech.id, efoodCC.id] });
+    check("ακροατήριο: ένα ξένο μέσα σε λίστα με σωστά: απορρίπτεται ΟΛΟΚΛΗΡΗ η αίτηση", x.data.error === "audience_cross_client");
+    check("... και δεν άλλαξε τίποτα (το ακροατήριο μένει {Apple Technical})", db.prepare("select count(*) c from team_document_audience where document_id = ?").get(dA).c === 1);
+    x = await put(dF, { title: "eFood πολιτική", departmentId: efoodCC.id, text: "Η πολιτική επιστροφών της eFood διαρκεί επτά ημέρες. EFD-MARK", audienceProjectIds: [appleCC.id] });
+    check("ακροατήριο: το αντίστροφο (eFood προς Apple): 400 audience_cross_client", x.data.error === "audience_cross_client");
+    x = await J(call(aEd, "PUT", `/team/documents/${dA}`, { ...base, audienceProjectIds: [appleTech.id, efoodCC.id] }));
+    check("ακροατήριο: ο editor (δεν ανήκει στο eFood) παίρνει 403, όχι εξήγηση για άλλον πελάτη", x.status === 403 && x.data.error === "audience_forbidden");
+    await put(dA, { ...base, audienceProjectIds: [] });
+  }
+
+  // ---------------------------------------------------------------- 30.4 άμυνα σε βάθος: «ξεχασμένο» ακροατήριο πάνω από τον τοίχο
+  {
+    db.prepare("insert into team_audience_groups (id, workspace_id, created_at) values ('ag-00000000000000c3', 'team-bpo', ?)").run(nowIso());
+    for (const pid of [efoodCC.id, appleCC.id]) db.prepare("insert into team_audience_group_projects (group_id, project_id) values ('ag-00000000000000c3', ?)").run(pid);
+    db.prepare("insert into team_document_audience (workspace_id, document_id, group_id) values ('team-bpo', ?, 'ag-00000000000000c3')").run(dF);
+    for (const v of env.VECTORIZE.vectors.values()) if (v.metadata.documentId === dF) v.metadata.department_id = "ag-00000000000000c3";
+    const r = await J(call(aAgent, "GET", `/team/documents/${dF}`));
+    check("τοίχος στην ανάγνωση: ακροατήριο που ξεπερνά τον τοίχο ΔΕΝ δίνει πρόσβαση (404)", r.status === 404);
+    const list = (await J(call(aAgent, "GET", "/team/documents"))).data.documents;
+    check("... ούτε εμφανίζεται στη λίστα", !list.some((d) => d.id === dF));
+    const a = await ask(aAgent, { question: Q });
+    check("... ούτε το χρησιμοποιεί ο βοηθός (ακόμα κι όταν το Vectorize το επιστρέφει)", a.status === 200 && !a.prompt.includes("EFD-MARK") && a.prompt.includes("APL-MARK"), a.prompt.slice(0, 200));
+    check("... ο ιδιοκτήτης (eFood) το διαβάζει κανονικά", (await J(call(fAgent, "GET", `/team/documents/${dF}`))).status === 200);
+    db.prepare("delete from team_document_audience where document_id = ?").run(dF);
+    for (const v of env.VECTORIZE.vectors.values()) if (v.metadata.documentId === dF) v.metadata.department_id = efoodCC.id;
+  }
+
+  // ---------------------------------------------------------------- 30.5 μετακίνηση εγγράφων
+  {
+    const base = { title: "Apple πολιτική", text: "Η πολιτική επιστροφών της Apple διαρκεί δεκατέσσερις ημέρες. APL-MARK" };
+    check("μετακίνηση εγγράφου σε project ΑΛΛΟΥ πελάτη: 409 cross_client_move", (await put(dA, { ...base, departmentId: efoodCC.id })).data.error === "cross_client_move");
+    check("... στα εσωτερικά: 409", (await put(dA, { ...base, departmentId: training.id })).data.error === "cross_client_move");
+    check("... στο «όλη η εταιρεία» (θα το έβλεπαν όλοι οι πελάτες): 409", (await put(dA, { ...base, departmentId: "_all" })).data.error === "cross_client_move");
+    check("... και το έγγραφο μένει στη θέση του", db.prepare("select department_id d from team_documents where id = ?").get(dA).d === appleCC.id);
+    const mv = await put(dT, { title: "Apple τεχνικό", departmentId: appleCC.id, text: "Οδηγίες επανεκκίνησης συσκευής Apple. APLT-MARK" });
+    check("μετακίνηση μέσα στον ΙΔΙΟ πελάτη: επιτρέπεται", mv.status === 200);
+    await put(dT, { title: "Apple τεχνικό", departmentId: appleTech.id, text: "Οδηγίες επανεκκίνησης συσκευής Apple. APLT-MARK" });
+    const tmp = await mkdoc("Προσωρινό εσωτερικό", "_all", "Κείμενο προσωρινού εγγράφου. TMP-MARK");
+    check("από «όλη η εταιρεία» προς ένα project (στένεμα): επιτρέπεται", (await put(tmp, { title: "Προσωρινό εσωτερικό", departmentId: appleCC.id, text: "Κείμενο προσωρινού εγγράφου. TMP-MARK" })).status === 200);
+    await adm("DELETE", `/team/documents/${tmp}`);
+  }
+
+  // ---------------------------------------------------------------- 30.6 μεταφορά project ανάμεσα σε τοίχους
+  {
+    const put2 = (id, body) => adm("PUT", `/team/admin/departments/${id}/client`, body);
+    let x = await put2(training.id, { clientId: apple.id });
+    check("project: από τα εσωτερικά σε πελάτη: 200 και το όνομα γίνεται «πελάτης · τμήμα»", x.status === 200 && x.data.name === "Apple · BPO Training" && (await deptName(training.id)) === "Apple · BPO Training");
+    x = await put2(training.id, { clientId: null });
+    check("project: πίσω στα εσωτερικά: το όνομα γυρίζει στο σκέτο", x.status === 200 && (await deptName(training.id)) === "BPO Training" && db.prepare("select count(*) c from team_project_clients where project_id = ?").get(training.id).c === 0);
+    // κοινά έγγραφα μέσα στον ίδιο πελάτη (έγκυρα) που θα γίνονταν υπερ-τοίχου
+    await put(dT, { title: "Apple τεχνικό", departmentId: appleTech.id, text: "Οδηγίες επανεκκίνησης συσκευής Apple. APLT-MARK", audienceProjectIds: [appleCC.id] });
+    await put(dA, { title: "Apple πολιτική", departmentId: appleCC.id, text: "Η πολιτική επιστροφών της Apple διαρκεί δεκατέσσερις ημέρες. APL-MARK", audienceProjectIds: [appleTech.id] });
+    x = await put2(appleTech.id, { clientId: efood.id });
+    check("project: μεταφορά σε άλλον πελάτη ενώ μοιράζονται έγγραφα: 409 cross_client_shares με πλήθη", x.status === 409 && x.data.error === "cross_client_shares" && x.data.owned === 1 && x.data.incoming === 1, x.data);
+    check("... τίποτα δεν άλλαξε (ίδιο όνομα, ίδιος πελάτης)", (await deptName(appleTech.id)) === "Apple · Technical");
+    await put(dT, { title: "Apple τεχνικό", departmentId: appleTech.id, text: "Οδηγίες επανεκκίνησης συσκευής Apple. APLT-MARK", audienceProjectIds: [] });
+    x = await put2(appleTech.id, { clientId: efood.id });
+    check("project: ΜΟΝΟ τα εισερχόμενα κοινά (άλλο project του Apple το μοιράζεται προς αυτό): πάλι 409", x.status === 409 && x.data.owned === 0 && x.data.incoming === 1, x.data);
+    await put(dA, { title: "Apple πολιτική", departmentId: appleCC.id, text: "Η πολιτική επιστροφών της Apple διαρκεί δεκατέσσερις ημέρες. APL-MARK", audienceProjectIds: [] });
+    check("project: όνομα που υπάρχει ήδη στον προορισμό: 409 name_taken", (await put2(appleTech.id, { clientId: efood.id, shortName: "Customer Care" })).data.error === "name_taken");
+    check("project: άγνωστος πελάτης: 404 client_not_found", (await put2(appleTech.id, { clientId: "c-zzzzzzzz" })).data.error === "client_not_found");
+    check("project: άκυρο clientId: 400 invalid_client", (await put2(appleTech.id, { clientId: 5 })).data.error === "invalid_client" && (await put2(appleTech.id, {})).data.error === "invalid_client");
+    check("project: άκυρο σκέτο όνομα (με «·»): 400 invalid_name", (await put2(appleTech.id, { clientId: efood.id, shortName: "A · B" })).data.error === "invalid_name");
+    check("project: ίδιος πελάτης (χωρίς αλλαγή): 200", (await put2(appleTech.id, { clientId: apple.id })).status === 200);
+    x = await put2(appleTech.id, { clientId: efood.id });
+    check("project: χωρίς κοινά έγγραφα η μεταφορά περνά: 200, νέο όνομα «eFood · Technical»", x.status === 200 && x.data.name === "eFood · Technical");
+    check("... στο ιστορικό καταγράφεται η αλλαγή πελάτη", db.prepare("select count(*) c from team_audit_log where action = 'project_client_changed' and target = ?").get(appleTech.id).c >= 1);
+    const wallsAfter = await J(call(aEd, "GET", "/team/me"));
+    check("... ο editor που ανήκε σε Apple CC και στο μεταφερμένο project πλέον ανήκει σε ΔΥΟ τοίχους (Apple, eFood)", wallsOf(wallsAfter) === "Apple,eFood", wallsAfter.data.walls);
+    await put2(appleTech.id, { clientId: apple.id });
+    check("project: επαναφορά στον Apple", (await deptName(appleTech.id)) === "Apple · Technical");
+  }
+
+  // ---------------------------------------------------------------- 30.7 μετονομασίες
+  {
+    const ren = (id, name) => adm("PATCH", `/team/admin/clients/${id}`, { name });
+    let x = await ren(apple.id, "Apple Inc");
+    check("πελάτης: μετονομασία: τα ονόματα των τμημάτων του ακολουθούν («Apple Inc · …»)", x.status === 200 && (await deptName(appleCC.id)) === "Apple Inc · Customer Care" && (await deptName(appleTech.id)) === "Apple Inc · Technical");
+    check("... τα τμήματα άλλων πελατών δεν αλλάζουν", (await deptName(efoodCC.id)) === "eFood · Customer Care");
+    check("πελάτης: μετονομασία σε υπάρχον όνομα (και με άλλα κεφαλαία): 409 name_taken", (await ren(apple.id, "EFOOD")).data.error === "name_taken");
+    check("πελάτης: άκυρο όνομα: 400, άγνωστος: 404", (await ren(apple.id, "A · B")).status === 400 && (await ren("c-zzzzzzzz", "X")).status === 404);
+    await ren(apple.id, "Apple");
+    // σύγκρουση με όνομα άλλου project: το όνομα «Zeta · Ops» υπάρχει ήδη ως εσωτερικό project
+    const zOps = (await adm("POST", "/team/admin/departments", { name: "Zeta · Ops" })).data;
+    const q = (await adm("POST", "/team/admin/clients", { name: "Qwerty" })).data;
+    const qOps = (await adm("POST", "/team/admin/departments", { name: "Ops", clientId: q.id })).data;
+    x = await ren(q.id, "Zeta");
+    check("πελάτης: μετονομασία που θα έκανε ΔΥΟ projects να έχουν το ίδιο όνομα: 409 name_taken και τίποτα δεν αλλάζει", x.data.error === "name_taken" && (await deptName(qOps.id)) === "Qwerty · Ops" && !!zOps.id);
+    // μετονομασία τμήματος μέσα σε πελάτη
+    const rn = (id, name) => adm("PATCH", `/team/admin/departments/${id}`, { name });
+    x = await rn(appleCC.id, "Support");
+    check("τμήμα πελάτη: μετονομασία αλλάζει το σκέτο όνομα και ξαναφτιάχνει το πλήρες («Apple · Support»)", x.status === 200 && (await deptName(appleCC.id)) === "Apple · Support" && db.prepare("select short_name s from team_project_clients where project_id = ?").get(appleCC.id).s === "Support");
+    check("τμήμα πελάτη: όνομα με «·»: 400, όνομα που υπάρχει στον ίδιο πελάτη: 409", (await rn(appleCC.id, "A · B")).status === 400 && (await rn(appleCC.id, "Technical")).data.error === "name_taken");
+    await rn(appleCC.id, "Customer Care");
+    check("εσωτερικό project: η μετονομασία δουλεύει όπως πριν", (await rn(training.id, "BPO Academy")).status === 200 && (await deptName(training.id)) === "BPO Academy");
+    await rn(training.id, "BPO Training");
+    // διαγραφή πελάτη
+    check("πελάτης: διαγραφή με projects: 409 client_has_projects", (await adm("DELETE", `/team/admin/clients/${q.id}`)).data.error === "client_has_projects");
+    await adm("PUT", `/team/admin/departments/${qOps.id}/client`, { clientId: null });
+    check("πελάτης: άδειος πελάτης διαγράφεται (200) και φεύγει από την επισκόπηση", (await adm("DELETE", `/team/admin/clients/${q.id}`)).status === 200 && !(await overview()).clients.some((c) => c.id === q.id));
+    check("πελάτης: άγνωστος: 404", (await adm("DELETE", "/team/admin/clients/c-zzzzzzzz")).status === 404);
+    check("προφίλ: πίσω σε «company» ενώ υπάρχουν πελάτες: 409 has_clients (δεν χάνονται σιωπηλά οι τοίχοι)", (await adm("PATCH", "/team/admin/workspace", { profile: "company" })).data.error === "has_clients");
+  }
+
+  // ---------------------------------------------------------------- 30.8 /team/me και ο βοηθός ανά πελάτη
+  {
+    const me = await J(call(bothAgent, "GET", "/team/me"));
+    check("/team/me: προφίλ και οι δύο τοίχοι του πράκτορα που δουλεύει για Apple και eFood", me.data.profile === "multi_client" && wallsOf(me) === "Apple,eFood" && me.data.departments.every((d) => d.clientId), me.data);
+    const one = await J(call(aAgent, "GET", "/team/me"));
+    check("/team/me: πράκτορας ενός πελάτη: ένας τοίχος", wallsOf(one) === "Apple");
+    const demo = await J(call("admin@demo.gr", "GET", "/team/me"));
+    check("/team/me: χώρος «company»: προφίλ company, καθόλου τοίχοι", demo.data.profile === "company" && demo.data.walls.length === 0);
+
+    const before = usage(bothAgent);
+    let r = await ask(bothAgent, { question: Q });
+    check("βοηθός: πράκτορας σε ΔΥΟ πελάτες χωρίς επιλογή: 400 client_required με τη λίστα (Apple, eFood)", r.status === 400 && r.data.error === "client_required" && r.data.clients.map((c) => c.name).join() === "Apple,eFood", r.data);
+    check("... ΔΕΝ καταναλώνεται ερώτηση του ημερήσιου ορίου", usage(bothAgent) === before);
+    // Ένα δεύτερο τμήμα του eFood και ένα κοινό έγγραφο προς αυτό: δημιουργεί ΟΜΑΔΑ ακροατηρίου που περιέχει το eFood CC του πράκτορα.
+    const efoodTech = (await adm("POST", "/team/admin/departments", { name: "Technical", clientId: efood.id })).data;
+    await put(dF, { title: "eFood πολιτική", departmentId: efoodCC.id, text: "Η πολιτική επιστροφών της eFood διαρκεί επτά ημέρες. EFD-MARK", audienceProjectIds: [efoodTech.id] });
+    const efoodGroup = db.prepare("select group_id g from team_document_audience where document_id = ?").get(dF).g;
+    const c0 = env.VECTORIZE.calls.length;
+    r = await ask(bothAgent, { question: Q, clientId: apple.id });
+    check("βοηθός: επιλογή Apple: βλέπει ΜΟΝΟ έγγραφα της Apple", r.status === 200 && r.prompt.includes("APL-MARK") && !r.prompt.includes("EFD-MARK"), r.prompt.slice(0, 200));
+    // ΣΤΡΩΜΑ 1: το φίλτρο προς το Vectorize. Δεν περιέχει projects ούτε ομάδες ακροατηρίου του άλλου πελάτη.
+    const idsAsked = new Set(env.VECTORIZE.calls.slice(c0).flatMap((c) => (c.filter && c.filter.department_id ? c.filter.department_id.$in : [])));
+    check("στρώμα φίλτρου: το ερώτημα προς το Vectorize περιέχει το Apple CC και ΚΑΝΕΝΑ project ή ομάδα του eFood", idsAsked.has(appleCC.id) && !idsAsked.has(efoodCC.id) && !idsAsked.has(efoodTech.id) && !idsAsked.has(efoodGroup), [...idsAsked]);
+    // ΣΤΡΩΜΑ 2: ο έλεγχος στη βάση, ανεξάρτητα από το φίλτρο (το Vectorize "ξεχνά" να φιλτράρει)
+    env.VECTORIZE.ignoreFilter = true;
+    r = await ask(bothAgent, { question: Q, clientId: apple.id });
+    check("στρώμα βάσης: ακόμα κι αν το Vectorize ΔΕΝ φιλτράρει, ο έλεγχος στη βάση κόβει τον άλλον πελάτη", r.status === 200 && r.prompt.includes("APL-MARK") && !r.prompt.includes("EFD-MARK"), r.prompt.slice(0, 200));
+    r = await ask(bothAgent, { question: Q, clientId: efood.id });
+    check("στρώμα βάσης: και αντίστροφα (επιλογή eFood, χωρίς φίλτρο Vectorize): μόνο eFood", r.status === 200 && r.prompt.includes("EFD-MARK") && !r.prompt.includes("APL-MARK"));
+    env.VECTORIZE.ignoreFilter = false;
+    await put(dF, { title: "eFood πολιτική", departmentId: efoodCC.id, text: "Η πολιτική επιστροφών της eFood διαρκεί επτά ημέρες. EFD-MARK", audienceProjectIds: [] });
+    r = await ask(bothAgent, { question: Q, clientId: efood.id });
+    check("βοηθός: επιλογή eFood: βλέπει ΜΟΝΟ έγγραφα της eFood", r.status === 200 && r.prompt.includes("EFD-MARK") && !r.prompt.includes("APL-MARK"), r.prompt.slice(0, 200));
+    r = await ask(bothAgent, { question: "Πόσο διαρκεί το διάλειμμα των πρακτόρων;", clientId: apple.id });
+    check("βοηθός: τα έγγραφα «όλης της εταιρείας» (εσωτερικά του BPO) φαίνονται σε κάθε επιλογή", r.status === 200 && r.prompt.includes("ALL-MARK"));
+    check("βοηθός: τοίχος που δεν ανήκει στο μέλος (εσωτερικά): 403 client_forbidden", (await ask(bothAgent, { question: Q, clientId: "internal" })).data.error === "client_forbidden");
+    check("βοηθός: άγνωστο clientId: 403 client_forbidden", (await ask(bothAgent, { question: Q, clientId: "c-zzzzzzzz" })).data.error === "client_forbidden");
+    check("βοηθός: πράκτορας ΕΝΟΣ πελάτη δεν χρειάζεται επιλογή", (await ask(aAgent, { question: Q })).status === 200);
+    check("βοηθός: ... και δεν παίρνει τον άλλον πελάτη ούτε ζητώντας τον ρητά (403)", (await ask(aAgent, { question: Q, clientId: efood.id })).data.error === "client_forbidden");
+    r = await ask(aMulti, { question: Q });
+    check("βοηθός: πράκτορας σε ΔΥΟ τμήματα του ΙΔΙΟΥ πελάτη: χωρίς επιλογή, μόνο Apple", r.status === 200 && r.prompt.includes("APL-MARK") && !r.prompt.includes("EFD-MARK"));
+    r = await ask(BPO, { question: Q });
+    check("βοηθός: ο admin χωρίς επιλογή ψάχνει παντού (όπως πάντα)", r.status === 200 && r.prompt.includes("APL-MARK") && r.prompt.includes("EFD-MARK"));
+    r = await ask(BPO, { question: Q, clientId: efood.id });
+    check("βοηθός: ο admin μπορεί να περιοριστεί σε έναν πελάτη", r.status === 200 && r.prompt.includes("EFD-MARK") && !r.prompt.includes("APL-MARK"));
+    const demoAsk = await ask("admin@demo.gr", { question: "οδηγίες", clientId: "c-zzzzzzzz" });
+    check("βοηθός: στον χώρο «company» το clientId αγνοείται (καμία αλλαγή συμπεριφοράς)", demoAsk.status === 200);
+  }
+
+  // ---------------------------------------------------------------- λίστα εγγράφων ανά πελάτη
+  {
+    const all = (await J(call(bothAgent, "GET", "/team/documents"))).data.documents.map((d) => d.id);
+    check("λίστα: χωρίς επιλογή δείχνει έγγραφα και των δύο πελατών", all.includes(dA) && all.includes(dF));
+    const forApple = await J(call(bothAgent, "GET", `/team/documents?clientId=${apple.id}`));
+    const ids = forApple.data.documents.map((d) => d.id);
+    check("λίστα: με clientId=Apple μόνο έγγραφα της Apple και τα εταιρικά (εσωτερικά BPO)", ids.includes(dA) && !ids.includes(dF) && ids.includes(dAll), ids);
+    check("λίστα: κάθε έγγραφο φέρει το clientId του", forApple.data.documents.find((d) => d.id === dA).clientId === apple.id && forApple.data.documents.find((d) => d.id === dAll).clientId === null);
+    check("λίστα: ξένος τοίχος: 403 client_forbidden", (await J(call(aAgent, "GET", `/team/documents?clientId=${efood.id}`))).status === 403);
+    check("λίστα: ο χώρος «company» αγνοεί το clientId", (await J(call("admin@demo.gr", "GET", "/team/documents?clientId=zzz"))).status === 200);
+    check("ανάγνωση εγγράφου άλλου πελάτη (χωρίς κανένα ακροατήριο): 404", (await J(call(aAgent, "GET", `/team/documents/${dF}`))).status === 404 && (await J(call(fAgent, "GET", `/team/documents/${dA}`))).status === 404);
+    check("ο πράκτορας των εσωτερικών δεν βλέπει έγγραφα πελατών", (await J(call(tAgent, "GET", `/team/documents/${dA}`))).status === 404 && (await J(call(aAgent, "GET", `/team/documents/${dI}`))).status === 404);
+  }
+
+  // ---------------------------------------------------------------- 30.8β παλιό ακροατήριο άλλου τοίχου (από πριν υπάρξουν πελάτες)
+  {
+    db.prepare("insert into team_audience_groups (id, workspace_id, created_at) values ('ag-00000000000000c4', 'team-bpo', ?)").run(nowIso());
+    for (const pid of [appleCC.id, efoodCC.id]) db.prepare("insert into team_audience_group_projects (group_id, project_id) values ('ag-00000000000000c4', ?)").run(pid);
+    db.prepare("insert into team_document_audience (workspace_id, document_id, group_id) values ('team-bpo', ?, 'ag-00000000000000c4')").run(dA);
+    const x = await J(call(aEd, "PUT", `/team/documents/${dA}`, { title: "Apple πολιτική", departmentId: appleCC.id, text: "Η πολιτική επιστροφών της Apple διαρκεί δεκατέσσερις ημέρες. APL-MARK", audienceProjectIds: [appleTech.id] }));
+    const g = db.prepare("select group_id g from team_document_audience where document_id = ?").get(dA);
+    const members = db.prepare("select project_id p from team_audience_group_projects where group_id = ? order by project_id").all(g.g).map((r) => r.p);
+    check("παλιό ακροατήριο άλλου πελάτη που ο editor δεν βλέπει: στην αποθήκευση ΔΕΝ διατηρείται (μένουν μόνο τμήματα του ίδιου πελάτη)", x.status === 200 && JSON.stringify(members) === JSON.stringify([appleCC.id, appleTech.id].sort()), members);
+    await put(dA, { title: "Apple πολιτική", departmentId: appleCC.id, text: "Η πολιτική επιστροφών της Apple διαρκεί δεκατέσσερις ημέρες. APL-MARK", audienceProjectIds: [] });
+  }
+
+  // ---------------------------------------------------------------- 30.9 αντιφάσεις: ποτέ ανάμεσα σε πελάτες
+  {
+    state.judge = [{ x: "δεκατέσσερις ημέρες", y: "επτά ημέρες", topic: "Προθεσμία επιστροφών τοίχου" }];
+    const dF2 = await mkdoc("eFood νέα πολιτική", efoodCC.id, "Επιστροφές πολιτική eFood: επτά ημέρες. NEWF-MARK");
+    const crossRows = (id) => db.prepare("select count(*) c from team_contradictions where (doc_a = ? or doc_b = ?) and topic = 'Προθεσμία επιστροφών τοίχου'").get(id, id).c;
+    check("αντιφάσεις: ΜΕΤΑ από έγγραφο eFood που συγκρούεται με έγγραφο Apple: καμία αντίφαση (δεν συγκρίνονται)", crossRows(dF2) === 0);
+    const dA2 = await mkdoc("Apple νέα πολιτική", appleTech.id, "Επιστροφές πολιτική Apple: επτά ημέρες. NEWA-MARK");
+    check("αντιφάσεις: (έλεγχος του ελέγχου) μέσα στον ΙΔΙΟ πελάτη η σύγκρουση ανιχνεύεται", crossRows(dA2) >= 1, crossRows(dA2));
+    const rows = db.prepare("select doc_a, doc_b from team_contradictions where topic = 'Προθεσμία επιστροφών τοίχου'").all();
+    const wallOfDoc = (id) => db.prepare("select pc.client_id c from team_documents d left join team_project_clients pc on pc.project_id = d.department_id where d.id = ?").get(id).c;
+    check("αντιφάσεις: όλες οι αντιφάσεις του θέματος είναι μέσα στον ίδιο πελάτη", rows.length >= 1 && rows.every((r) => wallOfDoc(r.doc_a) === wallOfDoc(r.doc_b)), rows);
+    state.judge = undefined;
+  }
+
+  // ---------------------------------------------------------------- 30.10 χωρίς το migration 0016: δουλεύει ως «company»
+  {
+    db.exec("PRAGMA foreign_keys = OFF");
+    for (const t of ["team_project_clients", "team_clients", "team_workspace_settings"]) db.exec(`DROP TABLE ${t}`);
+    db.exec("PRAGMA foreign_keys = ON");
+    const o = await overview();
+    check("χωρίς πίνακες πελατών: η επισκόπηση δουλεύει ως «company» (clientsAvailable: false, κανένας πελάτης)", o.profile === "company" && o.clientsAvailable === false && o.clients.length === 0 && o.departments.length >= 4);
+    check("... τα τμήματα φορτώνουν χωρίς πελάτη (clientId null)", o.departments.every((d) => d.clientId === null));
+    check("... ο κανόνας ανάγνωσης δουλεύει όπως πριν: ο πράκτορας διαβάζει το δικό του έγγραφο", (await J(call(aAgent, "GET", `/team/documents/${dA}`))).status === 200);
+    const r = await ask(aAgent, { question: Q });
+    check("... ο βοηθός δουλεύει (χωρίς τοίχους, μόνο ιδιοκτήτης και ακροατήρια)", r.status === 200 && r.prompt.includes("APL-MARK"));
+    check("... /team/me δουλεύει (προφίλ company)", (await J(call(aAgent, "GET", "/team/me"))).data.profile === "company");
+    check("... η δημιουργία πελάτη: 503 clients_unavailable", (await adm("POST", "/team/admin/clients", { name: "Late" })).data.error === "clients_unavailable");
+    check("... η αλλαγή προφίλ: 503 clients_unavailable", (await adm("PATCH", "/team/admin/workspace", { profile: "multi_client" })).data.error === "clients_unavailable");
+    check("... η μεταφορά project: 503 clients_unavailable", (await adm("PUT", `/team/admin/departments/${appleTech.id}/client`, { clientId: null })).data.error === "clients_unavailable");
+    check("... ένα νέο project χωρίς πελάτη δημιουργείται κανονικά", (await adm("POST", "/team/admin/departments", { name: "Χωρίς πίνακες" })).status === 201);
+    db.exec(readFileSync(join(REPO, "migrations", "0016_team_clients.sql"), "utf8"));
+    check("μετά το migration 0016: οι πελάτες ξαναδουλεύουν (κενοί: τα δεδομένα των πινάκων χάθηκαν στη δοκιμή)", (await adm("PATCH", "/team/admin/workspace", { profile: "multi_client" })).status === 200 && (await adm("POST", "/team/admin/clients", { name: "Νέος" })).status === 201);
+  }
+}
+
+// ============================================================================ 31. Οθόνες call center: πελάτες, τοίχοι, επιλογή πελάτη (jsdom)
+section("31. Οθόνες call center: τύπος χώρου, πελάτες και τμήματα, μεταφορά, επιλογή πελάτη στον βοηθό, ακροατήριο μέσα στον πελάτη");
+{ // ένα μπλοκ: δικός του οργανισμός (team-ui31), ανεξάρτητος από τους υπόλοιπους
+  const setU = (dom, el, v) => { el.value = v; el.dispatchEvent(new dom.window.Event("input", { bubbles: true })); el.dispatchEvent(new dom.window.Event("change", { bubbles: true })); };
+  const submitU = (dom, sel) => $u(dom, sel).dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  const nowIso = () => new Date().toISOString();
+  db.prepare("insert into team_workspaces (id,name,status,created_at) values ('team-ui31','Call Center UI','pilot',?)").run(nowIso());
+  const ADM = "ui31_admin@demo.gr";
+  db.prepare("insert into team_members (workspace_id,email,role,status,created_at) values ('team-ui31',?,'admin','active',?)").run(ADM, nowIso());
+  S[ADM] = (await login(ADM)).cookie;
+  const api = async (method, path, body) => { const res = await call(ADM, method, path, body); return { status: res.status, data: await readJson(res) }; };
+  const ov = async () => (await api("GET", "/team/admin/overview")).data;
+  const person = async (email, projectRoles) => { await api("POST", "/team/admin/members", { email, role: "member", projectRoles, sendInvite: false }); S[email] = (await login(email)).cookie; };
+
+  // ------------------------------------------------------------ admin: από «Εταιρεία» σε «Call center»
+  const ad = uiFor(ADM)("team-admin.html");
+  await uiWait(() => $u(ad, "#profile-card"));
+  check("χώρος «Εταιρεία»: φαίνεται η κάρτα «Τύπος χώρου» με το κουμπί αλλαγής", /Εταιρεία/.test($u(ad, "#profile-card").textContent) && /Αλλαγή σε/.test($u(ad, "#profile-switch").textContent));
+  check("χώρος «Εταιρεία»: δεν υπάρχει φόρμα πελάτη ούτε επιλογέας πελάτη", !$u(ad, "#add-client") && !$u(ad, "select.move-client"));
+  clickU(ad, $u(ad, "#profile-switch"));
+  const conf = await uiWait(() => $u(ad, ".confirm"));
+  check("αλλαγή τύπου: ζητά επιβεβαίωση που εξηγεί τον τοίχο και δεν αλλάζει τίποτα ακόμα", !!conf && /τοίχος/.test(conf.textContent) && (await ov()).profile === "company");
+  clickU(ad, $u(ad, ".confirm-no"));
+  check("«Όχι»: μένει «Εταιρεία»", (await ov()).profile === "company" && !$u(ad, ".confirm"));
+  clickU(ad, $u(ad, "#profile-switch"));
+  await uiWait(() => $u(ad, ".confirm-yes"));
+  clickU(ad, $u(ad, ".confirm-yes"));
+  check("«Ναι»: ο χώρος γίνεται call center και εμφανίζεται η φόρμα νέου πελάτη", !!(await uiWait(() => $u(ad, "#add-client"))) && (await ov()).profile === "multi_client");
+
+  // ------------------------------------------------------------ πελάτες και τμήματα από την οθόνη
+  setU(ad, $u(ad, "#new-client"), "Apple UI");
+  submitU(ad, "#add-client");
+  await uiWait(() => $$u(ad, ".client-row .name").some((e) => e.textContent === "Apple UI"));
+  setU(ad, $u(ad, "#new-client"), "eFood UI");
+  submitU(ad, "#add-client");
+  await uiWait(() => $$u(ad, ".client-row .name").some((e) => e.textContent === "eFood UI"));
+  const clients = (await ov()).clients;
+  const cA = clients.find((c) => c.name === "Apple UI"), cF = clients.find((c) => c.name === "eFood UI");
+  check("πελάτες: δημιουργούνται από την οθόνη και φαίνονται ως ομάδες με ετικέτα «πελάτης»", !!cA && !!cF && $$u(ad, ".client-group").length === 2 && /πελάτης/.test($u(ad, ".client-row").textContent));
+  for (const [cid, name] of [[cA.id, "Customer Care"], [cA.id, "Technical"], [cF.id, "Customer Care"]]) {
+    setU(ad, $u(ad, `#add-dept-${cid} input`), name);
+    submitU(ad, `#add-dept-${cid}`);
+    await uiWait(() => $$u(ad, `.client-group[data-client="${cid}"] .dept-row .name`).some((e) => e.textContent === name));
+  }
+  const names = (await ov()).departments.map((d) => d.name).sort();
+  check("τμήματα μέσα σε πελάτη: το όνομα γράφεται «πελάτης · τμήμα» και το ίδιο όνομα τμήματος χωράει σε δύο πελάτες", JSON.stringify(names) === JSON.stringify(["Apple UI · Customer Care", "Apple UI · Technical", "eFood UI · Customer Care"]), names);
+  check("τμήματα: κάτω από κάθε πελάτη φαίνεται το σκέτο όνομα και υπάρχει επιλογέας πελάτη με τον τρέχοντα", $$u(ad, `.client-group[data-client="${cA.id}"] select.move-client`).length === 2 && $u(ad, `.client-group[data-client="${cA.id}"] select.move-client`).value === cA.id);
+  setU(ad, $u(ad, "#new-dept"), "UI Internal");
+  submitU(ad, "#add-dept");
+  await uiWait(() => $$u(ad, ".internal-group .dept-row .name").some((e) => e.textContent === "UI Internal"));
+  check("εσωτερικό τμήμα (χωρίς πελάτη): δημιουργείται στην ενότητα «Εσωτερικά»", (await ov()).departments.some((d) => d.name === "UI Internal" && d.clientId === null));
+  setU(ad, $u(ad, `#add-dept-${cA.id} input`), "Customer Care");
+  submitU(ad, `#add-dept-${cA.id}`);
+  check("τμήμα με όνομα που υπάρχει ήδη στον ίδιο πελάτη: φαίνεται σφάλμα και δεν δημιουργείται", !!(await uiWait(() => $u(ad, ".note.err") && /Υπάρχει ήδη/.test($u(ad, ".note.err").textContent))) && (await ov()).departments.filter((d) => d.name === "Apple UI · Customer Care").length === 1);
+
+  // ------------------------------------------------------------ μεταφορά project ανάμεσα σε τοίχους
+  const deptId = async (name) => (await ov()).departments.find((d) => d.name === name).id;
+  const dInt = await deptId("UI Internal");
+  const moveSel = () => $$u(ad, ".dept-row").find((r) => r.querySelector(".name") && /UI Internal/.test(r.querySelector(".name").textContent)).querySelector("select.move-client");
+  setU(ad, moveSel(), cA.id);
+  const mc = await uiWait(() => $u(ad, ".confirm"));
+  check("μεταφορά σε πελάτη: ζητά επιβεβαίωση με το νέο όνομα και δεν αλλάζει τίποτα ακόμα", !!mc && /Apple UI/.test(mc.textContent) && /UI Internal/.test(mc.textContent) && (await ov()).departments.find((d) => d.id === dInt).clientId === null);
+  clickU(ad, $u(ad, ".confirm-no"));
+  check("«Όχι» στη μεταφορά: ο επιλογέας επανέρχεται στο «Εσωτερικό»", moveSel().value === "" && (await ov()).departments.find((d) => d.id === dInt).clientId === null);
+  setU(ad, moveSel(), cA.id);
+  await uiWait(() => $u(ad, ".confirm-yes"));
+  clickU(ad, $u(ad, ".confirm-yes"));
+  check("«Ναι»: το project μεταφέρεται στον πελάτη και το όνομά του γίνεται «Apple UI · UI Internal»", !!(await uiWait(() => (db.prepare("select name from departments where id = ?").get(dInt) || {}).name === "Apple UI · UI Internal")));
+  // κοινά έγγραφα μέσα στον πελάτη → η μεταφορά σε άλλον πελάτη απορρίπτεται με ξεκάθαρο μήνυμα
+  const dCC = await deptId("Apple UI · Customer Care"), dTech = await deptId("Apple UI · Technical"), dFood = await deptId("eFood UI · Customer Care");
+  const mkd = async (title, departmentId, text, extra = {}) => (await api("POST", "/team/documents", { title, departmentId, text, ...extra })).data.id;
+  const shared = await mkd("UI κοινό Apple", dTech, "Οδηγίες επανεκκίνησης συσκευής Apple. UIAPL-MARK", { audienceProjectIds: [dCC] });
+  await mkd("UI Apple πολιτική", dCC, "Η πολιτική επιστροφών της Apple διαρκεί δεκατέσσερις ημέρες. UIAPLP-MARK");
+  await mkd("UI eFood πολιτική", dFood, "Η πολιτική επιστροφών της eFood διαρκεί επτά ημέρες. UIEFD-MARK");
+  await mkd("UI εσωτερικοί κανόνες", "_all", "Το διάλειμμα των πρακτόρων διαρκεί δέκα λεπτά. UIALL-MARK");
+  clickU(ad, $u(ad, "#tab-departments"));
+  await uiWait(() => $$u(ad, ".dept-row").length >= 4);
+  const techSel = () => $$u(ad, ".dept-row").find((r) => r.querySelector(".name") && r.querySelector(".name").textContent === "Technical" && r.closest(".client-group").getAttribute("data-client") === cA.id).querySelector("select.move-client");
+  setU(ad, techSel(), cF.id);
+  await uiWait(() => $u(ad, ".confirm-yes"));
+  clickU(ad, $u(ad, ".confirm-yes"));
+  const errToast = await uiWait(() => $u(ad, ".toast.err"));
+  check("μεταφορά με κοινά έγγραφα: μήνυμα σφάλματος που λέει πόσα και τι να κάνει ο admin", !!errToast && /Δεν μεταφέρεται/.test(errToast.textContent) && /1 έγγραφο/.test(errToast.textContent) && /Αφαίρεσε πρώτα/.test(errToast.textContent), errToast && errToast.textContent);
+  check("... και το project μένει στον Apple UI", (await ov()).departments.find((d) => d.id === dTech).clientId === cA.id);
+  // διαγραφή άδειου πελάτη και προστασία του μη άδειου
+  setU(ad, $u(ad, "#new-client"), "Κενός UI");
+  submitU(ad, "#add-client");
+  await uiWait(() => $$u(ad, ".client-row .name").some((e) => e.textContent === "Κενός UI"));
+  const delFor = (name) => $$u(ad, ".client-row").find((r) => r.querySelector(".name").textContent === name).querySelector(".delete-client");
+  check("διαγραφή πελάτη: το κουμπί είναι ανενεργό όταν ο πελάτης έχει τμήματα, ενεργό όταν είναι άδειος", delFor("Apple UI").disabled === true && delFor("Κενός UI").disabled === false);
+  clickU(ad, delFor("Κενός UI"));
+  await uiWait(() => $u(ad, ".confirm-yes"));
+  clickU(ad, $u(ad, ".confirm-yes"));
+  check("διαγραφή άδειου πελάτη: ζητά επιβεβαίωση και μετά φεύγει", !!(await uiWait(() => !(db.prepare("select 1 from team_clients where name = 'Κενός UI'").get()))));
+  check("επιστροφή σε «Εταιρεία» όσο υπάρχουν πελάτες: το κουμπί είναι ανενεργό", $u(ad, "#profile-switch").disabled === true);
+
+  // ------------------------------------------------------------ editor: το ακροατήριο προσφέρει μόνο τμήματα του ίδιου πελάτη
+  await person("ui31_ed@demo.gr", { [dCC]: "editor", [dTech]: "member", [dFood]: "member" });
+  const ed = uiFor("ui31_ed@demo.gr")("team-editor.html");
+  clickU(ed, await uiWait(() => $u(ed, "#tab-docs")));
+  await uiWait(() => $$u(ed, ".item").length > 2);
+  clickU(ed, $$u(ed, ".item").find((i) => /UI Apple πολιτική/.test(i.textContent)));
+  await uiWait(() => $u(ed, "#audience"));
+  check("editor: το ακροατήριο προσφέρει ΜΟΝΟ το τμήμα του ίδιου πελάτη (όχι το eFood, παρότι ο editor είναι μέλος εκεί)", $$u(ed, "#audience input[type=checkbox]").map((c) => c.getAttribute("data-project")).join() === dTech, $$u(ed, "#audience input[type=checkbox]").map((c) => c.getAttribute("data-project")));
+  check("editor: η λίστα εγγράφων δείχνει το όνομα με τον πελάτη («Apple UI · …»)", $$u(ed, ".item .m").some((m) => /Apple UI · Customer Care/.test(m.textContent)));
+
+  // ------------------------------------------------------------ portal: πράκτορας σε δύο πελάτες
+  await person("ui31_both@demo.gr", { [dCC]: "member", [dFood]: "member" });
+  await person("ui31_one@demo.gr", { [dCC]: "member" });
+  const pt = uiFor("ui31_both@demo.gr")("portal.html");
+  await uiWait(() => $u(pt, "#wallrow"));
+  check("portal: πράκτορας σε δύο πελάτες: φαίνεται η επιλογή πελάτη με τους δύο πελάτες", $$u(pt, "#wall option").map((o) => o.textContent).join() === ["Διάλεξε πελάτη…", "Apple UI", "eFood UI"].join(), $$u(pt, "#wall option").map((o) => o.textContent));
+  check("portal: χωρίς επιλογή το «Ρώτα» είναι ανενεργό και το πεδίο ζητά πελάτη", $u(pt, "form.searchrow button").disabled === true && /Διάλεξε πρώτα πελάτη/.test($u(pt, "#q").placeholder));
+  check("portal: χωρίς επιλογή δεν φαίνεται κανένας τίτλος εγγράφου, μόνο υπόδειξη", $$u(pt, ".row").length === 0 && $$u(pt, ".wall-hint").length === 2);
+  setU(pt, $u(pt, "#wall"), cA.id);
+  await uiWait(() => $$u(pt, ".row").length > 0);
+  check("portal: με επιλογή Apple: ενεργοποιείται το «Ρώτα» και η λίστα έχει μόνο έγγραφα Apple και τα εσωτερικά του call center", $u(pt, "form.searchrow button").disabled === false && $$u(pt, ".cols > div:nth-child(2) .row .title").map((e) => e.textContent).sort().join() === ["UI Apple πολιτική", "UI εσωτερικοί κανόνες", "UI κοινό Apple"].sort().join(), $$u(pt, ".cols > div:nth-child(2) .row .title").map((e) => e.textContent));
+  setU(pt, $u(pt, "#q"), "Ποια είναι η πολιτική επιστροφών;");
+  submitU(pt, "form.searchrow");
+  await uiWait(() => $u(pt, ".answer .source"));
+  check("portal: η απάντηση δείχνει τον πελάτη στην ετικέτα και η πηγή είναι έγγραφο της Apple", /πελάτης: Apple UI/.test($u(pt, ".answer .label").textContent) && /Apple UI/.test($u(pt, ".answer .source").textContent) && !/eFood/.test($u(pt, ".answer").textContent), $u(pt, ".answer").textContent);
+  setU(pt, $u(pt, "#wall"), cF.id);
+  await uiWait(() => $$u(pt, ".cols > div:nth-child(2) .row .title").some((e) => /eFood/.test(e.textContent)));
+  check("portal: αλλαγή πελάτη: σβήνει η απάντηση του προηγούμενου και αλλάζει η λίστα", $u(pt, ".answer").style.display === "none" && !$$u(pt, ".cols > div:nth-child(2) .row .title").some((e) => /Apple/.test(e.textContent)));
+  const one = uiFor("ui31_one@demo.gr")("portal.html");
+  await uiWait(() => $u(one, "#q"));
+  check("portal: πράκτορας ενός πελάτη: καμία επιλογή πελάτη και το «Ρώτα» είναι ενεργό", !$u(one, "#wallrow") && $u(one, "form.searchrow button").disabled === false);
+}
+
 // ============================================================================ Σύνοψη
 console.log("\n" + "=".repeat(60));
 if (failures.length) {

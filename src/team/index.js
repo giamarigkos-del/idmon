@@ -19,7 +19,7 @@ import {
   handleSaveDocument,
 } from "./docs.js";
 import { handleTeamQuery } from "./query.js";
-import { COMPANY_WIDE } from "./access.js";
+import { COMPANY_WIDE, memberWalls } from "./access.js";
 import { handleDismissQuestion, handleInbox } from "./inbox.js";
 import {
   handleCheckDocument,
@@ -43,6 +43,13 @@ import {
   handleMemberReading,
 } from "./admin.js";
 import { handleCloseFeedback, handleCreateFeedback } from "./feedback.js";
+import {
+  handleAssignProjectClient,
+  handleCreateClient,
+  handleDeleteClient,
+  handleRenameClient,
+  handleSetProfile,
+} from "./clients.js";
 
 const DOC_PATH_RE = /^\/team\/documents\/([^/]+)$/;
 const DOC_CHECK_RE = /^\/team\/documents\/([^/]+)\/check$/;
@@ -52,6 +59,8 @@ const ADMIN_DEPT_RE = /^\/team\/admin\/departments\/([^/]+)$/;
 const ADMIN_MEMBER_RE = /^\/team\/admin\/members\/([^/]+)$/;
 const ADMIN_MEMBER_READING_RE = /^\/team\/admin\/members\/([^/]+)\/reading$/;
 const ADMIN_DOC_RE = /^\/team\/admin\/documents\/([^/]+)$/;
+const ADMIN_CLIENT_RE = /^\/team\/admin\/clients\/([^/]+)$/;
+const ADMIN_DEPT_CLIENT_RE = /^\/team\/admin\/departments\/([^/]+)\/client$/;
 
 // Προστασία από cross-site αιτήματα: ένα αίτημα που αλλάζει κάτι πρέπει να έρχεται από
 // την ίδια προέλευση. (Το cookie είναι επιπλέον SameSite=Strict.)
@@ -93,8 +102,11 @@ async function routeTeamRequest(request, env, url, deps, ctx) {
       email: member.email,
       role: member.role,
       workspaceName: member.workspaceName,
-      departments: member.departments.map((d) => ({ id: d.id, name: d.name })),
+      departments: member.departments.map((d) => ({ id: d.id, name: d.name, clientId: d.clientId || null })),
       editorProjectIds: member.editorProjectIds || [],
+      // Προφίλ χώρου και οι τοίχοι (πελάτες) όπου ανήκει το μέλος: αν είναι πάνω από ένας, ο βοηθός ρωτά "για ποιον πελάτη δουλεύεις;".
+      profile: member.profile || "company",
+      walls: member.profile === "multi_client" ? memberWalls(member, member.departments) : [],
     });
   }
 
@@ -105,13 +117,15 @@ async function routeTeamRequest(request, env, url, deps, ctx) {
       departments: visibleDepartments(member, all).map((d) => ({
         id: d.id,
         name: d.name,
+        clientId: d.clientId || null,
+        shortName: d.shortName || null,
         ...(member.role === "admin" ? { hidden: !!d.hidden } : {}),
       })),
     });
   }
 
   // --- έγγραφα (ανάγνωση: όλοι, σύμφωνα με τους κανόνες πρόσβασης)
-  if (path === "/team/documents" && method === "GET") return handleListDocuments(env, member);
+  if (path === "/team/documents" && method === "GET") return handleListDocuments(env, member, url.searchParams.get("clientId"));
   if (path === "/team/documents" && method === "POST") return handleSaveDocument(request, rc, null);
 
   const checkMatch = path.match(DOC_CHECK_RE);
@@ -159,6 +173,13 @@ async function routeTeamRequest(request, env, url, deps, ctx) {
     if (member.role !== "admin") return json(403, { error: "forbidden" });
     if (path === "/team/admin/overview" && method === "GET") return handleAdminOverview(env, member);
     if (path === "/team/admin/departments" && method === "POST") return handleCreateDepartment(request, rc);
+    if (path === "/team/admin/workspace" && method === "PATCH") return handleSetProfile(request, rc);
+    if (path === "/team/admin/clients" && method === "POST") return handleCreateClient(request, rc);
+    const clMatch = path.match(ADMIN_CLIENT_RE);
+    if (clMatch && method === "PATCH") return handleRenameClient(request, rc, decodeURIComponent(clMatch[1]));
+    if (clMatch && method === "DELETE") return handleDeleteClient(rc, decodeURIComponent(clMatch[1]));
+    const dcMatch = path.match(ADMIN_DEPT_CLIENT_RE);
+    if (dcMatch && method === "PUT") return handleAssignProjectClient(request, rc, decodeURIComponent(dcMatch[1]));
     const dMatch = path.match(ADMIN_DEPT_RE);
     if (dMatch && method === "PATCH") return handleUpdateDepartment(request, rc, decodeURIComponent(dMatch[1]));
     if (path === "/team/admin/members" && method === "POST") return handleCreateMember(request, rc);

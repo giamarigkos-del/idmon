@@ -25,6 +25,45 @@ export const COMPANY_WIDE = "_all";
 
 export const ROLES = ["admin", "editor", "employee"];
 
+// ΤΟΙΧΟΙ (2 Οκτ 2026): στο προφίλ "call center" κάθε πελάτης είναι τοίχος. Ένα project ανήκει σε έναν πελάτη ή σε κανέναν (τα εσωτερικά
+// του call center, "internal"). Στο προφίλ "company" κανένα project δεν έχει πελάτη, άρα όλα είναι στον ίδιο "τοίχο" και ο διαμοιρασμός
+// μένει ελεύθερος όπως πάντα. Ο κανόνας είναι ένας: ΤΙΠΟΤΑ δεν περνά από τον τοίχο ενός πελάτη σε άλλον (ακροατήριο, αντιφάσεις, ανάγνωση).
+export const INTERNAL_WALL = "internal";
+
+// Ο τοίχος ενός project: το id του πελάτη, αλλιώς "internal". Άγνωστο project: undefined (deny by default στους ελέγχους).
+export function wallOf(workspaceDepartments, projectId) {
+  const d = (workspaceDepartments || []).find((x) => x.id === projectId);
+  if (!d) return undefined;
+  return d.clientId || INTERNAL_WALL;
+}
+
+// Οι τοίχοι όπου ανήκει ένα μέλος (από τα projects του): [{ id, name }]. Στο "company" πάντα ένας.
+export function memberWalls(member, workspaceDepartments) {
+  const seen = new Map();
+  for (const pid of member.departmentIds || []) {
+    const d = (workspaceDepartments || []).find((x) => x.id === pid);
+    if (!d) continue;
+    const id = d.clientId || INTERNAL_WALL;
+    if (!seen.has(id)) seen.set(id, { id, name: d.clientId ? d.clientName : "Εσωτερικά" });
+  }
+  return [...seen.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), "el"));
+}
+
+// Το μέλος "περιορισμένο" σε έναν τοίχο: μόνο τα projects του εκείνου του τοίχου. Ο βοηθός ψάχνει πάντα σε ΕΝΑΝ πελάτη τη φορά, ώστε
+// ένας πράκτορας που δουλεύει για δύο πελάτες να μην παίρνει ποτέ ανάμεικτη απάντηση. null = ο τοίχος δεν είναι διαθέσιμος στο μέλος.
+// Ο admin μπορεί να περιοριστεί σε οποιονδήποτε υπαρκτό τοίχο (π.χ. για δοκιμή): γίνεται "μέλος" όλων των projects εκείνου του τοίχου.
+export function scopeMemberToWall(member, workspaceDepartments, wallId) {
+  const inWall = (pid) => wallOf(workspaceDepartments, pid) === wallId;
+  if (member.role === "admin") {
+    const pids = (workspaceDepartments || []).filter((d) => inWall(d.id)).map((d) => d.id);
+    if (!pids.length) return null;
+    return { ...member, role: "employee", departmentIds: pids, editorProjectIds: [] };
+  }
+  const ids = (member.departmentIds || []).filter(inWall);
+  if (!ids.length) return null;
+  return { ...member, departmentIds: ids, editorProjectIds: (member.editorProjectIds || []).filter((p) => ids.includes(p)) };
+}
+
 // Ακροατήριο: μέχρι 10 projects ΣΥΝΟΛΙΚΑ (ιδιοκτήτης και άλλα).
 export const MAX_AUDIENCE_PROJECTS = 10;
 
@@ -133,5 +172,8 @@ export function canReadDocument(member, workspaceDepartments, departmentId, hidd
   if (hidden) return false;
   const owner = (workspaceDepartments || []).find((d) => d.id === departmentId);
   if (!owner || owner.hidden) return false;
-  return (audienceProjectIds || []).some((p) => own.includes(p));
+  // Ο τοίχος ισχύει ΚΑΙ στην ανάγνωση (άμυνα σε βάθος): ένα project άλλου πελάτη στο ακροατήριο δεν δίνει ποτέ πρόσβαση, ακόμα κι αν
+  // έμεινε εκεί από παλιά δεδομένα. Στο προφίλ "company" όλα έχουν τον ίδιο τοίχο, άρα δεν αλλάζει τίποτα.
+  const ownerWall = owner.clientId || INTERNAL_WALL;
+  return (audienceProjectIds || []).some((p) => own.includes(p) && wallOf(workspaceDepartments, p) === ownerWall);
 }

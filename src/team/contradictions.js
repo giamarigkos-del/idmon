@@ -15,8 +15,8 @@
 // άλλου τμήματος (μόνο ανάγνωση). Αν η άλλη πλευρά είναι σε ΚΡΥΦΟ τμήμα, βλέπει μόνο ότι
 // υπάρχει αντίφαση, χωρίς τίτλο ή κείμενο, και ειδοποιείται ο admin.
 
-import { json, loadWorkspaceDepartments, sha256Hex } from "./auth.js";
-import { COMPANY_WIDE, canReadDocument, canWriteDepartment } from "./access.js";
+import { json, loadWorkspaceDepartments, loadWorkspaceProfile, sha256Hex } from "./auth.js";
+import { COMPANY_WIDE, canReadDocument, canWriteDepartment, wallOf } from "./access.js";
 import { departmentName, listDocIndex, normalizeText, readDoc } from "./store.js";
 import { SYSTEM_ACTOR, recordAudit } from "./audit.js";
 
@@ -177,11 +177,19 @@ export async function checkContradictions(env, deps, { workspaceId, docId, title
     }
     const candidates = [...byDoc.entries()].sort((a, b) => b[1].score - a[1].score).slice(0, MAX_CANDIDATE_DOCS);
 
+    // ΤΟΙΧΟΙ (call center): έγγραφα διαφορετικών πελατών ΔΕΝ συγκρίνονται ποτέ. Δεν έχει νόημα (κάθε πελάτης έχει δικούς του κανόνες) και
+    // μια "αντίφαση" ανάμεσα στην Apple και στην eFood θα φανέρωνε ότι υπάρχει το άλλο έγγραφο. Στο προφίλ "company" συγκρίνονται όλα, όπως πάντα.
+    const wallProfile = await loadWorkspaceProfile(env, workspaceId);
+    const wallDepartments = wallProfile === "multi_client" ? await loadWorkspaceDepartments(env, workspaceId) : [];
+    const wallOfDoc = (d) => (d.departmentId === COMPANY_WIDE ? "_all" : wallOf(wallDepartments, d.departmentId));
+    const wallMe = wallProfile === "multi_client" ? await readDoc(env, workspaceId, docId) : null;
+
     // 2+3) κριτής και επαλήθευση, παράλληλα ανά υποψήφιο έγγραφο
     const jobs = [];
     for (const [otherId, info] of candidates) {
       const other = await readDoc(env, workspaceId, otherId);
       if (!other) continue; // παλιά vectors χωρίς έγγραφο: αγνοούνται
+      if (wallProfile === "multi_client" && (!wallMe || wallOfDoc(other) !== wallOfDoc(wallMe))) continue; // άλλος τοίχος (ή άγνωστο έγγραφο): fail closed
       const excerpts = [...info.texts.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_EXCERPTS_PER_DOC).map((e) => e[0]);
       result.candidates++;
       jobs.push(

@@ -10,7 +10,7 @@
 // κείμενο που ο χρήστης δεν δικαιούται -- ό,τι δεν ανακτήθηκε δεν μπορεί να διαρρεύσει.
 
 import { json, loadWorkspaceDepartments } from "./auth.js";
-import { COMPANY_WIDE, buildVectorFilters, canReadDocument } from "./access.js";
+import { COMPANY_WIDE, buildVectorFilters, canReadDocument, memberWalls, scopeMemberToWall } from "./access.js";
 import { audienceGroupsForMember, documentAccessInfo, readDoc } from "./store.js";
 import { DEFAULT_DAILY_QUESTIONS, consumeQuota } from "./quota.js";
 
@@ -23,7 +23,7 @@ export const TOO_MANY_PROJECTS_ANSWER = "Ο λογαριασμός σου ανή
 // Ένωση των αποτελεσμάτων των παρτίδων: ταξινόμηση με βάση το score και κόψιμο στο μέγεθος που θα είχε ένα μόνο ερώτημα.
 // Το topK του retrieveMatches δεν είναι γνωστό εδώ. Αν κάποια παρτίδα επέστρεψε "γεμάτη", αυτό είναι το μέγεθος. Αλλιώς (λίγα έγγραφα σε κάθε
 // παρτίδα) κρατάμε τουλάχιστον MIN_MERGED_MATCHES, ώστε να μη χαθούν σχετικά αποτελέσματα από διαφορετικές παρτίδες.
-const MIN_MERGED_MATCHES = 5;
+const MIN_MERGED_MATCHES = 4; // = TOP_K του retrieveMatches στο src/index.js (4)
 function mergeMatches(results) {
   const lists = results.map((r) => (r && r.matches) || []);
   if (lists.length === 1) return lists[0];
@@ -98,16 +98,33 @@ export async function handleTeamQuery(request, env, member, deps) {
   if (question.length > MAX_QUESTION_CHARS) return json(400, { error: "question_too_long" });
   const history = deps.sanitizeHistory(body.history);
 
+  const departments = await loadWorkspaceDepartments(env, member.workspaceId);
+
+  // ΤΟΙΧΟΙ (call center): ο βοηθός ψάχνει σε ΕΝΑΝ πελάτη τη φορά, ώστε ένας πράκτορας που δουλεύει για δύο πελάτες να μην παίρνει ποτέ
+  // ανάμεικτη απάντηση. Αν το μέλος ανήκει σε περισσότερους από έναν τοίχους, ο πελάτης (clientId) είναι υποχρεωτικός: αλλιώς 400, ΠΡΙΝ
+  // καταναλωθεί ερώτηση του ημερήσιου ορίου και πριν ψάξουμε οτιδήποτε. Ο admin χωρίς clientId ψάχνει παντού, όπως πάντα.
+  // `actor` = το μέλος όπως περιορίστηκε στον τοίχο: ΜΟΝΟ αυτό χρησιμοποιείται για φίλτρο, ακροατήρια και έλεγχο ανάγνωσης.
+  let actor = member;
+  if (member.profile === "multi_client") {
+    const wanted = typeof body.clientId === "string" && body.clientId ? body.clientId : null;
+    if (wanted) {
+      actor = scopeMemberToWall(member, departments, wanted);
+      if (!actor) return json(403, { error: "client_forbidden" });
+    } else if (member.role !== "admin") {
+      const walls = memberWalls(member, departments);
+      if (walls.length > 1) return json(400, { error: "client_required", clients: walls });
+    }
+  }
+
   // Ημερήσιο όριο ερωτήσεων ανά μέλος (έλεγχος κόστους LLM). Fail open αν ο μετρητής δεν είναι διαθέσιμος.
   const dailyLimit = parseInt(env.TEAM_DAILY_QUESTION_LIMIT, 10) || DEFAULT_DAILY_QUESTIONS;
   const quota = await consumeQuota(env, member.id, "question", dailyLimit);
   if (!quota.ok) return json(429, { error: "daily_limit", limit: dailyLimit });
 
-  const departments = await loadWorkspaceDepartments(env, member.workspaceId);
-  const isAdmin = member.role === "admin";
+  const isAdmin = actor.role === "admin";
   // Οι ομάδες ακροατηρίου που αφορούν το μέλος (άδειο αν λείπει το migration 0015) και το φίλτρο σε παρτίδες.
-  const groupIds = isAdmin ? [] : await audienceGroupsForMember(env, member);
-  const { filters, tooMany } = buildVectorFilters(member, groupIds); // admin: ένα ερώτημα χωρίς φίλτρο
+  const groupIds = isAdmin ? [] : await audienceGroupsForMember(env, actor);
+  const { filters, tooMany } = buildVectorFilters(actor, groupIds); // admin: ένα ερώτημα χωρίς φίλτρο
   const workspaceId = member.workspaceId;
 
   const stream = new ReadableStream({
@@ -128,7 +145,7 @@ export async function handleTeamQuery(request, env, member, deps) {
           const info = await documentAccessInfo(env, workspaceId, matches.map((m) => m.metadata.documentId));
           matches = matches.filter((m) => {
             const d = info.get(m.metadata.documentId);
-            return !!d && canReadDocument(member, departments, d.departmentId, d.hidden, d.audienceProjectIds);
+            return !!d && canReadDocument(actor, departments, d.departmentId, d.hidden, d.audienceProjectIds);
           });
         }
 
@@ -136,7 +153,7 @@ export async function handleTeamQuery(request, env, member, deps) {
 
         if (matches.length === 0) {
           controller.enqueue(deps.encodeSSE({ type: "chunk", text: NO_MATCH_ANSWER }));
-          await logUnanswered(env, deps, member, question);
+          await logUnanswered(env, deps, actor, question);
           controller.enqueue(deps.encodeSSE({ type: "done", isFallback: true, primarySource: null, relatedSections: [] }));
           controller.close();
           return;
@@ -179,7 +196,7 @@ export async function handleTeamQuery(request, env, member, deps) {
             text: top.metadata.text,
           };
         } else {
-          await logUnanswered(env, deps, member, question);
+          await logUnanswered(env, deps, actor, question);
         }
 
         controller.enqueue(deps.encodeSSE({ type: "done", isFallback, primarySource, relatedSections: [] }));

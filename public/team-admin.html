@@ -56,6 +56,13 @@
   .backlink{background:none;border:none;color:var(--text-soft);cursor:pointer;font-size:var(--fs-sm);padding:4px 0;font-family:inherit;margin-bottom:8px;}
   .backlink:hover{text-decoration:underline;color:var(--text);}
   .pastebox{margin-top:14px;padding-top:12px;border-top:1px solid var(--border);}
+  .group{margin-top:6px;}
+  .group-body{margin:0 0 6px 10px;padding-left:14px;border-left:2px solid var(--border);}
+  .group-title{font-weight:600;font-size:var(--fs-md);margin:18px 0 2px;}
+  .client-row{border-top:1px solid var(--border);margin-top:10px;}
+  .client-row .name{font-size:var(--fs-lg);}
+  .client-row .pill{margin-left:8px;}
+  select.move-client{max-width:230px;}
   .reading{margin-top:12px;}
   .reading details.audience{margin:0;background:var(--bg);}
   .reading-row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border);font-size:var(--fs-sm);}
@@ -185,9 +192,24 @@
     invalid_projects: "Ένα από τα projects δεν είναι έγκυρο.", invalid_changes: "Η αλλαγή δεν είναι έγκυρη.",
     invalid_members: "Η επιλογή μελών δεν είναι έγκυρη.", invalid_emails: "Ένα από τα emails δεν είναι σωστό.",
     no_targets: "Δεν επιλέχθηκε κανένα μέλος.", too_many: "Πάρα πολλά μέλη σε ένα αίτημα. Το πολύ 100.",
-    too_many_invites: "Για πάνω από 40 νέα μέλη δημιούργησέ τα χωρίς πρόσκληση.", invalid_status: "Η κατάσταση δεν είναι έγκυρη."
+    too_many_invites: "Για πάνω από 40 νέα μέλη δημιούργησέ τα χωρίς πρόσκληση.", invalid_status: "Η κατάσταση δεν είναι έγκυρη.",
+    client_has_projects: "Ο πελάτης έχει ακόμα τμήματα. Μετέφερέ τα ή αφαίρεσέ τα πρώτα.",
+    has_clients: "Υπάρχουν ακόμα πελάτες. Διέγραψέ τους πρώτα (αφού μεταφέρεις ή αφαιρέσεις τα τμήματά τους).",
+    profile_company: "Αυτό ισχύει μόνο για χώρο call center. Άλλαξε πρώτα τον τύπο χώρου.",
+    client_not_found: "Ο πελάτης δεν βρέθηκε (ίσως διαγράφηκε στο μεταξύ).", invalid_client: "Ο πελάτης δεν είναι έγκυρος.", invalid_profile: "Ο τύπος χώρου δεν είναι έγκυρος.",
+    clients_unavailable: "Οι πελάτες δεν είναι ακόμα διαθέσιμοι σε αυτόν τον χώρο (λείπει μια ενημέρωση βάσης)."
   };
-  function errText(r) { return ERRORS[r.data && r.data.error] || "Κάτι πήγε στραβά."; }
+  function errText(r) {
+    var e = r.data && r.data.error;
+    // Η μεταφορά project ανάμεσα σε πελάτες απορρίπτεται όσο μένουν κοινά έγγραφα πάνω από τον τοίχο: λέμε πόσα και τι να κάνει ο admin.
+    if (e === "cross_client_shares") {
+      var parts = [];
+      if (r.data.owned) parts.push(r.data.owned + (r.data.owned === 1 ? " έγγραφο του project μοιράζεται" : " έγγραφα του project μοιράζονται") + " με τμήματα του ίδιου πελάτη");
+      if (r.data.incoming) parts.push(r.data.incoming + (r.data.incoming === 1 ? " έγγραφο άλλου τμήματος μοιράζεται" : " έγγραφα άλλων τμημάτων μοιράζονται") + " προς αυτό");
+      return "Δεν μεταφέρεται: " + parts.join(" και ") + ". Αφαίρεσε πρώτα τον διαμοιρασμό από την οθόνη του εγγράφου.";
+    }
+    return ERRORS[e] || "Κάτι πήγε στραβά.";
+  }
   var ROLE_LABEL = { admin: "Admin", member: "Μέλος", editor: "Editor", employee: "Υπάλληλος" };
   var ACTION_LABEL = {
     login: "σύνδεση", document_hidden: "σήμανση εμπιστευτικού", document_unhidden: "άρση εμπιστευτικού", feedback_closed: "κλείσιμο αναφορών υπαλλήλων", rechecks_run: "εκτέλεση επανελέγχων", document_created: "νέο έγγραφο", document_updated: "αλλαγή εγγράφου", document_deleted: "διαγραφή εγγράφου",
@@ -196,7 +218,9 @@
     contradiction_check_failed: "αποτυχία ελέγχου αντιφάσεων", department_created: "νέο project", department_renamed: "μετονομασία project",
     department_hidden: "απόκρυψη project", department_unhidden: "εμφάνιση project", member_added: "νέο μέλος", member_role_changed: "αλλαγή ρόλου", member_project_roles_changed: "αλλαγή ρόλων ανά project",
     member_disabled: "απενεργοποίηση μέλους", member_enabled: "ενεργοποίηση μέλους", member_departments_changed: "αλλαγή projects μέλους", question_dismissed: "παράβλεψη ερώτησης",
-    members_bulk_changed: "μαζική αλλαγή projects", members_bulk_status: "μαζική αλλαγή κατάστασης"
+    members_bulk_changed: "μαζική αλλαγή projects", members_bulk_status: "μαζική αλλαγή κατάστασης",
+    workspace_profile_changed: "αλλαγή τύπου χώρου", client_created: "νέος πελάτης", client_renamed: "μετονομασία πελάτη", client_deleted: "διαγραφή πελάτη",
+    project_client_changed: "μεταφορά project σε πελάτη"
   };
 
   function load() {
@@ -220,66 +244,200 @@
     app.appendChild(content);
   }
 
-  // ---------------------------------------------------------------- τμήματα
+  // ---------------------------------------------------------------- τμήματα, πελάτες (τοίχοι) και τύπος χώρου
+  // Δύο προφίλ, ένας κώδικας: "company" = μία εταιρεία, επίπεδη λίστα τμημάτων με ελεύθερο διαμοιρασμό. "multi_client" = call center:
+  // κάθε πελάτης είναι ΤΟΙΧΟΣ (τίποτα δεν περνά από τον έναν πελάτη στον άλλον) και τα τμήματά του ζουν μέσα του.
+  function deptRowFor(d, msg, inClient) {
+    var shown = inClient ? (d.shortName || d.name) : d.name;
+    var name = h("input", { type: "text", value: shown, maxlength: "60", "aria-label": "Όνομα project " + d.name });
+    var rename = h("button", { class: "btn secondary", type: "button", text: "Αποθήκευση ονόματος", onclick: function () {
+      beginAction();
+      var newNameText = name.value.trim().replace(/\s+/g, " ");
+      api("/team/admin/departments/" + encodeURIComponent(d.id), "PATCH", { name: name.value }).then(function (r) {
+        if (r.status === 200) { ok(d.name + ": μετονομάστηκε σε " + newNameText); changed("dept-" + d.id); load(); } else { msg.className = "note err"; msg.textContent = errText(r); }
+      });
+    } });
+    var deptRow, deptControls;
+    function doToggleHidden() {
+      beginAction();
+      api("/team/admin/departments/" + encodeURIComponent(d.id), "PATCH", { hidden: !d.hidden }).then(function (r) {
+        if (r.status === 200) { ok(d.name + (d.hidden ? ": ορατό project" : ": κρυφό project")); changed("dept-" + d.id); load(); }
+        else { msg.className = "note err"; msg.textContent = errText(r); }
+      });
+    }
+    var toggle = h("button", { class: "btn secondary hide-toggle", type: "button", text: d.hidden ? "Εμφάνιση project" : "Απόκρυψη project", onclick: function () {
+      // Ένα κρυφό project δεν μοιράζει έγγραφα: αν έχει κοινοποιημένα, τα επαναφέρει σε "μόνο μέλη του project". Προειδοποιούμε πριν.
+      if (!d.hidden && d.sharedDocumentCount > 0) {
+        confirmFirst(deptRow, deptControls, (d.sharedDocumentCount === 1
+          ? "Ένα έγγραφο του project μοιράζεται με άλλα projects. Θα σταματήσει να μοιράζεται και δεν θα επανέλθει μόνο του."
+          : d.sharedDocumentCount + " έγγραφα του project μοιράζονται με άλλα projects. Θα σταματήσουν να μοιράζονται και δεν θα επανέλθουν μόνα τους.") + " Σίγουρα;", doToggleHidden);
+        return;
+      }
+      doToggleHidden();
+    } });
+    var controls = [name, rename, toggle, h("button", { class: "btn secondary open-project", type: "button", text: "Μέλη", onclick: function () { beginAction(); proj.openId = d.id; proj.q = ""; proj.page = 0; proj.result = ""; proj.showDisabled = false; render(); } })];
+    if (data.profile === "multi_client") {
+      // Μεταφορά σε άλλον πελάτη (ή στα εσωτερικά): σοβαρή ενέργεια, ζητά επιβεβαίωση. Ο server την αρνείται αν θα έμενε κοινό έγγραφο πάνω από τον τοίχο.
+      var move = h("select", { class: "move-client", "aria-label": "Πελάτης του project " + d.name }, [option("", "Εσωτερικό (χωρίς πελάτη)")].concat(data.clients.map(function (c) { return option(c.id, c.name); })));
+      move.value = d.clientId || "";
+      move.addEventListener("change", function () {
+        var target = move.value;
+        var targetClient = data.clients.filter(function (c) { return c.id === target; })[0];
+        function revert() { move.value = d.clientId || ""; }
+        var question = target
+          ? "Το project θα μεταφερθεί στον πελάτη «" + targetClient.name + "» και το όνομά του θα γίνει «" + targetClient.name + " · " + shown + "». Τα μέλη και τα έγγραφά του μένουν. Σίγουρα;"
+          : "Το project θα γίνει εσωτερικό του call center (χωρίς πελάτη). Σίγουρα;";
+        confirmFirst(deptRow, deptControls, question, function () {
+          beginAction();
+          api("/team/admin/departments/" + encodeURIComponent(d.id) + "/client", "PUT", { clientId: target || null }).then(function (r) {
+            if (r.status === 200) { ok(shown + ": " + (target ? "μεταφέρθηκε στον πελάτη " + targetClient.name : "έγινε εσωτερικό")); changed("dept-" + d.id); load(); }
+            else { fail(errText(r)); revert(); }
+          });
+        }, revert);
+      });
+      controls.splice(3, 0, move);
+    }
+    deptControls = h("div", { class: "controls" }, controls);
+    deptRow = h("div", { class: "row dept-row", "data-key": "dept-" + d.id }, [
+      h("div", null, [
+        h("span", { class: "name", text: shown }), d.hidden ? h("span", { class: "pill hid", text: "κρυφό" }) : null,
+        h("div", { class: "meta", text: plural(d.memberCount, "μέλος", "μέλη") + " · " + plural(d.documentCount, "έγγραφο", "έγγραφα") + (d.disabledCount ? " · +" + plural(d.disabledCount, "απενεργοποιημένο", "απενεργοποιημένα") : "") }),
+      ]),
+      deptControls,
+    ]);
+    return deptRow;
+  }
+
+  // Φόρμα νέου τμήματος: εσωτερικό (χωρίς πελάτη) ή μέσα σε πελάτη.
+  function addDeptForm(msg, client) {
+    var label = client ? "Νέο τμήμα του πελάτη " + client.name : (data.profile === "multi_client" ? "Νέο εσωτερικό τμήμα" : "Όνομα νέου project");
+    var input = h("input", { type: "text", class: "grow", maxlength: "60", placeholder: client ? "Όνομα νέου τμήματος" : (data.profile === "multi_client" ? "Όνομα νέου εσωτερικού τμήματος" : "Όνομα νέου project"), "aria-label": label });
+    if (!client) input.id = "new-dept";
+    var form = h("form", { class: "add" + (client ? " add-in-client" : ""), id: client ? "add-dept-" + client.id : "add-dept", onsubmit: function (e) {
+      e.preventDefault();
+      beginAction();
+      var body = { name: input.value };
+      if (client) body.clientId = client.id;
+      api("/team/admin/departments", "POST", body).then(function (r) {
+        if (r.status === 201) { ok((r.data.name || input.value) + ": νέο project"); changed("dept-" + r.data.id); load(); } else { msg.className = "note err"; msg.textContent = errText(r); }
+      });
+    } }, [input, h("button", { class: "btn", type: "submit", text: client ? "Προσθήκη τμήματος" : (data.profile === "multi_client" ? "Προσθήκη εσωτερικού τμήματος" : "Προσθήκη project") })]);
+    return form;
+  }
+
+  function clientBlock(c, msg) {
+    var name = h("input", { type: "text", value: c.name, maxlength: "60", "aria-label": "Όνομα πελάτη " + c.name });
+    var save = h("button", { class: "btn secondary", type: "button", text: "Αποθήκευση ονόματος", onclick: function () {
+      beginAction();
+      api("/team/admin/clients/" + encodeURIComponent(c.id), "PATCH", { name: name.value }).then(function (r) {
+        if (r.status === 200) { ok(c.name + ": μετονομάστηκε σε " + name.value.trim().replace(/\s+/g, " ")); changed("client-" + c.id); load(); } else { fail(errText(r)); }
+      });
+    } });
+    var host, row;
+    var del = h("button", { class: "btn danger delete-client", type: "button", text: "Διαγραφή πελάτη",
+      title: c.projectCount > 0 ? "Ο πελάτης έχει ακόμα τμήματα" : "", onclick: function () {
+        confirmFirst(row, host, "Να διαγραφεί ο πελάτης «" + c.name + "» (δεν έχει τμήματα); Σίγουρα;", function () {
+          beginAction();
+          api("/team/admin/clients/" + encodeURIComponent(c.id), "DELETE").then(function (r) {
+            if (r.status === 200) { ok(c.name + ": ο πελάτης διαγράφηκε"); load(); } else { fail(errText(r)); load(); }
+          });
+        });
+      } });
+    del.disabled = c.projectCount > 0; // ιδιότητα, όχι attribute: το h() θα έβαζε disabled="false", που κλειδώνει το κουμπί
+    host = h("div", { class: "controls" }, [name, save, del]);
+    row = h("div", { class: "row client-row", "data-key": "client-" + c.id }, [
+      h("div", null, [h("span", { class: "name", text: c.name }), h("span", { class: "pill muted", text: "πελάτης" }), h("div", { class: "meta", text: plural(c.projectCount, "τμήμα", "τμήματα") })]),
+      host,
+    ]);
+    var body = h("div", { class: "group-body" });
+    data.departments.filter(function (d) { return d.clientId === c.id; }).forEach(function (d) { body.appendChild(deptRowFor(d, msg, true)); });
+    if (!c.projectCount) body.appendChild(h("p", { class: "empty", text: "Ο πελάτης δεν έχει ακόμα τμήματα. Πρόσθεσε το πρώτο παρακάτω." }));
+    body.appendChild(addDeptForm(msg, c));
+    return h("div", { class: "group client-group", "data-client": c.id }, [row, body]);
+  }
+
+  function profileCard() {
+    var multi = data.profile === "multi_client";
+    var card = h("div", { class: "card", id: "profile-card" }, [h("h2", { text: "Τύπος χώρου" })]);
+    card.appendChild(h("p", { class: "hint", text: multi
+      ? "Call center με πολλούς πελάτες: κάθε πελάτης είναι τοίχος. Τα έγγραφά του δεν μοιράζονται ποτέ με άλλον πελάτη και ο βοηθός ψάχνει σε έναν πελάτη τη φορά. Τα τμήματα ενός πελάτη μοιράζονται ελεύθερα έγγραφα μεταξύ τους."
+      : "Εταιρεία: ένας οργανισμός με τμήματα. Τα τμήματα μπορούν να μοιράζονται ελεύθερα έγγραφα μεταξύ τους. Αν είσαι call center με πολλούς πελάτες, άλλαξε τον τύπο ώστε κάθε πελάτης να γίνει τοίχος." }));
+    var row = h("div", { class: "controls", id: "profile-controls" });
+    var btn;
+    if (!data.clientsAvailable) {
+      card.appendChild(h("p", { class: "note", text: "Η αλλαγή τύπου χώρου δεν είναι ακόμα διαθέσιμη σε αυτόν τον χώρο (λείπει μια ενημέρωση βάσης)." }));
+      return card;
+    }
+    if (multi) {
+      var hasClients = data.clients.length > 0;
+      btn = h("button", { class: "btn secondary", type: "button", id: "profile-switch", text: "Επιστροφή σε «Εταιρεία»",
+        title: hasClients ? "Διέγραψε πρώτα όλους τους πελάτες" : "", onclick: function () {
+          confirmFirst(card, row, "Ο χώρος θα γίνει «Εταιρεία» (χωρίς πελάτες και τοίχους). Σίγουρα;", function () { switchProfile("company"); });
+        } });
+      btn.disabled = hasClients; // ιδιότητα, όχι attribute (βλ. παραπάνω)
+      row.appendChild(btn);
+      if (hasClients) row.appendChild(h("span", { class: "muted", text: "Για επιστροφή σε «Εταιρεία» διέγραψε πρώτα όλους τους πελάτες (αφού μεταφέρεις ή αφαιρέσεις τα τμήματά τους)." }));
+    } else {
+      btn = h("button", { class: "btn secondary", type: "button", id: "profile-switch", text: "Αλλαγή σε «Call center (πολλοί πελάτες)»", onclick: function () {
+        confirmFirst(card, row, "Κάθε πελάτης θα γίνει τοίχος και τα έγγραφα δεν θα μοιράζονται ποτέ ανάμεσα σε πελάτες. Τα υπάρχοντα projects μένουν «εσωτερικά» μέχρι να τα μεταφέρεις σε πελάτες. Σίγουρα;", function () { switchProfile("multi_client"); });
+      } });
+      row.appendChild(btn);
+    }
+    card.appendChild(row);
+    return card;
+  }
+  function switchProfile(profile) {
+    beginAction();
+    api("/team/admin/workspace", "PATCH", { profile: profile }).then(function (r) {
+      if (r.status === 200) { ok(profile === "multi_client" ? "Ο χώρος έγινε «Call center»" : "Ο χώρος έγινε «Εταιρεία»"); load(); } else { fail(errText(r)); load(); }
+    });
+  }
+
   function departmentsView() {
     var open = proj.openId ? deptById(proj.openId) : null;
     if (open) return projectView(open);
     proj.openId = null;
+    var multi = data.profile === "multi_client";
+    var wrap = h("div", null);
     var box = h("div", { class: "card" }, [
-      h("h2", { text: "Projects" }),
-      h("p", { class: "hint", text: "Ένα κρυφό project το βλέπουν μόνο τα μέλη του και οι admins: τα έγγραφά του δεν μοιράζονται με άλλα projects και μια αντίφαση μαζί του εμφανίζεται χωρίς περιεχόμενο. Με το «Μέλη» ανοίγεις τη σελίδα του project." }),
+      h("h2", { text: multi ? "Πελάτες και projects" : "Projects" }),
+      h("p", { class: "hint", text: multi
+        ? "Κάθε πελάτης είναι τοίχος: τα έγγραφά του δεν μοιράζονται ποτέ με άλλον πελάτη. Μέσα σε έναν πελάτη τα τμήματα μοιράζονται ελεύθερα έγγραφα. Ένα κρυφό project το βλέπουν μόνο τα μέλη του και οι admins. Με το «Μέλη» ανοίγεις τη σελίδα του project."
+        : "Ένα κρυφό project το βλέπουν μόνο τα μέλη του και οι admins: τα έγγραφά του δεν μοιράζονται με άλλα projects και μια αντίφαση μαζί του εμφανίζεται χωρίς περιεχόμενο. Με το «Μέλη» ανοίγεις τη σελίδα του project." }),
     ]);
     var msg = h("p", { class: "note", role: "status", "aria-live": "polite" });
     box.appendChild(h("div", { class: "row" }, [
-      h("div", null, [h("span", { class: "name", text: "Όλη η εταιρεία" }), h("div", { class: "meta", text: plural(data.companyWideDocumentCount, "έγγραφο", "έγγραφα") + " · ορατά σε όλους" })]),
+      h("div", null, [h("span", { class: "name", text: multi ? "Εσωτερικά έγγραφα του call center" : "Όλη η εταιρεία" }), h("div", { class: "meta", text: plural(data.companyWideDocumentCount, "έγγραφο", "έγγραφα") + (multi ? " · ορατά σε όλους τους πράκτορες όλων των πελατών, μην βάζεις εδώ πληροφορίες πελατών" : " · ορατά σε όλους") })]),
     ]));
-    data.departments.forEach(function (d) {
-      var name = h("input", { type: "text", value: d.name, maxlength: "80", "aria-label": "Όνομα project " + d.name });
-      var rename = h("button", { class: "btn secondary", type: "button", text: "Αποθήκευση ονόματος", onclick: function () {
-        beginAction();
-        var newNameText = name.value.trim().replace(/\s+/g, " ");
-        api("/team/admin/departments/" + encodeURIComponent(d.id), "PATCH", { name: name.value }).then(function (r) {
-          if (r.status === 200) { ok(d.name + ": μετονομάστηκε σε " + newNameText); changed("dept-" + d.id); load(); } else { msg.className = "note err"; msg.textContent = errText(r); }
-        });
-      } });
-      var deptRow, deptControls;
-      function doToggleHidden() {
-        beginAction();
-        api("/team/admin/departments/" + encodeURIComponent(d.id), "PATCH", { hidden: !d.hidden }).then(function (r) {
-          if (r.status === 200) { ok(d.name + (d.hidden ? ": ορατό project" : ": κρυφό project")); changed("dept-" + d.id); load(); }
-          else { msg.className = "note err"; msg.textContent = errText(r); }
-        });
-      }
-      var toggle = h("button", { class: "btn secondary hide-toggle", type: "button", text: d.hidden ? "Εμφάνιση project" : "Απόκρυψη project", onclick: function () {
-        // Ένα κρυφό project δεν μοιράζει έγγραφα: αν έχει κοινοποιημένα, τα επαναφέρει σε "μόνο μέλη του project". Προειδοποιούμε πριν.
-        if (!d.hidden && d.sharedDocumentCount > 0) {
-          confirmFirst(deptRow, deptControls, (d.sharedDocumentCount === 1
-            ? "Ένα έγγραφο του project μοιράζεται με άλλα projects. Θα σταματήσει να μοιράζεται και δεν θα επανέλθει μόνο του."
-            : d.sharedDocumentCount + " έγγραφα του project μοιράζονται με άλλα projects. Θα σταματήσουν να μοιράζονται και δεν θα επανέλθουν μόνα τους.") + " Σίγουρα;", doToggleHidden);
-          return;
-        }
-        doToggleHidden();
-      } });
-      deptControls = h("div", { class: "controls" }, [name, rename, toggle, h("button", { class: "btn secondary open-project", type: "button", text: "Μέλη", onclick: function () { beginAction(); proj.openId = d.id; proj.q = ""; proj.page = 0; proj.result = ""; proj.showDisabled = false; render(); } })]);
-      deptRow = h("div", { class: "row dept-row", "data-key": "dept-" + d.id }, [
-        h("div", null, [
-          h("span", { class: "name", text: d.name }), d.hidden ? h("span", { class: "pill hid", text: "κρυφό" }) : null,
-          h("div", { class: "meta", text: plural(d.memberCount, "μέλος", "μέλη") + " · " + plural(d.documentCount, "έγγραφο", "έγγραφα") + (d.disabledCount ? " · +" + plural(d.disabledCount, "απενεργοποιημένο", "απενεργοποιημένα") : "") }),
-        ]),
-        deptControls,
+    if (multi) {
+      data.clients.forEach(function (c) { box.appendChild(clientBlock(c, msg)); });
+      var internal = data.departments.filter(function (d) { return !d.clientId; });
+      var group = h("div", { class: "group internal-group" }, [
+        h("div", { class: "group-title", text: "Εσωτερικά (χωρίς πελάτη)" }),
+        h("p", { class: "hint", text: "Τμήματα του ίδιου του call center (π.χ. εκπαίδευση). Δεν μοιράζονται έγγραφα με πελάτες." }),
       ]);
-      box.appendChild(deptRow);
-    });
-    var newName = h("input", { type: "text", class: "grow", id: "new-dept", maxlength: "80", placeholder: "Όνομα νέου project", "aria-label": "Όνομα νέου project" });
-    box.appendChild(h("form", { class: "add", id: "add-dept", onsubmit: function (e) {
-      e.preventDefault();
-      beginAction();
-      api("/team/admin/departments", "POST", { name: newName.value }).then(function (r) {
-        if (r.status === 201) { ok((r.data.name || newName.value) + ": νέο project"); changed("dept-" + r.data.id); load(); } else { msg.className = "note err"; msg.textContent = errText(r); }
-      });
-    } }, [newName, h("button", { class: "btn", type: "submit", text: "Προσθήκη project" })]));
+      var gbody = h("div", { class: "group-body" });
+      internal.forEach(function (d) { gbody.appendChild(deptRowFor(d, msg, false)); });
+      if (!internal.length) gbody.appendChild(h("p", { class: "empty", text: "Κανένα εσωτερικό τμήμα." }));
+      gbody.appendChild(addDeptForm(msg, null));
+      group.appendChild(gbody);
+      box.appendChild(group);
+      var newClient = h("input", { type: "text", class: "grow", id: "new-client", maxlength: "60", placeholder: "Όνομα νέου πελάτη", "aria-label": "Όνομα νέου πελάτη" });
+      box.appendChild(h("form", { class: "add", id: "add-client", onsubmit: function (e) {
+        e.preventDefault();
+        beginAction();
+        api("/team/admin/clients", "POST", { name: newClient.value }).then(function (r) {
+          if (r.status === 201) { ok((r.data.name || newClient.value) + ": νέος πελάτης"); changed("client-" + r.data.id); load(); } else { fail(errText(r)); }
+        });
+      } }, [newClient, h("button", { class: "btn", type: "submit", text: "Προσθήκη πελάτη" })]));
+    } else {
+      data.departments.forEach(function (d) { box.appendChild(deptRowFor(d, msg, false)); });
+      box.appendChild(addDeptForm(msg, null));
+    }
     box.appendChild(msg);
-    return box;
+    wrap.appendChild(box);
+    wrap.appendChild(profileCard());
+    return wrap;
   }
 
   // ---------------------------------------------------------------- μέλη

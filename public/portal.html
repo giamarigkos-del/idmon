@@ -23,6 +23,11 @@
   .userbox a{color:var(--text-soft);text-decoration:underline;margin:0;}
   .avatar{width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent);
     display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-xs);font-weight:600;}
+  /* Πράκτορας που δουλεύει για περισσότερους από έναν πελάτες: ο βοηθός ψάχνει σε ΕΝΑΝ πελάτη τη φορά, γι' αυτό η επιλογή είναι εμφανής. */
+  .wallrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px;padding:10px 14px;border:1px solid var(--accent);border-radius:var(--r);background:var(--accent-soft);}
+  .wallrow label{margin:0;color:var(--text);font-weight:600;font-size:var(--fs-md);}
+  .wallrow select{min-width:200px;height:var(--h-input);}
+  .wallrow .note{margin:0;min-height:0;}
   .searchrow{display:flex;gap:8px;margin-bottom:8px;}
   .searchrow input{flex:1;min-width:0;height:48px;font-size:1rem;padding:0 14px;}
   .searchrow .btn{height:48px;padding:0 22px;font-size:var(--fs-md);}
@@ -70,6 +75,9 @@
   // ------------------------------------------------------------------ βοηθητικά
   var app = document.getElementById("app");
   var chatHistory = []; // τελευταία μηνύματα συζήτησης, για follow-up ερωτήσεις
+  var wall = null; // ο πελάτης (τοίχος) για τον οποίο δουλεύει τώρα ο πράκτορας (μόνο στο call center, όταν ανήκει σε περισσότερους από έναν)
+  var WALL_KEY = "idmon-team-wall";
+  var wallRequired = false; // true όταν ο πράκτορας ανήκει σε περισσότερους από έναν πελάτες: χωρίς επιλογή δεν φαίνονται έγγραφα ούτε γίνεται ερώτηση
 
   // Ο βοηθός γράφει συχνά markdown (**έντονα**, λίστες με * ή -). Εμφανίζεται ως κείμενο με έντονα και κουκκίδες,
   // χωρίς ποτέ innerHTML: κάθε κομμάτι μπαίνει με textContent.
@@ -250,20 +258,58 @@
     var input = h("input", { type: "text", id: "q", placeholder: "Ρώτα για μια διαδικασία…", "aria-label": "Ερώτηση", autocomplete: "off", maxlength: "1000" });
     var ask = h("button", { class: "btn lg", type: "submit", text: "Ρώτα" });
     var answerBox = h("div", { class: "answer card", style: "display:none;", "aria-live": "polite" });
+    var recent = h("div", null, [h("h2", { text: "Τι άλλαξε πρόσφατα" })]);
+    var docsCol = h("div", null, [h("h2", { text: "Έγγραφα που βλέπεις" })]);
+
+    // Επιλογή πελάτη (call center, μέλος σε περισσότερους από έναν πελάτες). Χωρίς επιλογή δεν γίνεται ερώτηση: αλλιώς η απάντηση θα έβγαινε ανάμεικτη.
+    wall = null;
+    var walls = me.profile === "multi_client" && me.walls && me.walls.length > 1 ? me.walls : null;
+    wallRequired = !!walls;
+    if (walls) {
+      var stored = null;
+      try { stored = window.localStorage.getItem(WALL_KEY); } catch (e) { stored = null; }
+      var pick = h("select", { id: "wall", "aria-label": "Πελάτης για τον οποίο δουλεύεις" }, [h("option", { value: "", text: "Διάλεξε πελάτη…" })].concat(walls.map(function (w) { return h("option", { value: w.id, text: w.name }); })));
+      if (stored && walls.some(function (w) { return w.id === stored; })) { pick.value = stored; wall = stored; }
+      var wallNote = h("span", { class: "note", id: "wall-note", role: "status" });
+      var setWall = function (value, fromUser) {
+        wall = value || null;
+        try { if (wall) window.localStorage.setItem(WALL_KEY, wall); else window.localStorage.removeItem(WALL_KEY); } catch (e) { /* ignore */ }
+        input.placeholder = wall ? "Ρώτα για μια διαδικασία…" : "Διάλεξε πρώτα πελάτη…";
+        ask.disabled = !wall;
+        if (fromUser) {
+          // Άλλος πελάτης = άλλη συζήτηση: καθαρίζουμε την απάντηση και το ιστορικό, ώστε τίποτα να μη περάσει από τον έναν πελάτη στον άλλον.
+          chatHistory = [];
+          clear(answerBox); answerBox.style.display = "none";
+          wallNote.textContent = "";
+          loadDocuments(me, recent, docsCol);
+        }
+      };
+      pick.addEventListener("change", function () { setWall(pick.value, true); });
+      app.appendChild(h("div", { class: "wallrow", id: "wallrow" }, [h("label", { for: "wall", text: "Δουλεύεις για:" }), pick, wallNote]));
+      setWall(pick.value, false);
+    }
     app.appendChild(h("form", { class: "searchrow", onsubmit: function (e) { e.preventDefault(); askQuestion(input, ask, answerBox); } }, [input, ask]));
     // Ο βοηθός είναι σύστημα AI και το δηλώνουμε καθαρά (άρθρο 50 του AI Act, σε ισχύ από 2 Αυγούστου 2026).
     app.appendChild(h("p", { class: "hint ai-note", id: "ai-note", text: "Ο βοηθός είναι AI. Απαντά μόνο από έγγραφα που έχεις πρόσβαση και μπορεί να κάνει λάθη: έλεγξε την πηγή." }));
     app.appendChild(answerBox);
 
-    var recent = h("div", null, [h("h2", { text: "Τι άλλαξε πρόσφατα" })]);
-    var docsCol = h("div", null, [h("h2", { text: "Έγγραφα που βλέπεις" })]);
     app.appendChild(h("div", { class: "cols" }, [recent, docsCol]));
     input.focus();
     loadDocuments(me, recent, docsCol);
   }
 
   function loadDocuments(me, recentCol, docsCol) {
-    api("/team/documents").then(function (r) {
+    // Πράκτορας σε περισσότερους από έναν πελάτες, χωρίς επιλογή: δεν δείχνουμε έγγραφα κανενός (ούτε τίτλους άλλου πελάτη δίπλα σε αυτόν που εξυπηρετεί).
+    if (wallRequired && !wall) {
+      while (recentCol.childNodes.length > 1) recentCol.removeChild(recentCol.lastChild);
+      while (docsCol.childNodes.length > 1) docsCol.removeChild(docsCol.lastChild);
+      [recentCol, docsCol].forEach(function (col) { col.appendChild(h("div", { class: "empty wall-hint", text: "Διάλεξε πρώτα για ποιον πελάτη δουλεύεις." })); });
+      return;
+    }
+    api("/team/documents" + (wall ? "?clientId=" + encodeURIComponent(wall) : "")).then(function (r) {
+      // Ξαναφορτώνεται και όταν αλλάζει ο πελάτης: πρώτα καθαρίζουμε τις λίστες (κρατάμε μόνο τον τίτλο της στήλης).
+      while (recentCol.childNodes.length > 1) recentCol.removeChild(recentCol.lastChild);
+      while (docsCol.childNodes.length > 1) docsCol.removeChild(docsCol.lastChild);
       var docs = (r.data && r.data.documents) || [];
       // Ο υπάλληλος βλέπει ήδη μόνο τα δικά του + εταιρικά. Ο editor/admin βλέπει και άλλα
       // τμήματα (μόνο ανάγνωση), οπότε τα ξεχωρίζουμε με την ετικέτα τμήματος.
@@ -301,7 +347,8 @@
     clear(box);
     box.style.display = "";
     var body = h("p", { class: "body", text: "Ψάχνω…" });
-    box.appendChild(h("p", { class: "label" }, [h("span", { class: "pill muted", text: "AI" }), h("span", { text: "Απάντηση από AI, με βάση τα έγγραφα που έχεις πρόσβαση" })]));
+    var wallName = wall ? (function () { var sel = document.getElementById("wall"); var o = sel && sel.options[sel.selectedIndex]; return o ? o.text : ""; })() : "";
+    box.appendChild(h("p", { class: "label" }, [h("span", { class: "pill muted", text: "AI" }), h("span", { text: "Απάντηση από AI, με βάση τα έγγραφα που έχεις πρόσβαση" + (wallName ? " · πελάτης: " + wallName : "") })]));
     box.appendChild(body);
     var text = "";
 
@@ -309,8 +356,22 @@
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: question, history: chatHistory.slice(-6) }),
+      body: JSON.stringify(wall ? { question: question, history: chatHistory.slice(-6), clientId: wall } : { question: question, history: chatHistory.slice(-6) }),
     }).then(function (res) {
+      // Ο server απαιτεί πελάτη (400) ή τον αρνείται (403): δεν ξαναδοκιμάζουμε σιωπηλά, ζητάμε από τον χρήστη να διαλέξει.
+      if (res.status === 400 || res.status === 403) {
+        return res.json().catch(function () { return {}; }).then(function (d) {
+          var sel = document.getElementById("wall");
+          if (d.error === "client_required") { body.textContent = "Διάλεξε πρώτα για ποιον πελάτη δουλεύεις."; if (sel) sel.focus(); return null; }
+          if (d.error === "client_forbidden") {
+            body.textContent = "Ο πελάτης που διάλεξες δεν είναι διαθέσιμος για σένα. Διάλεξε άλλον.";
+            try { window.localStorage.removeItem(WALL_KEY); } catch (e) { /* ignore */ }
+            if (sel) { sel.value = ""; sel.dispatchEvent(new Event("change")); }
+            return null;
+          }
+          throw new Error("bad response");
+        });
+      }
       if (res.status === 429) { body.textContent = "Έφτασες το ημερήσιο όριο ερωτήσεων. Δοκίμασε αύριο ή ρώτα τον υπεύθυνο του τμήματός σου."; return null; }
       if (res.status === 401) { renderLogin("Η σύνδεσή σου έληξε. Ζήτησε νέο σύνδεσμο.", "err"); return null; }
       if (!res.ok || !res.body) throw new Error("bad response");

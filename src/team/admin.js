@@ -6,7 +6,8 @@
 // Μαζικές ενέργειες (1 Οκτ 2026): αλλαγές συμμετοχής σε projects και κατάστασης για ΠΟΛΛΑ μέλη με ένα αίτημα, ατομικά (όλα ή τίποτα) και
 // με ΜΙΑ γραμμή ιστορικού ανά ενέργεια: handleBulkMemberships και handleBulkStatus (στο τέλος του αρχείου).
 
-import { json, loadWorkspaceDepartments, normalizeEmail } from "./auth.js";
+import { json, loadWorkspaceDepartments, loadWorkspaceProfile, normalizeEmail } from "./auth.js";
+import { cleanName as cleanClientName, clientsAvailable, composeProjectName, loadClients, projectClientRow, validName } from "./clients.js";
 import { AUDIT_RETENTION_DAYS, recordAudit } from "./audit.js";
 import { COMPANY_WIDE, ROLES, canReadDocument } from "./access.js";
 import { DOC_ID_RE, departmentName, listDocIndex, pendingUpdateSummary, readDoc, resetDocumentAudience, writeDocRecord } from "./store.js";
@@ -115,9 +116,15 @@ export async function handleAdminOverview(env, member) {
   const docs = await listDocIndex(env, member.workspaceId);
   return json(200, {
     workspaceName: member.workspaceName,
+    // Προφίλ χώρου ("company" | "multi_client") και οι πελάτες (τοίχοι). Στο "company" η λίστα πελατών είναι πάντα κενή.
+    profile: await loadWorkspaceProfile(env, member.workspaceId),
+    clientsAvailable: await clientsAvailable(env),
+    clients: await loadClients(env, member.workspaceId),
     departments: departments.map((d) => ({
       id: d.id,
       name: d.name,
+      clientId: d.clientId,
+      shortName: d.shortName,
       hidden: !!d.hidden,
       // Μόνο ενεργά μέλη στο πλήθος (οι απενεργοποιημένοι δεν είναι πια "μέλη" για τον admin). Χωριστά το πλήθος των ανενεργών.
       memberCount: members.filter((m) => m.status === "active" && m.departmentIds.includes(d.id)).length,
@@ -171,17 +178,30 @@ export async function handleCreateDepartment(request, rc) {
   } catch {
     return json(400, { error: "invalid_json" });
   }
-  const name = cleanName(body.name);
-  if (!name || name.length > MAX_NAME_CHARS) return json(400, { error: "invalid_name" });
+  const short = cleanName(body.name);
+  if (!short || short.length > MAX_NAME_CHARS) return json(400, { error: "invalid_name" });
+  // Τμήμα ΜΕΣΑ σε πελάτη (call center): το όνομα γράφεται "<πελάτης> · <τμήμα>" και το project μπαίνει στον τοίχο του πελάτη.
+  let client = null;
+  if (body.clientId !== undefined && body.clientId !== null) {
+    if (typeof body.clientId !== "string") return json(400, { error: "invalid_client" });
+    if (!validName(cleanClientName(body.name))) return json(400, { error: "invalid_name" });
+    if (!(await clientsAvailable(env))) return json(503, { error: "clients_unavailable" });
+    if ((await loadWorkspaceProfile(env, member.workspaceId)) !== "multi_client") return json(409, { error: "profile_company" });
+    client = await env.DB.prepare("SELECT id, name FROM team_clients WHERE id = ? AND workspace_id = ?").bind(body.clientId, member.workspaceId).first();
+    if (!client) return json(404, { error: "client_not_found" });
+  }
+  const name = client ? composeProjectName(client.name, short) : short;
   const existing = await loadWorkspaceDepartments(env, member.workspaceId);
   if (existing.some((d) => d.name.toLowerCase() === name.toLowerCase())) return json(409, { error: "name_taken" });
   // Το id πάει αυτούσιο στα metadata του Vectorize: λατινικά μόνο, τυχαίο (τα ελληνικά ονόματα δεν χωράνε).
   const id = `d-${deps.randomHex(4)}`;
-  await env.DB.prepare(
+  const statements = [env.DB.prepare(
     "INSERT INTO departments (id, workspace_id, name, hidden, created_at) VALUES (?, ?, ?, 0, ?)"
-  ).bind(id, member.workspaceId, name, new Date().toISOString()).run();
-  await recordAudit(env, member, "department_created", id, { name });
-  return json(201, { id, name, hidden: false });
+  ).bind(id, member.workspaceId, name, new Date().toISOString())];
+  if (client) statements.push(env.DB.prepare("INSERT INTO team_project_clients (project_id, client_id, short_name) VALUES (?, ?, ?)").bind(id, client.id, short));
+  await runStatements(env, statements);
+  await recordAudit(env, member, "department_created", id, client ? { name, client: client.name } : { name });
+  return json(201, { id, name, hidden: false, clientId: client ? client.id : null, shortName: client ? short : null });
 }
 
 // ------------------------------------------------------------------ PATCH /team/admin/departments/{id}
@@ -199,11 +219,15 @@ export async function handleUpdateDepartment(request, rc, id) {
 
   const changes = {};
   if (body.name !== undefined) {
-    const name = cleanName(body.name);
-    if (!name || name.length > MAX_NAME_CHARS) return json(400, { error: "invalid_name" });
+    const clientRow = await projectClientRow(env, id);
+    const typed = cleanName(body.name);
+    if (!typed || typed.length > MAX_NAME_CHARS || (clientRow && !validName(typed))) return json(400, { error: "invalid_name" });
+    // Project πελάτη: αυτό που γράφεται είναι το σκέτο όνομα τμήματος, το πλήρες ξαναφτιάχνεται ως "<πελάτης> · <τμήμα>".
+    const name = clientRow ? composeProjectName(clientRow.clientName, typed) : typed;
     const others = (await loadWorkspaceDepartments(env, member.workspaceId)).filter((d) => d.id !== id);
     if (others.some((d) => d.name.toLowerCase() === name.toLowerCase())) return json(409, { error: "name_taken" });
     changes.name = name;
+    if (clientRow) changes.shortName = typed;
   }
   if (body.hidden !== undefined) {
     if (typeof body.hidden !== "boolean") return json(400, { error: "invalid_hidden" });
@@ -211,8 +235,10 @@ export async function handleUpdateDepartment(request, rc, id) {
   }
   if (!Object.keys(changes).length) return json(400, { error: "nothing_to_change" });
 
-  await env.DB.prepare("UPDATE departments SET name = ?, hidden = ? WHERE id = ?")
-    .bind(changes.name !== undefined ? changes.name : dept.name, changes.hidden !== undefined ? changes.hidden : dept.hidden, id).run();
+  const updates = [env.DB.prepare("UPDATE departments SET name = ?, hidden = ? WHERE id = ?")
+    .bind(changes.name !== undefined ? changes.name : dept.name, changes.hidden !== undefined ? changes.hidden : dept.hidden, id)];
+  if (changes.shortName !== undefined) updates.push(env.DB.prepare("UPDATE team_project_clients SET short_name = ? WHERE project_id = ?").bind(changes.shortName, id));
+  await runStatements(env, updates);
   if (changes.name !== undefined) await recordAudit(env, member, "department_renamed", id, { from: dept.name, to: changes.name });
   let sharedReset = 0;
   if (changes.hidden === 1 && !dept.hidden) {
