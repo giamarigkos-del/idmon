@@ -20,8 +20,6 @@
   .brand{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:var(--fs-md);font-weight:600;}
   .pill{background:var(--accent-soft);color:var(--accent);}
   .userbox{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:var(--fs-sm);color:var(--text-soft);}
-  .avatar{width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent);
-    display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-xs);font-weight:600;}
   /* Πράκτορας που δουλεύει για περισσότερους από έναν πελάτες: ο βοηθός ψάχνει σε ΕΝΑΝ πελάτη τη φορά, γι' αυτό η επιλογή είναι εμφανής. */
   .wallrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px;padding:10px 14px;border:1px solid var(--accent);border-radius:var(--r);background:var(--accent-soft);}
   .wallrow label{margin:0;color:var(--text);font-weight:600;font-size:var(--fs-md);}
@@ -136,13 +134,67 @@
     });
   }
 
-  function initials(email) {
+  // ==== ΜΕΝΟΥ ΧΡΗΣΤΗ ΚΑΙ ΚΥΚΛΑΚΙ ΑΡΙΘΜΟΥ: ΚΟΙΝΟ ΣΤΙΣ ΤΡΕΙΣ ΣΕΛΙΔΕΣ (portal, team-editor, team-admin) ====
+  // Πρέπει να είναι ΙΔΙΟ αυτολεξεί και στις τρεις: το ελέγχει το τεστ της ενότητας 32. Αν το αλλάξεις, άλλαξέ το και στις τρεις.
+  var USER_ROLE_NAME = { admin: "Διαχειριστής", editor: "Συντάκτης", employee: "Υπάλληλος" };
+  function menuInitials(email) {
     var name = String(email || "").split("@")[0].replace(/[^A-Za-zΑ-Ωα-ωΆ-Ώά-ώ]+/g, " ").trim();
     var parts = name.split(/\s+/);
-    var s = (parts[0] || "?").charAt(0) + (parts[1] ? parts[1].charAt(0) : "");
-    return s.toUpperCase();
+    return ((parts[0] || "?").charAt(0) + (parts[1] ? parts[1].charAt(0) : "")).toUpperCase();
   }
-  var ROLE_LABEL = { admin: "Διαχειριστής", editor: "Συντάκτης", employee: "Υπάλληλος" };
+  // Κυκλάκι με αριθμό: δεν υπάρχει όταν δεν υπάρχει τίποτα νέο, δείχνει «99+» πάνω από 99. Είναι διακοσμητικό (aria-hidden):
+  // ο αριθμός λέγεται από το aria-label του κουμπιού (countLabel).
+  function countBadge(n) {
+    n = Number(n);
+    if (!isFinite(n) || n < 1) return null;
+    return h("span", { class: "count-badge", "aria-hidden": "true", text: n > 99 ? "99+" : String(Math.floor(n)) });
+  }
+  function countLabel(n) {
+    n = Math.floor(Number(n));
+    return n > 99 ? "πάνω από 99 νέα" : n === 1 ? "1 νέο" : n + " νέα";
+  }
+  // Μενού λογαριασμού: κουμπί με τα αρχικά (τέρμα δεξιά, τελευταίο στη σειρά) που ανοίγει μικρό μενού με το email, τον ρόλο και το «Έξοδος».
+  // Κλείνει με Esc, με κλικ έξω ή όταν φεύγεις με Tab. Οι ακροατές εγγράφου μπαίνουν ΜΟΝΟ όσο το μενού είναι ανοιχτό.
+  function userMenu(me, onLogout) {
+    var isOpen = false;
+    var wrap = h("div", { class: "user-menu-wrap" });
+    var btn = h("button", { class: "avatar-btn", type: "button", id: "user-menu-btn", "aria-haspopup": "menu", "aria-expanded": "false",
+      "aria-controls": "user-menu", "aria-label": "Ο λογαριασμός μου (" + (me.email || "") + ")", text: menuInitials(me.email),
+      onclick: function () { setOpen(!isOpen, false); } });
+    var logout = h("button", { class: "btn secondary um-item", type: "button", role: "menuitem", id: "logout", text: "Έξοδος",
+      onclick: function () { setOpen(false, false); api("/team/logout", "POST").then(onLogout); } });
+    var panel = h("div", { class: "user-menu", id: "user-menu", role: "menu", "aria-label": "Λογαριασμός" }, [
+      h("div", { class: "um-head" }, [
+        h("div", { class: "um-email", text: me.email || "" }),
+        h("div", { class: "um-meta", text: (USER_ROLE_NAME[me.role] || "") + (me.workspaceName ? " · " + me.workspaceName : "") }),
+      ]),
+      logout,
+    ]);
+    panel.hidden = true;
+    function onDocClick(e) { if (!wrap.contains(e.target)) setOpen(false, false); }
+    function onKey(e) {
+      if (e.key === "Escape") { e.preventDefault(); setOpen(false, true); }
+      else if (e.key === "Tab") setOpen(false, false);
+    }
+    function setOpen(next, returnFocus) {
+      isOpen = next;
+      panel.hidden = !next;
+      btn.setAttribute("aria-expanded", next ? "true" : "false");
+      if (next) {
+        document.addEventListener("click", onDocClick, true);
+        document.addEventListener("keydown", onKey, true);
+        logout.focus();
+      } else {
+        document.removeEventListener("click", onDocClick, true);
+        document.removeEventListener("keydown", onKey, true);
+        if (returnFocus) btn.focus();
+      }
+    }
+    wrap.appendChild(btn);
+    wrap.appendChild(panel);
+    return wrap;
+  }
+  // ==== ΤΕΛΟΣ ΚΟΙΝΟΥ ΜΠΛΟΚ ====
 
   function daysAgo(iso) {
     var d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
@@ -232,23 +284,21 @@
   function renderApp(me) {
     clear(app);
     var deptPills = (me.departments || []).map(function (d) { return h("span", { class: "pill", text: d.name }); });
-    var rolePill = h("span", { class: "pill muted", text: ROLE_LABEL[me.role] || me.role });
+    var rolePill = h("span", { class: "pill muted", text: USER_ROLE_NAME[me.role] || me.role });
     var manage = me.role === "employee" ? null : h("a", { href: "/team-editor.html", id: "staff-link", class: "btn secondary", text: "Εισερχόμενα και έγγραφα" });
     var adminLink = me.role === "admin" ? h("a", { href: "/team-admin.html", id: "admin-link", class: "btn secondary", text: "Διαχείριση" }) : null;
     if (manage) {
       api("/team/inbox").then(function (r) {
         if (r.status !== 200) return;
         var c = r.data.counts, total = c.contradictions + c.updates + c.questions;
-        if (total > 0) manage.textContent = "Εισερχόμενα και έγγραφα (" + total + ")";
+        var badge = countBadge(total);
+        if (badge) { manage.appendChild(badge); manage.setAttribute("aria-label", "Εισερχόμενα και έγγραφα, " + countLabel(total)); }
       });
     }
-    var logout = h("button", { class: "btn secondary", id: "logout", type: "button", text: "Έξοδος", onclick: function () {
-      api("/team/logout", "POST").then(function () { chatHistory = []; renderLogin(); });
-    } });
 
     app.appendChild(h("div", { class: "topbar" }, [
       h("div", { class: "brand" }, [h("span", { text: me.workspaceName || "Idmon" })].concat(deptPills, [rolePill])),
-      h("div", { class: "userbox topnav" }, [manage, adminLink, h("span", { class: "avatar", "aria-hidden": "true", text: initials(me.email) }), logout]),
+      h("div", { class: "userbox topnav" }, [manage, adminLink, userMenu(me, function () { chatHistory = []; renderLogin(); })]),
     ]));
 
     var input = h("input", { type: "text", id: "q", placeholder: "Ρώτα για μια διαδικασία…", "aria-label": "Ερώτηση", autocomplete: "off", maxlength: "1000" });

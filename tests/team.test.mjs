@@ -754,7 +754,7 @@ section("11. portal.html και team-editor.html: χρήση σαν πραγμα
   check("Escape κλείνει τον αναγνώστη", !dom.window.document.querySelector(".overlay"));
 
   // --- αποσύνδεση
-  dom.window.document.querySelector(".userbox button").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  dom.window.document.querySelector("#logout").dispatchEvent(new dom.window.Event("click", { bubbles: true })); // το «Έξοδος» ζει πλέον μέσα στο μενού του λογαριασμού
   check("αποσύνδεση: επιστροφή στη φόρμα email", !!(await waitFor(() => dom.window.document.querySelector("#email"))));
   const dom2 = br.open(portalHtml, "/portal.html#login=" + link);
   check("το ίδιο link ξανά: δεν ισχύει, μήνυμα και νέα φόρμα", !!(await waitFor(() => /έληξε ή έχει ήδη χρησιμοποιηθεί/.test(text(dom2, ".note")))));
@@ -1272,7 +1272,7 @@ section("16. team-editor (εισερχόμενα), team-admin και portal: π�
   const pd = browserFor("ed_cc@demo.gr")("portal.html");
   const staff = await waitFor(() => $(pd, "#staff-link"));
   check("portal editor: σύνδεσμος «Εισερχόμενα και έγγραφα», ΧΩΡΙΣ σύνδεσμο διαχείρισης", !!staff && !$(pd, "#admin-link"));
-  check("... με μετρητή εκκρεμοτήτων", !!(await waitFor(() => /\(\d+\)/.test($(pd, "#staff-link").textContent))));
+  check("... με μετρητή εκκρεμοτήτων σε κυκλάκι (μόνο ο αριθμός)", !!(await waitFor(() => /^\d+$/.test((($(pd, "#staff-link .count-badge")) || {}).textContent || ""))));
   const pa = browserFor("admin@demo.gr")("portal.html");
   check("portal admin: υπάρχει και σύνδεσμος διαχείρισης", !!(await waitFor(() => $(pa, "#admin-link"))));
   await call("ed_cc@demo.gr", "POST", `/team/updates/${U7}/reject`);
@@ -3566,6 +3566,131 @@ section("32. UX για αρχάριους: όλα φαίνονται ως κου
   check("τα στατικά αρχεία δεν έχουν <a> στο markup (όλα μπαίνουν με το h(), άρα περνούν από τον έλεγχο παραπάνω)", pages.every(([, src]) => !/<a\s[^>]*href/.test(src.split("<script>")[0].replace(/<link[^>]*>/g, ""))));
   const body = pages.map(([, src]) => src.split("<script>").slice(1).join("")).join("\n");
   check("οι σελίδες δεν έχουν ούτε μία λατινική ετικέτα ρόλου (Admin, Editor) ως κείμενο κουμπιού ή επιλογής", !/text:\s*"(Admin|Editor|admin|editor)"/.test(body) && !/option\("[a-z]+",\s*"(Admin|Editor)"\)/.test(body));
+}
+
+// ============================================================================ 33. Μενού λογαριασμού (κύκλος με αρχικά) και κυκλάκι αριθμού
+section("33. Μενού λογαριασμού (κύκλος με αρχικά, τέρμα δεξιά) και κυκλάκι με αριθμό: portal, editor, διαχείριση");
+{
+  const START = "// ==== ΜΕΝΟΥ ΧΡΗΣΤΗ", END = "// ==== ΤΕΛΟΣ ΚΟΙΝΟΥ ΜΠΛΟΚ ====";
+  const pageNames = ["portal.html", "team-editor.html", "team-admin.html"];
+  const blocks = pageNames.map((n) => { const src = readFileSync(join(REPO, "public", n), "utf8"); const a = src.indexOf(START), b = src.indexOf(END); return { count: src.split(START).length - 1, text: a >= 0 && b > a ? src.slice(a, b + END.length) : "" }; });
+  check("κοινό μπλοκ μενού: υπάρχει ΜΙΑ φορά σε κάθε μία από τις τρεις σελίδες", blocks.every((b) => b.count === 1 && b.text.length > 500), blocks.map((b) => b.count));
+  check("κοινό μπλοκ μενού: ίδιο αυτολεξεί στις τρεις σελίδες (ένα σημείο αλήθειας)", blocks[0].text === blocks[1].text && blocks[1].text === blocks[2].text);
+  const cssText = readFileSync(join(REPO, "public", "team.css"), "utf8");
+  check("team.css: το μενού κρύβεται πραγματικά με το hidden (αλλιώς το display του το αφήνει ανοιχτό)", /\.user-menu\[hidden\]\s*\{\s*display:\s*none/.test(cssText));
+  check("team.css: ο κύκλος του λογαριασμού έχει μέγεθος κουμπιού (var(--h-btn)) και κολλά δεξιά", /\.avatar-btn\s*\{[^}]*width:\s*var\(--h-btn\)[^}]*height:\s*var\(--h-btn\)/.test(cssText) && /\.user-menu-wrap\s*\{[^}]*margin-left:\s*auto/.test(cssText));
+
+  // ---------------------------------------------------------- μονάδες: το ΠΡΑΓΜΑΤΙΚΟ μπλοκ σε πραγματικό DOM
+  const win = new JSDOMu("<!DOCTYPE html><html><body></body></html>", { runScripts: "outside-only", pretendToBeVisual: true }).window;
+  const hh = (tag, props, children) => { const node = win.document.createElement(tag); props = props || {};
+    Object.keys(props).forEach((k) => { if (k === "class") node.className = props[k]; else if (k === "text") node.textContent = props[k]; else if (k.slice(0, 2) === "on") node.addEventListener(k.slice(2), props[k]); else node.setAttribute(k, props[k]); });
+    (children || []).forEach((c) => { if (c) node.appendChild(typeof c === "string" ? win.document.createTextNode(c) : c); }); return node; };
+  const apiCalls = [];
+  const fakeApi = (path, method) => { apiCalls.push([path, method]); return Promise.resolve({ status: 200, data: {} }); };
+  const lib = win.eval("(function (h, api) {" + blocks[0].text + "\nreturn { countBadge: countBadge, countLabel: countLabel, menuInitials: menuInitials, userMenu: userMenu }; })")(hh, fakeApi);
+  const txt = (b) => (b ? b.textContent : null);
+  check("κυκλάκι: δεν υπάρχει για 0, αρνητικό, NaN, κείμενο ή τίποτα", [0, -3, NaN, "x", undefined, null].every((v) => lib.countBadge(v) === null));
+  check("κυκλάκι: δείχνει μόνο τον αριθμό (1, 4, 99)", txt(lib.countBadge(1)) === "1" && txt(lib.countBadge(4)) === "4" && txt(lib.countBadge(99)) === "99");
+  check("κυκλάκι: «99+» από το 100 και πάνω, και ακέραιο για δεκαδικά", txt(lib.countBadge(100)) === "99+" && txt(lib.countBadge(1234)) === "99+" && txt(lib.countBadge(3.7)) === "3");
+  check("κυκλάκι: διακοσμητικό (aria-hidden), ο αριθμός λέγεται από το aria-label του κουμπιού", lib.countBadge(4).getAttribute("aria-hidden") === "true" && lib.countBadge(4).className === "count-badge");
+  check("αριθμός στα ελληνικά για τον αναγνώστη οθόνης: «1 νέο», «4 νέα», «πάνω από 99 νέα»", lib.countLabel(1) === "1 νέο" && lib.countLabel(4) === "4 νέα" && lib.countLabel(100) === "πάνω από 99 νέα");
+  check("αρχικά: «GA» από giamarigkos+admin, «MP» από maria.papadopoulou, «B» από bpo, «?» όταν δεν υπάρχουν γράμματα", lib.menuInitials("giamarigkos+admin@gmail.com") === "GA" && lib.menuInitials("maria.papadopoulou@acme.gr") === "MP" && lib.menuInitials("bpo@demo.gr") === "B" && lib.menuInitials("123@x.gr") === "?" && lib.menuInitials("") === "?");
+
+  // Μετράμε ΠΡΑΓΜΑΤΙΚΑ τους ακροατές που μένουν στο document (click, keydown): ανοιχτό μενού = 2, κλειστό = 0, ποτέ διαρροή.
+  const live = [];
+  const origAdd = win.document.addEventListener.bind(win.document), origRemove = win.document.removeEventListener.bind(win.document);
+  win.document.addEventListener = (t, f, c) => { if (t === "click" || t === "keydown") live.push([t, f, c]); return origAdd(t, f, c); };
+  win.document.removeEventListener = (t, f, c) => { const k = live.findIndex((x) => x[0] === t && x[1] === f); if (k >= 0) live.splice(k, 1); return origRemove(t, f, c); };
+  let loggedOut = 0;
+  const me0 = { email: "maria@acme.gr", role: "editor", workspaceName: "Acme" };
+  const menu = lib.userMenu(me0, () => { loggedOut++; });
+  win.document.body.appendChild(menu);
+  const btn = menu.querySelector("#user-menu-btn"), panel = menu.querySelector("#user-menu"), out = menu.querySelector("#logout");
+  const key = (k) => win.document.dispatchEvent(new win.KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+  const clk = (el) => el.dispatchEvent(new win.Event("click", { bubbles: true }));
+  check("μενού: κλειστό στην αρχή (hidden, aria-expanded=false)", panel.hidden === true && btn.getAttribute("aria-expanded") === "false");
+  check("μενού: ο κύκλος είναι κουμπί με αρχικά και όνομα για αναγνώστη οθόνης που λέει το email", btn.tagName === "BUTTON" && btn.textContent === "M" && /maria@acme\.gr/.test(btn.getAttribute("aria-label")) && btn.getAttribute("aria-haspopup") === "menu");
+  check("μενού: δείχνει το email, τον ρόλο στα ελληνικά και τον οργανισμό, και το «Έξοδος» είναι κουμπί", /maria@acme\.gr/.test(panel.textContent) && /Συντάκτης · Acme/.test(panel.textContent) && out.tagName === "BUTTON" && out.textContent === "Έξοδος");
+  clk(btn);
+  check("μενού: το κλικ το ανοίγει (ορατό, aria-expanded=true) και ο κέρσορας πάει στο «Έξοδος»", panel.hidden === false && btn.getAttribute("aria-expanded") === "true" && win.document.activeElement === out);
+  clk(btn);
+  check("μενού: δεύτερο κλικ στον κύκλο το κλείνει", panel.hidden === true && btn.getAttribute("aria-expanded") === "false");
+  clk(btn); key("Escape");
+  check("μενού: το Esc το κλείνει και επιστρέφει τον κέρσορα στον κύκλο", panel.hidden === true && win.document.activeElement === btn);
+  clk(btn); clk(menu.querySelector(".um-email"));
+  check("μενού: κλικ μέσα στο μενού (στο email) δεν το κλείνει", panel.hidden === false);
+  clk(win.document.body);
+  check("μενού: κλικ έξω το κλείνει", panel.hidden === true && btn.getAttribute("aria-expanded") === "false");
+  clk(btn); key("Tab");
+  check("μενού: το Tab (φεύγεις από το μενού) το κλείνει", panel.hidden === true);
+  key("Escape"); key("Tab"); clk(win.document.body);
+  check("μενού: κλειστό δεν αφήνει ακροατές στο document, και το Esc, το Tab και το κλικ έξω δεν το ξανανοίγουν", panel.hidden === true && live.length === 0, live.length);
+  clk(btn);
+  check("μενού: ανοιχτό έχει ακριβώς 2 ακροατές (click και keydown), και κλείνοντας φεύγουν και οι δύο", live.length === 2 && (clk(btn), live.length === 0), live.length);
+  clk(btn); clk(out);
+  await new Promise((r) => setTimeout(r, 20));
+  check("«Έξοδος» από το μενού: καλεί /team/logout με POST ΜΙΑ φορά, καλεί το onLogout και κλείνει το μενού", apiCalls.filter((c) => c[0] === "/team/logout" && c[1] === "POST").length === 1 && loggedOut === 1 && panel.hidden === true, { apiCalls, loggedOut });
+  const evil = lib.userMenu({ email: '<img src=x onerror=alert(1)>@x.gr', role: "admin", workspaceName: "<b>Acme</b>" }, () => {});
+  check("ασφάλεια: το email και ο οργανισμός μπαίνουν ως κείμενο, όχι ως HTML (καμία εικόνα ή έντονο στο μενού)", !evil.querySelector("img") && !evil.querySelector("b") && /<img/.test(evil.textContent));
+
+  // ---------------------------------------------------------- πραγματικές σελίδες (jsdom) σε νέο χώρο
+  const nowIso33 = () => new Date().toISOString();
+  db.prepare("insert into team_workspaces (id,name,status,created_at) values ('team-ui33','UI33 Demo','pilot',?)").run(nowIso33());
+  const A33 = "ui33_admin@demo.gr", E33 = "ui33_editor@demo.gr", P33 = "ui33_emp@demo.gr";
+  db.prepare("insert into team_members (workspace_id,email,role,status,created_at) values ('team-ui33',?,'admin','active',?)").run(A33, nowIso33());
+  S[A33] = (await login(A33)).cookie;
+  const api33 = async (m, pth, body) => { const res = await call(A33, m, pth, body); return { status: res.status, data: await readJson(res) }; };
+  const dep = (await api33("POST", "/team/admin/departments", { name: "Εξυπηρέτηση" })).data.id;
+  await api33("POST", "/team/admin/members", { email: E33, role: "member", projectRoles: { [dep]: "editor" }, sendInvite: false }); S[E33] = (await login(E33)).cookie;
+  await api33("POST", "/team/admin/members", { email: P33, role: "member", projectRoles: { [dep]: "member" }, sendInvite: false }); S[P33] = (await login(P33)).cookie;
+  const docId = await newDocU(A33, "Διαδικασία ΜΕΝΟΥ", dep, "Η διαδικασία μενού ξεκινά με έναν έλεγχο. MENU33-X");
+  const up = await call(A33, "POST", "/team/updates", { documentId: docId, text: "Προσωρινή αλλαγή για τον έλεγχο του κυκλάκι. BADGE33" });
+  check("προετοιμασία: το συμπλήρωμα που θα φέρει εκκρεμότητα στα Εισερχόμενα δημιουργήθηκε", up.status === 201 || up.status === 200, up.status);
+
+  const pa = uiFor(A33)("portal.html");
+  await uiWait(() => $u(pa, "#user-menu-btn"));
+  const nav = $u(pa, ".topnav");
+  check("portal: ο κύκλος λογαριασμού είναι ο ΤΕΛΕΥΤΑΙΟΣ στη σειρά, μετά τα κουμπιά «Εισερχόμενα και έγγραφα» και «Διαχείριση»", !!nav && nav.lastElementChild.className === "user-menu-wrap" && !!$u(pa, "#staff-link") && !!$u(pa, "#admin-link") && !!(nav.querySelector("#staff-link").compareDocumentPosition(nav.lastElementChild) & 4));
+  check("portal: το μενού είναι κλειστό στην αρχή και δεν υπάρχει πια ξεχωριστό «Έξοδος» δίπλα στα κουμπιά", $u(pa, "#user-menu").hidden === true && $$u(pa, ".topnav > #logout").length === 0);
+  const badge = await uiWait(() => $u(pa, "#staff-link .count-badge"));
+  check("portal: το «Εισερχόμενα και έγγραφα» δείχνει κυκλάκι με τον αριθμό και το κουμπί μένει ίδιο", !!badge && /^\d+$/.test(badge.textContent) && /^Εισερχόμενα και έγγραφα/.test($u(pa, "#staff-link").textContent.replace(badge.textContent, "")) && !/\(/.test($u(pa, "#staff-link").textContent));
+  check("portal: ο αναγνώστης οθόνης ακούει «Εισερχόμενα και έγγραφα, N νέα» (το κυκλάκι είναι aria-hidden)", /^Εισερχόμενα και έγγραφα, (\d+ νέα|1 νέο|πάνω από 99 νέα)$/.test($u(pa, "#staff-link").getAttribute("aria-label")));
+  clickU(pa, $u(pa, "#user-menu-btn"));
+  check("portal: το κλικ στον κύκλο ανοίγει το μενού με email, ρόλο (Διαχειριστής) και οργανισμό", $u(pa, "#user-menu").hidden === false && /ui33_admin@demo\.gr/.test($u(pa, "#user-menu").textContent) && /Διαχειριστής · UI33 Demo/.test($u(pa, "#user-menu").textContent));
+  const pProblems = uxProblems(pa, ["Εξυπηρέτηση", "Διαδικασία ΜΕΝΟΥ", "UI33 Demo"]);
+  check("portal με ανοιχτό μενού: καμία παραβίαση UX (απλό link, μικρό γράμμα, λατινική λέξη)", pProblems.length === 0, pProblems);
+
+  const ea = uiFor(A33)("team-editor.html");
+  await uiWait(() => $u(ea, "#user-menu-btn"));
+  const enav = $u(ea, ".topnav");
+  check("editor: ο κύκλος λογαριασμού είναι ο τελευταίος στη σειρά, μετά το «← Αναζήτηση» και το «Διαχείριση»", !!enav && enav.lastElementChild.className === "user-menu-wrap" && enav.firstElementChild.textContent === "← Αναζήτηση");
+  const tb = await uiWait(() => $u(ea, "#tab-inbox .count-badge"));
+  check("editor: το tab «Εισερχόμενα» έχει κυκλάκι με αριθμό (όχι «(N)») και aria-label με «νέα»", !!tb && /^\d+$/.test(tb.textContent) && !/\(/.test($u(ea, "#tab-inbox").textContent) && /^Εισερχόμενα, (\d+ νέα|1 νέο|πάνω από 99 νέα)$/.test($u(ea, "#tab-inbox").getAttribute("aria-label")));
+  clickU(ea, $u(ea, "#user-menu-btn"));
+  check("editor: το μενού δείχνει email και ρόλο", $u(ea, "#user-menu").hidden === false && /Διαχειριστής/.test($u(ea, "#user-menu").textContent));
+  const eProblems = uxProblems(ea, ["Εξυπηρέτηση", "Διαδικασία ΜΕΝΟΥ", "UI33 Demo"]);
+  check("editor με ανοιχτό μενού: καμία παραβίαση UX", eProblems.length === 0, eProblems);
+
+  const aa = uiFor(A33)("team-admin.html");
+  await uiWait(() => $u(aa, "#user-menu-btn"));
+  const anav = $u(aa, ".topnav");
+  check("διαχείριση: ο κύκλος λογαριασμού είναι ο τελευταίος στη σειρά και το μενού κλειστό", !!anav && anav.lastElementChild.className === "user-menu-wrap" && $u(aa, "#user-menu").hidden === true);
+  const aProblems = uxProblems(aa, ["Εξυπηρέτηση", "Διαδικασία ΜΕΝΟΥ", "UI33 Demo"]);
+  check("διαχείριση: καμία παραβίαση UX με το μενού", aProblems.length === 0, aProblems);
+
+  const pe = uiFor(P33)("portal.html");
+  await uiWait(() => $u(pe, "#user-menu-btn"));
+  check("portal υπαλλήλου: υπάρχει μενού λογαριασμού αλλά ΟΧΙ κουμπιά εισερχομένων ή διαχείρισης, ούτε κυκλάκι", !!$u(pe, "#user-menu-btn") && !$u(pe, "#staff-link") && !$u(pe, "#admin-link") && !$u(pe, ".count-badge") && /Υπάλληλος/.test($u(pe, ".brand").textContent));
+
+  // έξοδος από κάθε σελίδα: η συνεδρία πρέπει να λήγει πραγματικά (στο τέλος, γιατί σβήνει τη συνεδρία)
+  clickU(ea, $u(ea, "#logout"));
+  await uiWait(() => false, 150);
+  const meAfter = await call(A33, "GET", "/team/me");
+  check("«Έξοδος» από το μενού του editor: η συνεδρία στον server ΛΗΓΕΙ (401 στο /team/me)", meAfter.status === 401, meAfter.status);
+  clickU(pe, $u(pe, "#logout"));
+  await uiWait(() => $u(pe, "#email"));
+  const meEmp = await call(P33, "GET", "/team/me");
+  check("«Έξοδος» από το μενού του portal: επιστροφή στη φόρμα email και η συνεδρία λήγει", !!$u(pe, "#email") && meEmp.status === 401, meEmp.status);
 }
 
 // ============================================================================ Σύνοψη

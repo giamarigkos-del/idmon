@@ -246,6 +246,68 @@
     return dyn[a] || ACTION_LABEL[a] || a;
   }
 
+  // ==== ΜΕΝΟΥ ΧΡΗΣΤΗ ΚΑΙ ΚΥΚΛΑΚΙ ΑΡΙΘΜΟΥ: ΚΟΙΝΟ ΣΤΙΣ ΤΡΕΙΣ ΣΕΛΙΔΕΣ (portal, team-editor, team-admin) ====
+  // Πρέπει να είναι ΙΔΙΟ αυτολεξεί και στις τρεις: το ελέγχει το τεστ της ενότητας 32. Αν το αλλάξεις, άλλαξέ το και στις τρεις.
+  var USER_ROLE_NAME = { admin: "Διαχειριστής", editor: "Συντάκτης", employee: "Υπάλληλος" };
+  function menuInitials(email) {
+    var name = String(email || "").split("@")[0].replace(/[^A-Za-zΑ-Ωα-ωΆ-Ώά-ώ]+/g, " ").trim();
+    var parts = name.split(/\s+/);
+    return ((parts[0] || "?").charAt(0) + (parts[1] ? parts[1].charAt(0) : "")).toUpperCase();
+  }
+  // Κυκλάκι με αριθμό: δεν υπάρχει όταν δεν υπάρχει τίποτα νέο, δείχνει «99+» πάνω από 99. Είναι διακοσμητικό (aria-hidden):
+  // ο αριθμός λέγεται από το aria-label του κουμπιού (countLabel).
+  function countBadge(n) {
+    n = Number(n);
+    if (!isFinite(n) || n < 1) return null;
+    return h("span", { class: "count-badge", "aria-hidden": "true", text: n > 99 ? "99+" : String(Math.floor(n)) });
+  }
+  function countLabel(n) {
+    n = Math.floor(Number(n));
+    return n > 99 ? "πάνω από 99 νέα" : n === 1 ? "1 νέο" : n + " νέα";
+  }
+  // Μενού λογαριασμού: κουμπί με τα αρχικά (τέρμα δεξιά, τελευταίο στη σειρά) που ανοίγει μικρό μενού με το email, τον ρόλο και το «Έξοδος».
+  // Κλείνει με Esc, με κλικ έξω ή όταν φεύγεις με Tab. Οι ακροατές εγγράφου μπαίνουν ΜΟΝΟ όσο το μενού είναι ανοιχτό.
+  function userMenu(me, onLogout) {
+    var isOpen = false;
+    var wrap = h("div", { class: "user-menu-wrap" });
+    var btn = h("button", { class: "avatar-btn", type: "button", id: "user-menu-btn", "aria-haspopup": "menu", "aria-expanded": "false",
+      "aria-controls": "user-menu", "aria-label": "Ο λογαριασμός μου (" + (me.email || "") + ")", text: menuInitials(me.email),
+      onclick: function () { setOpen(!isOpen, false); } });
+    var logout = h("button", { class: "btn secondary um-item", type: "button", role: "menuitem", id: "logout", text: "Έξοδος",
+      onclick: function () { setOpen(false, false); api("/team/logout", "POST").then(onLogout); } });
+    var panel = h("div", { class: "user-menu", id: "user-menu", role: "menu", "aria-label": "Λογαριασμός" }, [
+      h("div", { class: "um-head" }, [
+        h("div", { class: "um-email", text: me.email || "" }),
+        h("div", { class: "um-meta", text: (USER_ROLE_NAME[me.role] || "") + (me.workspaceName ? " · " + me.workspaceName : "") }),
+      ]),
+      logout,
+    ]);
+    panel.hidden = true;
+    function onDocClick(e) { if (!wrap.contains(e.target)) setOpen(false, false); }
+    function onKey(e) {
+      if (e.key === "Escape") { e.preventDefault(); setOpen(false, true); }
+      else if (e.key === "Tab") setOpen(false, false);
+    }
+    function setOpen(next, returnFocus) {
+      isOpen = next;
+      panel.hidden = !next;
+      btn.setAttribute("aria-expanded", next ? "true" : "false");
+      if (next) {
+        document.addEventListener("click", onDocClick, true);
+        document.addEventListener("keydown", onKey, true);
+        logout.focus();
+      } else {
+        document.removeEventListener("click", onDocClick, true);
+        document.removeEventListener("keydown", onKey, true);
+        if (returnFocus) btn.focus();
+      }
+    }
+    wrap.appendChild(btn);
+    wrap.appendChild(panel);
+    return wrap;
+  }
+  // ==== ΤΕΛΟΣ ΚΟΙΝΟΥ ΜΠΛΟΚ ====
+
   function load() {
     return api("/team/admin/overview").then(function (r) { if (r.status === 200) data = r.data; })
       .then(function () { return api("/team/admin/documents"); }).then(function (r) { if (r.status === 200) docsData = r.data; })
@@ -257,7 +319,7 @@
     clear(app);
     app.appendChild(h("div", { class: "topbar" }, [
       h("h1", { text: (me.workspaceName || "") + " · Διαχείριση" }),
-      h("div", { class: "topnav" }, [h("a", { href: "/team-editor.html", class: "btn secondary", text: "Εισερχόμενα και έγγραφα" }), h("a", { href: "/portal.html", class: "btn secondary", text: "← Αναζήτηση" })]),
+      h("div", { class: "topnav" }, [h("a", { href: "/team-editor.html", class: "btn secondary", text: "Εισερχόμενα και έγγραφα" }), h("a", { href: "/portal.html", class: "btn secondary", text: "← Αναζήτηση" }), userMenu(me, function () { window.location.assign("/portal.html"); })]),
     ]));
     var tabs = [["departments", W().P], ["documents", "Έγγραφα"], ["members", "Άνθρωποι"], ["audit", "Ιστορικό ενεργειών"]];
     app.appendChild(h("div", { class: "tabs", role: "tablist" }, tabs.map(function (t) {
