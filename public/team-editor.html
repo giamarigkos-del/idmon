@@ -49,6 +49,8 @@
 </head>
 <body>
 <div class="wrap" id="app"></div>
+<script src="/vendor/reader.js"></script>
+<script src="/vendor/editor.js"></script>
 
 <script>
 (function () {
@@ -511,6 +513,84 @@
     return { node: node, redraw: redraw, applicable: applicable, values: chosen };
   }
 
+  // ---------------------------------------------------------------- WYSIWYG (ο επεξεργαστής κειμένου του άρθρου)
+  // Ο συντάκτης βλέπει το άρθρο όπως θα φανεί και αποθηκεύεται Markdown. Ο επεξεργαστής (public/vendor/editor.js) φορτώνει με ξεχωριστό αρχείο.
+  // Αν δεν φορτώσει ή λείπει, μένει το απλό πεδίο κειμένου: ο συντάκτης δεν μένει ποτέ χωρίς τρόπο να γράψει.
+  var TOOLS = [
+    ["bold", "Έντονα", "bold", "Έντονα (Ctrl+B)"], ["italic", "Πλάγια", "italic", "Πλάγια (Ctrl+I)"], null,
+    ["h2", "Τίτλος", "h2", "Μεγάλος τίτλος ενότητας"], ["h3", "Υπότιτλος", "h3", "Μικρότερος τίτλος"], null,
+    ["bulletList", "Λίστα", "bulletList", "Λίστα με κουκκίδες"], ["orderedList", "Αρίθμηση", "orderedList", "Λίστα με αριθμούς"], ["blockquote", "Παράθεμα", "blockquote", "Παράθεμα ή σημαντική σημείωση"], null,
+    ["link", "Σύνδεσμος", null, "Βάλε σύνδεσμο στο επιλεγμένο κείμενο"], ["table", "Πίνακας", "table", "Βάλε πίνακα 3 επί 3"], null,
+    ["undo", "Αναίρεση", "undo", "Αναίρεση (Ctrl+Z)"], ["redo", "Επανάληψη", "redo", "Επανάληψη (Ctrl+Y)"],
+  ];
+  var TABLE_TOOLS = [["tableAddRow", "Γραμμή από κάτω"], ["tableAddCol", "Στήλη δεξιά"], ["tableDelRow", "Διαγραφή γραμμής"], ["tableDelCol", "Διαγραφή στήλης"], ["tableDelete", "Διαγραφή πίνακα"]];
+  var currentRte = null;
+  function richEditor(initialMarkdown) {
+    if (!window.IdmonEditor || typeof window.IdmonEditor.create !== "function") return null;
+    if (currentRte) { try { currentRte.destroy(); } catch (e) { /* ήδη κατεστραμμένος */ } currentRte = null; }
+    var ed = null, buttons = {};
+    // Τα κουμπιά της γραμμής εργαλείων ΔΕΝ παίρνουν την εστίαση όταν τα πατάς (ποντίκι ή αφή): ο κέρσορας μένει στο κείμενο και ο συντάκτης
+    // συνεχίζει να γράφει αμέσως. Αλλιώς το πρώτο πλήκτρο (π.χ. κενό) έπεφτε στο ίδιο το κουμπί και το ενεργοποιούσε ξανά. Με πληκτρολόγιο (Tab, Enter) δουλεύουν κανονικά.
+    function keepFocus(b) { b.addEventListener("mousedown", function (e) { e.preventDefault(); }); return b; }
+    var note = h("div", { class: "rte-note", id: "rte-note", role: "status", "aria-live": "polite" });
+    note.hidden = true;
+    function say(kind, text) { note.className = "rte-note" + (kind ? " " + kind : ""); note.textContent = text; note.hidden = !text; }
+    var toolbar = h("div", { class: "rte-toolbar", role: "toolbar", "aria-label": "Μορφοποίηση κειμένου" });
+    TOOLS.forEach(function (t) {
+      if (!t) { toolbar.appendChild(h("span", { class: "tb-sep", "aria-hidden": "true" })); return; }
+      var toggle = ["bold", "italic", "h2", "h3", "bulletList", "orderedList", "blockquote", "link"].indexOf(t[0]) >= 0;
+      var attrs = { class: "btn secondary tb", type: "button", id: "tb-" + t[0], text: t[1], title: t[3] };
+      if (toggle) attrs["aria-pressed"] = "false";
+      var b = keepFocus(h("button", attrs));
+      b.addEventListener("click", function () {
+        if (t[0] === "link") { openLinkBar(); return; }
+        say("", ""); ed.exec(t[2]);
+      });
+      buttons[t[0]] = b; toolbar.appendChild(b);
+    });
+    var ctx = h("div", { class: "rte-context", id: "rte-table-tools", role: "toolbar", "aria-label": "Εργαλεία πίνακα" }, [h("span", { class: "lbl", text: "Πίνακας:" })]);
+    ctx.hidden = true;
+    TABLE_TOOLS.forEach(function (t) {
+      var b = keepFocus(h("button", { class: "btn secondary tb" + (t[0] === "tableDelete" ? " danger" : ""), type: "button", id: "tb-" + t[0], text: t[1] }));
+      b.addEventListener("click", function () { ed.exec(t[0]); });
+      ctx.appendChild(b);
+    });
+    var url = h("input", { type: "text", id: "rte-link-url", placeholder: "https://…", "aria-label": "Διεύθυνση συνδέσμου", autocomplete: "off" });
+    var linkbar = h("div", { class: "rte-linkbar", id: "rte-linkbar" }, [
+      url,
+      h("button", { class: "btn", type: "button", id: "rte-link-apply", text: "Εφαρμογή", onclick: function () {
+        var r = ed.setLink(url.value);
+        if (!r.ok) { say("err", "Η διεύθυνση πρέπει να ξεκινά με https://, http:// ή mailto:"); return; }
+        say("", ""); linkbar.hidden = true;
+      } }),
+      h("button", { class: "btn secondary", type: "button", id: "rte-link-remove", text: "Αφαίρεση συνδέσμου", onclick: function () { ed.exec("unsetLink"); say("", ""); linkbar.hidden = true; } }),
+      h("button", { class: "btn secondary", type: "button", id: "rte-link-close", text: "Κλείσιμο", onclick: function () { linkbar.hidden = true; ed.focus(); } }),
+    ]);
+    linkbar.hidden = true;
+    url.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); document.getElementById("rte-link-apply").click(); } });
+    function openLinkBar() {
+      var s = ed.state();
+      url.value = s.linkHref || "";
+      linkbar.hidden = false; url.focus();
+    }
+    var host = h("div", { class: "rte-body", id: "rte-body" });
+    var wrap = h("div", { class: "rte", id: "rte" }, [toolbar, ctx, linkbar, note, host]);
+    ed = window.IdmonEditor.create(host, {
+      markdown: initialMarkdown, ariaLabel: "Κείμενο",
+      onImageFiles: function () { say("err", "Η προσθήκη εικόνων έρχεται σύντομα. Προς το παρόν γράψε το άρθρο με κείμενο, λίστες και πίνακες."); },
+      onState: function (s) {
+        Object.keys(buttons).forEach(function (k) {
+          if (k === "undo") buttons[k].disabled = !s.canUndo;
+          else if (k === "redo") buttons[k].disabled = !s.canRedo;
+          else if (k !== "table") buttons[k].setAttribute("aria-pressed", s[k] ? "true" : "false");
+        });
+        ctx.hidden = !s.table;
+      },
+    });
+    currentRte = ed;
+    return { node: h("div", null, [wrap, h("p", { class: "rte-hint", text: "Μπορείς να επικολλήσεις κείμενο από Word ή Google Docs: κρατιούνται οι τίτλοι, τα έντονα, οι λίστες και οι πίνακες." })]), getMarkdown: function () { return ed.getMarkdown(); } };
+  }
+
   function renderPanel(panel, doc) {
     clear(panel);
     var isNew = currentId === null;
@@ -526,7 +606,11 @@
           + (doc.audience.hiddenCount ? (doc.audience.projects.length ? " και " : "") + doc.audience.hiddenCount + (doc.audience.hiddenCount === 1 ? " ακόμα " + W().s : " ακόμα " + W().p) : "") + "." }));
       }
       var pb = pendingBlock(doc.pendingUpdates); if (pb) panel.appendChild(pb);
-      panel.appendChild(h("div", { class: "readonly-text", text: doc.fullText }));
+      var ro = h("div", { class: "prose readonly-text", id: "readonly-body" });
+      if (window.IdmonReader && typeof window.IdmonReader.renderInto === "function") window.IdmonReader.renderInto(ro, doc.fullText);
+      else ro.textContent = doc.fullText; // ο αναγνώστης δεν φόρτωσε: ΜΟΝΟ κείμενο, ποτέ HTML
+      panel.appendChild(ro);
+      panel.appendChild(h("a", { class: "btn secondary", id: "open-page", href: "/team-article.html?id=" + encodeURIComponent(doc.id), text: "Άνοιγμα σε πλήρη σελίδα" }));
       return;
     }
     if (!isNew && !doc) { panel.appendChild(h("p", { class: "ro", text: "Φόρτωση…" })); return; }
@@ -537,6 +621,7 @@
       var o = h("option", { value: d.id, text: d.name }); if (doc && doc.departmentId === d.id) o.selected = true; return o;
     }));
     var text = h("textarea", { id: "text", "aria-label": "Κείμενο" }); text.value = doc ? doc.fullText : "";
+    var rte = richEditor(doc ? doc.fullText : ""); // null όταν δεν υπάρχει ο επεξεργαστής: μένει το απλό πεδίο
     var aud = audienceBox(doc, dept);
     dept.addEventListener("change", aud.redraw);
     var note = h("p", { class: "note", role: "status", "aria-live": "polite" });
@@ -546,7 +631,7 @@
     var form = h("form", { onsubmit: function (e) {
       e.preventDefault();
       save.disabled = true; note.className = "note"; note.textContent = "Αποθήκευση και δημιουργία αναζήτησης…";
-      var body = { title: title.value, departmentId: dept.value, text: text.value };
+      var body = { title: title.value, departmentId: dept.value, text: rte ? rte.getMarkdown() : text.value };
       if (aud.applicable()) body.audienceProjectIds = aud.values();
       var req = isNew ? api("/team/documents", "POST", body) : api("/team/documents/" + encodeURIComponent(currentId), "PUT", body);
       req.then(function (r) {
@@ -560,8 +645,9 @@
       }).catch(function () { save.disabled = false; note.className = "note err"; note.textContent = "Δεν ήταν δυνατή η αποθήκευση."; });
     } }, [
       h("label", { for: "title", text: "Τίτλος" }), title, h("label", { for: "dept", text: "Τμήμα" }), dept,
-      h("label", { for: "text", text: "Κείμενο" }), text, aud.node,
+      h("label", rte ? { id: "text-label", text: "Κείμενο" } : { for: "text", text: "Κείμενο" }), rte ? rte.node : text, aud.node,
       h("div", { class: "actions" }, [save].concat(isNew ? [] : [
+        h("a", { class: "btn secondary", id: "open-page", href: "/team-article.html?id=" + encodeURIComponent(currentId), text: "Άνοιγμα για ανάγνωση" }),
         h("button", { class: "btn secondary", type: "button", text: "Έλεγχος αντιφάσεων τώρα", onclick: function () {
           note.className = "note"; note.textContent = "Έλεγχος…";
           api("/team/documents/" + encodeURIComponent(currentId) + "/check", "POST").then(function (r) {

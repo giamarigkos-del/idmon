@@ -19,6 +19,7 @@ import { json, loadWorkspaceDepartments, loadWorkspaceProfile, sha256Hex } from 
 import { COMPANY_WIDE, canReadDocument, canWriteDepartment, wallOf } from "./access.js";
 import { departmentName, listDocIndex, normalizeText, readDoc } from "./store.js";
 import { SYSTEM_ACTOR, recordAudit } from "./audit.js";
+import { markdownToPlainText } from "./markdown.js";
 
 const MAX_QUERY_CHUNKS = 6;
 const MAX_CANDIDATE_DOCS = 4;
@@ -193,7 +194,7 @@ export async function checkContradictions(env, deps, { workspaceId, docId, title
       const excerpts = [...info.texts.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_EXCERPTS_PER_DOC).map((e) => e[0]);
       result.candidates++;
       jobs.push(
-        judgePair(env, deps, { title, text }, { title: other.title, excerpts, fullText: other.fullText })
+        judgePair(env, deps, { title, text }, { title: other.title, excerpts, fullText: markdownToPlainText(other.fullText) || other.fullText })
           .then((items) => items.map((item) => ({ item, otherId, otherDept: other.departmentId })))
           .catch(() => { result.failed++; return []; })
       );
@@ -396,6 +397,7 @@ export async function handleRemindContradiction(env, deps, member, id, origin) {
 // αμέσως, και ο έλεγχος για νέες τρέχει στο παρασκήνιο (ctx.waitUntil) ώστε ο editor να μην περιμένει.
 export async function afterDocumentSaved(rc, { docId, title, text, vectors }) {
   const { env, deps, member, ctx, origin } = rc;
+  text = markdownToPlainText(text) || text; // τα παραθέματα του LLM είναι σε καθαρό κείμενο: ταιριάζουν με το καθαρό κείμενο, όχι με το Markdown
   await resolveStaleContradictions(env, member.workspaceId, docId, text, member.id);
   await scheduleRecheck(env, member.workspaceId, docId, origin);
   const job = checkContradictions(env, deps, {
@@ -414,14 +416,14 @@ export async function handleCheckDocument(rc, id) {
   if (!canWriteDepartment(member, departments, doc.departmentId)) return json(403, { error: "forbidden" });
   const vectors = [];
   try {
-    for (const chunk of deps.chunkText(doc.fullText).slice(0, MAX_QUERY_CHUNKS)) {
+    for (const chunk of deps.chunkText(markdownToPlainText(doc.fullText) || doc.fullText).slice(0, MAX_QUERY_CHUNKS)) {
       vectors.push({ values: await deps.getEmbedding(chunk, env.GEMINI_API_KEY) });
     }
   } catch {
     return json(503, { error: "ai_unavailable" });
   }
   const result = await checkContradictions(env, deps, {
-    workspaceId: member.workspaceId, docId: id, title: doc.title, text: doc.fullText, vectors, origin, actorEmail: member.email,
+    workspaceId: member.workspaceId, docId: id, title: doc.title, text: markdownToPlainText(doc.fullText) || doc.fullText, vectors, origin, actorEmail: member.email,
   });
   // Οι ήδη γνωστές αντιφάσεις δεν μετρούν ως "νέες". Επιστρέφουμε και πόσες ανοιχτές υπάρχουν, ώστε το μήνυμα
   // να μη δείχνει "0" όταν απλώς βρέθηκαν ξανά οι ίδιες.
@@ -466,7 +468,7 @@ export async function runDueRechecks(env, deps, opts = {}) {
       if (!doc) continue;
       const vectors = [];
       try {
-        for (const chunk of deps.chunkText(doc.fullText).slice(0, MAX_QUERY_CHUNKS)) {
+        for (const chunk of deps.chunkText(markdownToPlainText(doc.fullText) || doc.fullText).slice(0, MAX_QUERY_CHUNKS)) {
           vectors.push({ values: await deps.getEmbedding(chunk, env.GEMINI_API_KEY) });
         }
       } catch {
@@ -474,7 +476,7 @@ export async function runDueRechecks(env, deps, opts = {}) {
         continue;
       }
       const result = await checkContradictions(env, deps, {
-        workspaceId: row.workspace_id, docId: row.document_id, title: doc.title, text: doc.fullText, vectors,
+        workspaceId: row.workspace_id, docId: row.document_id, title: doc.title, text: markdownToPlainText(doc.fullText) || doc.fullText, vectors,
         origin: row.origin || "", actorEmail: "system",
       });
       out.processed++;

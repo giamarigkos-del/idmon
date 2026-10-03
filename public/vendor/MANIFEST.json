@@ -1,0 +1,60 @@
+{
+  "note": "Παράγεται από tools/vendor-build/build.mjs. Το τεστ της σουίτας ελέγχει ότι τα αρχεία δεν άλλαξαν με το χέρι.",
+  "files": {
+    "editor.js": {
+      "bytes": 508204,
+      "sha256": "900490fe35f616722dbb6a3bc359c8d144dd821c84e7be81764e2b3ca8389737"
+    },
+    "reader.js": {
+      "bytes": 73541,
+      "sha256": "2fdeeaab93da226c16f5063e1c4d10831401fcccd6cf95526adb6b0806caa0b1"
+    }
+  },
+  "dependencies": {
+    "@tiptap/core": {
+      "requested": "3.31.4",
+      "installed": "3.31.4",
+      "license": "MIT"
+    },
+    "@tiptap/extension-image": {
+      "requested": "3.31.4",
+      "installed": "3.31.4",
+      "license": "MIT"
+    },
+    "@tiptap/extension-table": {
+      "requested": "3.31.4",
+      "installed": "3.31.4",
+      "license": "MIT"
+    },
+    "@tiptap/markdown": {
+      "requested": "3.31.4",
+      "installed": "3.31.4",
+      "license": "MIT"
+    },
+    "@tiptap/pm": {
+      "requested": "3.31.4",
+      "installed": "3.31.4",
+      "license": "MIT"
+    },
+    "@tiptap/starter-kit": {
+      "requested": "3.31.4",
+      "installed": "3.31.4",
+      "license": "MIT"
+    },
+    "dompurify": {
+      "requested": "3.4.16",
+      "installed": "3.4.16",
+      "license": "(MPL-2.0 OR Apache-2.0)"
+    },
+    "marked": {
+      "requested": "17.0.6",
+      "installed": "17.0.6",
+      "license": "MIT"
+    },
+    "esbuild": {
+      "requested": "0.28.2",
+      "installed": "0.28.2",
+      "license": "MIT"
+    }
+  }
+}

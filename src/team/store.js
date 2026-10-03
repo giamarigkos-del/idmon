@@ -9,6 +9,7 @@
 
 import { COMPANY_WIDE } from "./access.js";
 import { sha256Hex } from "./auth.js";
+import { markdownToPlainText } from "./markdown.js";
 
 export const DOC_ID_RE = /^doc-[a-f0-9]{16}$/;
 export const docKey = (workspaceId, id) => `team:${workspaceId}:doc:${id}`;
@@ -277,7 +278,10 @@ export async function persistDocument(env, deps, member, { id, title, text, depa
   extras = hidden || departmentId === COMPANY_WIDE ? [] : [...new Set(extras)].filter((p) => p !== departmentId).sort();
   const groupId = await audienceGroupId(workspaceId, departmentId, extras);
 
-  const chunks = deps.chunkText(text);
+  // Το άρθρο αποθηκεύεται σε Markdown, αλλά ο βοηθός πρέπει να διαβάζει καθαρό κείμενο (χωρίς **, #, |). Αν το κείμενο μένει άδειο
+  // (π.χ. άρθρο μόνο με εικόνα), χρησιμοποιείται το ίδιο το Markdown ώστε να υπάρχει τουλάχιστον ένα chunk.
+  const plain = markdownToPlainText(text) || text;
+  const chunks = deps.chunkText(plain);
   const vectors = [];
   try {
     for (let i = 0; i < chunks.length; i++) {

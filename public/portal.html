@@ -49,13 +49,6 @@
   .loginbox p{color:var(--text-soft);font-size:var(--fs-md);line-height:1.55;margin:0 0 16px;}
   .loginbox input{width:100%;height:46px;margin-bottom:12px;}
   .loginbox .btn{width:100%;height:46px;font-size:var(--fs-md);}
-  /* αναγνώστης εγγράφου */
-  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;
-    justify-content:center;padding:5vh 16px;overflow:auto;z-index:20;}
-  .reader{background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:760px;width:100%;padding:20px 22px;}
-  .reader h2{margin:0 0 6px;font-size:var(--fs-xl);}
-  .reader .facts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 4px;font-size:var(--fs-sm);color:var(--text-soft);}
-  .reader .text{font-size:var(--fs-md);line-height:1.7;white-space:pre-wrap;word-wrap:break-word;margin:14px 0 18px;}
   @media (max-width:560px){.searchrow{flex-direction:column;}.searchrow .btn{width:100%;}}
 </style>
 </head>
@@ -242,44 +235,6 @@
     email.focus();
   }
 
-  // ------------------------------------------------------------------ αναγνώστης εγγράφου
-  // Ενημερώσεις που δεν έχουν μπει ακόμα στο βασικό κείμενο: φαίνονται ΠΑΝΩ από το άρθρο, γιατί
-  // υπερισχύουν του παλιού κειμένου σε περίπτωση διαφοράς.
-  function pendingUpdatesBlock(list) {
-    if (!list || !list.length) return null;
-    var box = h("div", { class: "card", style: "margin-top:12px;border-style:dashed;border-color:var(--warn-border);" }, [
-      h("p", { class: "label", style: "color:var(--warn-border);margin:0 0 4px;", text: "Πρόσφατες ενημερώσεις που δεν έχουν ενσωματωθεί ακόμα (υπερισχύουν του κειμένου παρακάτω)" }),
-    ]);
-    list.forEach(function (u) {
-      box.appendChild(h("div", { style: "font-size:14px;line-height:1.6;white-space:pre-wrap;margin-top:4px;", text: "• " + u.text + " (" + agoText(u.createdAt) + ")" }));
-    });
-    return box;
-  }
-  function openDocument(id) {
-    api("/team/documents/" + encodeURIComponent(id)).then(function (r) {
-      if (r.status !== 200) return;
-      var d = r.data;
-      var overlay = h("div", { class: "overlay", role: "dialog", "aria-modal": "true", "aria-label": d.title });
-      function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); document.removeEventListener("keydown", onKey); }
-      function onKey(e) { if (e.key === "Escape") close(); }
-      document.addEventListener("keydown", onKey);
-      overlay.addEventListener("click", function (e) { if (e.target === overlay) close(); });
-      var facts = [h("span", { class: "pill", text: d.departmentName })];
-      if (d.audience && d.audience.projects && d.audience.projects.length && d.departmentId !== "_all") {
-        facts.push(h("span", { class: "pill shared", text: "κοινό με: " + d.audience.projects.map(function (x) { return x.name; }).join(", ") + (d.audience.hiddenCount ? " +" + d.audience.hiddenCount : "") }));
-      }
-      if (d.updatedAt && !isNaN(new Date(d.updatedAt).getTime())) facts.push(h("span", { text: "ενημερώθηκε " + new Date(d.updatedAt).toLocaleDateString("el-GR") }));
-      overlay.appendChild(h("div", { class: "reader" }, [
-        h("h2", { text: d.title }),
-        h("div", { class: "facts" }, facts),
-        pendingUpdatesBlock(d.pendingUpdates),
-        h("div", { class: "text", text: d.fullText }),
-        h("button", { class: "btn secondary", type: "button", onclick: close, text: "Κλείσιμο" }),
-      ]));
-      document.body.appendChild(overlay);
-    });
-  }
-
   // ------------------------------------------------------------------ κύρια οθόνη
   function renderApp(me) {
     clear(app);
@@ -367,7 +322,7 @@
       if (!freshDocs.length) recentCol.appendChild(h("div", { class: "empty", text: "Καμία αλλαγή τις τελευταίες 14 ημέρες. Εδώ θα βλέπεις ποια έγγραφα άλλαξαν πρόσφατα." }));
       freshDocs.forEach(function (d) {
         var label = d.pendingUpdates ? "συμπλήρωμα " + agoText(d.pendingUpdates.latestAt) : "ενημερώθηκε " + agoText(d.updatedAt);
-        recentCol.appendChild(h("button", { class: "row btn secondary listbtn", type: "button", onclick: function () { openDocument(d.id); } }, [
+        recentCol.appendChild(h("a", { class: "row btn secondary listbtn", href: "/team-article.html?id=" + encodeURIComponent(d.id) }, [
           h("span", { class: "title", text: d.title }),
           h("span", { class: "badge", text: label }),
         ]));
@@ -384,7 +339,7 @@
       var own = {}; (me.departments || []).forEach(function (x) { own[x.id] = true; });
       docs.forEach(function (d) {
         var shared = me.role !== "admin" && d.departmentId !== "_all" && !own[d.departmentId];
-        docsCol.appendChild(h("button", { class: "row btn secondary listbtn", type: "button", onclick: function () { openDocument(d.id); } }, [
+        docsCol.appendChild(h("a", { class: "row btn secondary listbtn", href: "/team-article.html?id=" + encodeURIComponent(d.id) }, [
           h("span", { class: "title", text: d.title }),
           h("span", { class: "meta" }, [h("span", { text: d.departmentName }), shared ? h("span", { class: "pill shared", text: "κοινό" }) : null]),
         ]));
@@ -455,7 +410,7 @@
             var s = ev.primarySource;
             box.appendChild(h("div", { class: "source" }, [
               h("span", { text: "Πηγή: " + (s.title || "έγγραφο") + " · " + s.departmentName + (s.isUpdate ? " (πρόσφατη ενημέρωση)" : "") }),
-              h("button", { class: "btn secondary", type: "button", text: "Άνοιγμα άρθρου", onclick: function () { openDocument(s.documentId); } }),
+              h("a", { class: "btn secondary", href: "/team-article.html?id=" + encodeURIComponent(s.documentId), text: "Άνοιγμα άρθρου" }),
             ]));
             box.appendChild(feedbackRow(s.documentId, question));
           }

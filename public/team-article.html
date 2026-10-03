@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<!-- public\team-article.html -->
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Άρθρο · Idmon για ομάδες</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/shared.css">
+<link rel="stylesheet" href="/team.css">
+<style>
+  /* Σελίδα ανάγνωσης άρθρου (3 Οκτ 2026): ένα πλήρες άρθρο με δική του διεύθυνση (/team-article.html?id=...), κουμπί «← Πίσω»,
+     περιεχόμενα στα μεγάλα άρθρα και εκτύπωση. Το Markdown του άρθρου περνά ΜΟΝΟ από τον αυστηρό αναγνώστη (public/vendor/reader.js).
+     Αν ο αναγνώστης δεν φορτώσει, το κείμενο εμφανίζεται ως σκέτο κείμενο (ποτέ ως HTML). Τα κοινά στυλ ζουν στο team.css. */
+  body{min-height:100vh;}
+  .wrap{max-width:900px;}
+  .topbar{margin-bottom:22px;}
+  .brand{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:var(--fs-md);font-weight:600;}
+  .article{max-width:780px;margin:0 auto;}
+  .article h1{font-size:1.8rem;line-height:1.25;margin:0 0 10px;overflow-wrap:anywhere;}
+  .facts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 16px;font-size:var(--fs-sm);color:var(--text-soft);}
+  .pending-box{margin:0 0 18px;padding:12px 14px;border:1px dashed var(--warn-border);border-radius:var(--r);background:var(--warn-bg);}
+  .pending-box .label{margin:0 0 6px;font-size:var(--fs-sm);font-weight:600;color:var(--warn-border);}
+  .pending-box .item{margin-top:4px;font-size:var(--fs-sm);line-height:1.6;white-space:pre-wrap;}
+  .toc{margin:0 0 22px;padding:14px 16px;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);}
+  .toc h2{font-size:var(--fs-md);margin:0 0 10px;}
+  .toc-list{display:flex;flex-direction:column;gap:6px;}
+  .toc-item{justify-content:flex-start;text-align:left;width:100%;}
+  .toc-item.l3{width:calc(100% - 24px);margin-left:24px;}
+  .missing{max-width:560px;margin:8vh auto 0;text-align:center;}
+  .missing h1{font-size:var(--fs-xl);margin:0 0 8px;}
+  .missing p{color:var(--text-soft);font-size:var(--fs-md);line-height:1.6;margin:0 0 16px;}
+  .raw-text{white-space:pre-wrap;word-wrap:break-word;font-size:var(--fs-md);line-height:1.7;}
+  @media print{
+    body{background:#fff;color:#000;}
+    .topbar,.toc,.noprint,.btn,.user-menu-wrap{display:none !important;}
+    .wrap{max-width:none;padding:0;}
+    .article h1,.prose,.prose h1,.prose h2,.prose h3,.facts{color:#000;border-color:#999;}
+    .prose a{color:#000;}
+    .prose a[href^="http"]::after{content:" (" attr(href) ")";font-size:.85em;}
+    .prose th{background:#eee;color:#000;}
+    .prose blockquote{background:none;color:#000;border-left-color:#777;}
+    .prose pre,.prose code{background:#f4f4f4;color:#000;border-color:#ccc;}
+    .prose img,.prose table,.prose pre{break-inside:avoid;}
+    .pill{border:1px solid #999;background:none;color:#000;}
+    .pending-box{border-color:#999;background:none;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script src="/vendor/reader.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var app = document.getElementById("app");
+  function h(tag, props, children) {
+    var node = document.createElement(tag);
+    props = props || {};
+    Object.keys(props).forEach(function (k) {
+      if (k === "class") node.className = props[k];
+      else if (k === "text") node.textContent = props[k];
+      else if (k.slice(0, 2) === "on") node.addEventListener(k.slice(2), props[k]);
+      else node.setAttribute(k, props[k]);
+    });
+    (children || []).forEach(function (c) { if (c) node.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+    return node;
+  }
+  function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+  function api(path, method, body) {
+    var opts = { method: method || "GET", headers: {}, credentials: "same-origin" };
+    if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+    return fetch(path, opts).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (data) { return { status: res.status, data: data }; });
+    });
+  }
+
+  // ==== ΜΕΝΟΥ ΧΡΗΣΤΗ ΚΑΙ ΚΥΚΛΑΚΙ ΑΡΙΘΜΟΥ: ΚΟΙΝΟ ΣΤΙΣ ΤΡΕΙΣ ΣΕΛΙΔΕΣ (portal, team-editor, team-admin) ====
+  // Πρέπει να είναι ΙΔΙΟ αυτολεξεί και στις τρεις: το ελέγχει το τεστ της ενότητας 32. Αν το αλλάξεις, άλλαξέ το και στις τρεις.
+  var USER_ROLE_NAME = { admin: "Διαχειριστής", editor: "Συντάκτης", employee: "Υπάλληλος" };
+  function menuInitials(email) {
+    var name = String(email || "").split("@")[0].replace(/[^A-Za-zΑ-Ωα-ωΆ-Ώά-ώ]+/g, " ").trim();
+    var parts = name.split(/\s+/);
+    return ((parts[0] || "?").charAt(0) + (parts[1] ? parts[1].charAt(0) : "")).toUpperCase();
+  }
+  // Κυκλάκι με αριθμό: δεν υπάρχει όταν δεν υπάρχει τίποτα νέο, δείχνει «99+» πάνω από 99. Είναι διακοσμητικό (aria-hidden):
+  // ο αριθμός λέγεται από το aria-label του κουμπιού (countLabel).
+  function countBadge(n) {
+    n = Number(n);
+    if (!isFinite(n) || n < 1) return null;
+    return h("span", { class: "count-badge", "aria-hidden": "true", text: n > 99 ? "99+" : String(Math.floor(n)) });
+  }
+  function countLabel(n) {
+    n = Math.floor(Number(n));
+    return n > 99 ? "πάνω από 99 νέα" : n === 1 ? "1 νέο" : n + " νέα";
+  }
+  // Μενού λογαριασμού: κουμπί με τα αρχικά (τέρμα δεξιά, τελευταίο στη σειρά) που ανοίγει μικρό μενού με το email, τον ρόλο και το «Έξοδος».
+  // Κλείνει με Esc, με κλικ έξω ή όταν φεύγεις με Tab. Οι ακροατές εγγράφου μπαίνουν ΜΟΝΟ όσο το μενού είναι ανοιχτό.
+  function userMenu(me, onLogout) {
+    var isOpen = false;
+    var wrap = h("div", { class: "user-menu-wrap" });
+    var btn = h("button", { class: "avatar-btn", type: "button", id: "user-menu-btn", "aria-haspopup": "menu", "aria-expanded": "false",
+      "aria-controls": "user-menu", "aria-label": "Ο λογαριασμός μου (" + (me.email || "") + ")", text: menuInitials(me.email),
+      onclick: function () { setOpen(!isOpen, false); } });
+    var logout = h("button", { class: "btn secondary um-item", type: "button", role: "menuitem", id: "logout", text: "Έξοδος",
+      onclick: function () { setOpen(false, false); api("/team/logout", "POST").then(onLogout); } });
+    var panel = h("div", { class: "user-menu", id: "user-menu", role: "menu", "aria-label": "Λογαριασμός" }, [
+      h("div", { class: "um-head" }, [
+        h("div", { class: "um-email", text: me.email || "" }),
+        h("div", { class: "um-meta", text: (USER_ROLE_NAME[me.role] || "") + (me.workspaceName ? " · " + me.workspaceName : "") }),
+      ]),
+      logout,
+    ]);
+    panel.hidden = true;
+    function onDocClick(e) { if (!wrap.contains(e.target)) setOpen(false, false); }
+    function onKey(e) {
+      if (e.key === "Escape") { e.preventDefault(); setOpen(false, true); }
+      else if (e.key === "Tab") setOpen(false, false);
+    }
+    function setOpen(next, returnFocus) {
+      isOpen = next;
+      panel.hidden = !next;
+      btn.setAttribute("aria-expanded", next ? "true" : "false");
+      if (next) {
+        document.addEventListener("click", onDocClick, true);
+        document.addEventListener("keydown", onKey, true);
+        logout.focus();
+      } else {
+        document.removeEventListener("click", onDocClick, true);
+        document.removeEventListener("keydown", onKey, true);
+        if (returnFocus) btn.focus();
+      }
+    }
+    wrap.appendChild(btn);
+    wrap.appendChild(panel);
+    return wrap;
+  }
+  // ==== ΤΕΛΟΣ ΚΟΙΝΟΥ ΜΠΛΟΚ ====
+  function daysAgo(iso) { var d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000); return d < 0 ? 0 : d; }
+  function agoText(iso) { var d = daysAgo(iso); return d === 0 ? "σήμερα" : d === 1 ? "χθες" : "πριν " + d + " ημ."; }
+
+  // «← Πίσω»: αν ήρθες από σελίδα του ίδιου site (π.χ. την αναζήτηση), γυρνάς ακριβώς εκεί που ήσουν. Αλλιώς πηγαίνεις στην αναζήτηση.
+  function backButton() {
+    return h("a", { class: "btn secondary", id: "back-btn", href: "/portal.html", text: "← Πίσω στην αναζήτηση", onclick: function (e) {
+      var same = false;
+      try { same = !!document.referrer && new URL(document.referrer).origin === window.location.origin; } catch (err) { same = false; }
+      if (same && window.history.length > 1) { e.preventDefault(); window.history.back(); }
+    } });
+  }
+
+  function shell(me) {
+    clear(app);
+    var nav = [backButton()];
+    return { nav: nav, build: function (extra) {
+      (extra || []).forEach(function (x) { nav.push(x); });
+      nav.push(userMenu(me, function () { window.location.assign("/portal.html"); }));
+      app.appendChild(h("div", { class: "topbar" }, [h("div", { class: "brand", text: me.workspaceName || "Idmon" }), h("div", { class: "topnav" }, nav)]));
+      } };
+  }
+
+  function showMissing(me) {
+    var s = shell(me);
+    s.build([]);
+    document.title = "Δεν βρέθηκε · Idmon για ομάδες";
+    app.appendChild(h("div", { class: "missing card", id: "missing" }, [
+      h("h1", { text: "Δεν βρήκαμε αυτό το άρθρο" }),
+      h("p", { text: "Ή δεν υπάρχει πια, ή δεν έχεις δικαίωμα να το διαβάσεις. Αν περίμενες να το δεις, ρώτα τον υπεύθυνο του τμήματός σου." }),
+      h("a", { class: "btn", href: "/portal.html", id: "missing-back", text: "Πήγαινε στην αναζήτηση" }),
+    ]));
+  }
+
+  function pendingBlock(list) {
+    if (!list || !list.length) return null;
+    var box = h("div", { class: "pending-box", id: "pending-box" }, [h("p", { class: "label", text: "Πρόσφατες ενημερώσεις που δεν έχουν ενσωματωθεί ακόμα (υπερισχύουν του κειμένου παρακάτω)" })]);
+    list.forEach(function (u) { box.appendChild(h("div", { class: "item", text: "• " + u.text + " (" + agoText(u.createdAt) + ")" })); });
+    return box;
+  }
+
+  function showArticle(me, d) {
+    document.title = d.title + " · Idmon για ομάδες";
+    var extra = [h("button", { class: "btn secondary noprint", type: "button", id: "print-btn", text: "Εκτύπωση", onclick: function () { window.print(); } })];
+    if (d.editable && me.role !== "employee") extra.push(h("a", { class: "btn secondary", id: "edit-btn", href: "/team-editor.html?doc=" + encodeURIComponent(d.id), text: "Επεξεργασία" }));
+    var facts = [h("span", { class: "pill", text: d.departmentName })];
+    if (d.audience && d.audience.projects && d.audience.projects.length && d.departmentId !== "_all") {
+      facts.push(h("span", { class: "pill shared", text: "κοινό με: " + d.audience.projects.map(function (x) { return x.name; }).join(", ") + (d.audience.hiddenCount ? " +" + d.audience.hiddenCount : "") }));
+    }
+    if (d.updatedAt && !isNaN(new Date(d.updatedAt).getTime())) facts.push(h("span", { text: "ενημερώθηκε " + new Date(d.updatedAt).toLocaleDateString("el-GR") }));
+    var body = h("div", { class: "prose", id: "article-body" });
+    var headings = [];
+    if (window.IdmonReader && typeof window.IdmonReader.renderInto === "function") headings = window.IdmonReader.renderInto(body, d.fullText);
+    else body.appendChild(h("div", { class: "raw-text", text: d.fullText })); // ο αναγνώστης δεν φόρτωσε: ΜΟΝΟ κείμενο, ποτέ HTML
+    var toc = null;
+    if (headings.length >= 3) {
+      toc = h("nav", { class: "toc", id: "toc", "aria-label": "Περιεχόμενα" }, [h("h2", { text: "Περιεχόμενα" })]);
+      var list = h("div", { class: "toc-list" });
+      // Τα περιεχόμενα ΔΕΝ προσθέτουν εγγραφή στο ιστορικό: αλλιώς το «← Πίσω» θα γύριζε μόνο από το σημείο της σελίδας και όχι στην αναζήτηση.
+      headings.forEach(function (x) {
+        list.appendChild(h("a", { class: "btn secondary toc-item" + (x.level === 3 ? " l3" : ""), href: "#" + x.id, text: x.text, onclick: function (e) {
+          var target = document.getElementById(x.id);
+          if (!target) return;
+          e.preventDefault();
+          if (target.scrollIntoView) target.scrollIntoView({ block: "start" });
+          try { window.history.replaceState(null, "", "#" + x.id); } catch (err) { /* ο browser δεν το επιτρέπει: μένει χωρίς hash */ }
+        } }));
+      });
+      toc.appendChild(list);
+    }
+    var article = h("article", { class: "article", id: "article" }, [
+      h("h1", { id: "article-title", text: d.title }),
+      h("div", { class: "facts" }, facts),
+      pendingBlock(d.pendingUpdates), toc, body,
+    ]);
+    var s = shell(me);
+    s.build(extra);
+    app.appendChild(article);
+  }
+
+  var params = new URLSearchParams(window.location.search);
+  var id = params.get("id");
+  api("/team/me").then(function (r) {
+    if (r.status === 0) throw new Error("network");
+    if (r.status !== 200) { window.location.replace("/portal.html"); return; }
+    var me = r.data;
+    if (!id) { showMissing(me); return; }
+    return api("/team/documents/" + encodeURIComponent(id)).then(function (dr) {
+      if (dr.status !== 200) { showMissing(me); return; }
+      showArticle(me, dr.data);
+    });
+  }).catch(function () { app.appendChild(h("p", { text: "Δεν ήταν δυνατή η φόρτωση." })); });
+})();
+</script>
+</body>
+</html>

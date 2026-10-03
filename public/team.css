@@ -140,7 +140,7 @@ details.audience > summary .s-state{font-size:var(--fs-sm);color:var(--text-soft
 .avatar-btn{display:inline-flex;align-items:center;justify-content:center;width:var(--h-btn);height:var(--h-btn);padding:0;border-radius:50%;
   border:1px solid var(--field-border);background:var(--accent-soft);color:var(--accent);font-size:var(--fs-sm);font-weight:700;cursor:pointer;font-family:inherit;}
 .avatar-btn:hover,.avatar-btn[aria-expanded="true"]{border-color:var(--accent);}
-.user-menu{position:absolute;right:0;top:calc(100% + 8px);z-index:30;min-width:260px;max-width:calc(100vw - 32px);box-sizing:border-box;
+.user-menu{position:absolute;right:0;top:calc(100% + 8px);z-index:30;width:max-content;min-width:260px;max-width:min(400px,calc(100vw - 32px));box-sizing:border-box;
   background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:12px;box-shadow:0 8px 24px rgba(0,0,0,.45);}
 .user-menu[hidden]{display:none;}
 .um-head{padding:2px 4px 12px;margin-bottom:10px;border-bottom:1px solid var(--border);}
@@ -151,6 +151,54 @@ details.audience > summary .s-state{font-size:var(--fs-sm);color:var(--text-soft
   background:var(--accent);color:var(--on-accent);font-size:var(--fs-xs);font-weight:700;line-height:1;}
 .tab .count-badge{margin-left:8px;}
 .btn.secondary .count-badge{margin-left:2px;}
+
+/* ---- ΚΕΙΜΕΝΟ ΑΡΘΡΟΥ (.prose): ίδια εμφάνιση στη σελίδα ανάγνωσης, στον editor (WYSIWYG) και στην ανάγνωση μέσα στον editor ---- */
+.prose{font-size:var(--fs-md);line-height:1.75;color:var(--text);overflow-wrap:anywhere;}
+.prose > :first-child{margin-top:0;}
+.prose h1{font-size:1.6rem;line-height:1.3;margin:1.4em 0 .5em;}
+.prose h2{font-size:1.35rem;line-height:1.3;margin:1.5em 0 .5em;padding-bottom:.25em;border-bottom:1px solid var(--border);}
+.prose h3{font-size:1.15rem;line-height:1.35;margin:1.3em 0 .4em;}
+.prose h4,.prose h5,.prose h6{font-size:1rem;margin:1.2em 0 .3em;}
+.prose p{margin:0 0 1em;}
+.prose ul,.prose ol{margin:0 0 1em;padding-left:1.6em;}
+.prose li{margin:.25em 0;}
+.prose li > p{margin:0;}
+.prose blockquote{margin:0 0 1em;padding:.2em 1em;border-left:3px solid var(--accent);background:var(--surface-2);color:var(--text-soft);}
+.prose blockquote p:last-child{margin-bottom:0;}
+.prose code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;background:var(--surface-2);padding:.1em .35em;border-radius:4px;}
+.prose pre{margin:0 0 1em;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);overflow:auto;}
+.prose pre code{background:none;padding:0;}
+/* Οι σύνδεσμοι ΜΕΣΑ στο κείμενο ενός άρθρου είναι περιεχόμενο που έγραψε ο συντάκτης (όχι κουμπιά του περιβάλλοντος): μένουν υπογραμμισμένοι ώστε να φαίνεται ότι πατιούνται. */
+.prose a{color:var(--accent);text-decoration:underline;text-underline-offset:2px;}
+.prose img{display:block;max-width:100%;height:auto;margin:0 0 1em;border:1px solid var(--border);border-radius:var(--r);}
+.prose hr{margin:1.5em 0;border:0;border-top:1px solid var(--border);}
+.prose .table-wrap,.prose .tableWrapper{max-width:100%;margin:0 0 1em;overflow-x:auto;}
+.prose table{border-collapse:collapse;min-width:100%;}
+.prose th,.prose td{min-width:70px;padding:8px 12px;border:1px solid var(--border);text-align:left;vertical-align:top;}
+.prose th{background:var(--surface-2);font-weight:700;}
+.prose td > p,.prose th > p{margin:0;}
+
+/* ---- WYSIWYG ΕΠΕΞΕΡΓΑΣΤΗΣ (.rte): γραμμή κουμπιών 44px με λέξεις, και από κάτω το άρθρο όπως θα φανεί ---- */
+.rte{margin:0 0 14px;border:1px solid var(--field-border);border-radius:var(--r);background:var(--surface);}
+.rte:focus-within{border-color:var(--accent);box-shadow:0 0 0 2px var(--focus);}
+.rte-toolbar{display:flex;flex-wrap:wrap;gap:6px;padding:8px;background:var(--surface-2);border-bottom:1px solid var(--border);border-radius:var(--r) var(--r) 0 0;}
+.rte-toolbar .btn{min-height:var(--h-btn);padding:6px 12px;font-size:var(--fs-sm);}
+.rte-toolbar .btn[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
+.rte-toolbar .btn:disabled{opacity:.45;cursor:not-allowed;}
+.rte-toolbar .tb-sep{width:1px;align-self:stretch;background:var(--border);margin:2px 2px;}
+.rte-context{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px;border-bottom:1px solid var(--border);}
+.rte-context[hidden],.rte-linkbar[hidden]{display:none;}
+.rte-context .lbl{font-size:var(--fs-sm);color:var(--text-soft);margin-right:4px;}
+.rte-linkbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px;border-bottom:1px solid var(--border);}
+.rte-linkbar input{flex:1 1 220px;min-width:0;}
+.rte-note{padding:8px 12px;font-size:var(--fs-sm);color:var(--text-soft);border-bottom:1px solid var(--border);}
+.rte-note.err{color:var(--danger);}
+.rte-body{padding:14px 16px;min-height:320px;max-height:70vh;overflow:auto;}
+.rte-body .ProseMirror{min-height:290px;outline:none;}
+.rte-body .ProseMirror .selectedCell{background:var(--accent-soft);}
+.rte-body .ProseMirror .column-resize-handle{display:none;}
+.rte-hint{margin:6px 0 0;font-size:var(--fs-sm);color:var(--text-soft);}
+@media (max-width:560px){.rte-toolbar .btn{flex:1 1 auto;}.rte-body{padding:12px;max-height:none;}}
 
 /* ---- άδειες οθόνες και «Ξεκίνα εδώ»: κάθε άδεια οθόνη λέει τι είναι, γιατί είναι άδεια και τι να πατήσεις */
 .emptybox{border:1px dashed var(--field-border);border-radius:var(--r-lg);padding:18px 16px;text-align:center;margin:10px 0;}

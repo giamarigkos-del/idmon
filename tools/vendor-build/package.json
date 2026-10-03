@@ -1,0 +1,18 @@
+{
+  "name": "idmon-vendor-build",
+  "private": true,
+  "type": "module",
+  "description": "Φτιάχνει τα αρχεία public/vendor/editor.js και reader.js. Τρέχει ΜΟΝΟ όταν αλλάζουν οι βιβλιοθήκες ή οι κανόνες. Ο πελάτης και το deploy δεν το χρειάζονται.",
+  "scripts": { "build": "node build.mjs" },
+  "dependencies": {
+    "@tiptap/core": "3.31.4",
+    "@tiptap/extension-image": "3.31.4",
+    "@tiptap/extension-table": "3.31.4",
+    "@tiptap/markdown": "3.31.4",
+    "@tiptap/pm": "3.31.4",
+    "@tiptap/starter-kit": "3.31.4",
+    "dompurify": "3.4.16",
+    "marked": "17.0.6"
+  },
+  "devDependencies": { "esbuild": "0.28.2" }
+}

@@ -17,6 +17,7 @@ try {
   process.exit(2);
 }
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -747,11 +748,11 @@ section("11. portal.html και team-editor.html: χρήση σαν πραγμα
   check("φαίνεται η παραπομπή στον υπεύθυνο του τμήματος", /Ρώτα τον υπεύθυνο του τμήματος/.test(text(dom, ".answer .handoff")));
 
   // --- ανάγνωση εγγράφου
-  dom.window.document.querySelector(".answer .source button").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-  const reader = await waitFor(() => dom.window.document.querySelector(".overlay .reader"));
-  check("Άνοιγμα άρθρου: εμφανίζεται ο αναγνώστης με τίτλο και κείμενο", !!reader && /Διαδικασία επιστροφών/.test(reader.textContent) && /CC-MARK/.test(reader.textContent));
-  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape" }));
-  check("Escape κλείνει τον αναγνώστη", !dom.window.document.querySelector(".overlay"));
+  const openLink = dom.window.document.querySelector(".answer .source a.btn");
+  check("Άνοιγμα άρθρου: είναι σύνδεσμος ντυμένος ως κουμπί (a.btn) προς τη σελίδα του άρθρου, όχι παράθυρο πάνω από τη σελίδα", !!openLink && /^\/team-article\.html\?id=/.test(openLink.getAttribute("href")) && !dom.window.document.querySelector(".overlay"), openLink && openLink.outerHTML);
+  const artPage = br.open(readFileSync(join(REPO, "public", "team-article.html"), "utf8"), openLink.getAttribute("href"));
+  const artEl = await waitFor(() => artPage.window.document.querySelector("#article"));
+  check("σελίδα άρθρου: εμφανίζεται ο τίτλος, το κείμενο και το κουμπί «← Πίσω στην αναζήτηση»", !!artEl && /Διαδικασία επιστροφών/.test(artPage.window.document.querySelector("#article-title").textContent) && /CC-MARK/.test(artPage.window.document.querySelector("#article-body").textContent) && artPage.window.document.querySelector("#back-btn").tagName === "A" && /btn/.test(artPage.window.document.querySelector("#back-btn").className));
 
   // --- αποσύνδεση
   dom.window.document.querySelector("#logout").dispatchEvent(new dom.window.Event("click", { bubbles: true })); // το «Έξοδος» ζει πλέον μέσα στο μενού του λογαριασμού
@@ -801,10 +802,13 @@ section("11. portal.html και team-editor.html: χρήση σαν πραγμα
   // --- XSS: το περιεχόμενο εγγράφων δεν εκτελείται ποτέ ως HTML
   const portal3 = brEd.open(portalHtml, "/portal.html");
   await waitFor(() => [...portal3.window.document.querySelectorAll(".row")].some((r) => /Δοκιμή XSS/.test(r.textContent)));
-  [...portal3.window.document.querySelectorAll(".row")].find((r) => /Δοκιμή XSS/.test(r.textContent)).dispatchEvent(new portal3.window.Event("click", { bubbles: true }));
-  await waitFor(() => portal3.window.document.querySelector(".overlay .reader"));
-  check("XSS: ο τίτλος εμφανίζεται ως κείμενο, δεν δημιουργείται στοιχείο img", !portal3.window.document.querySelector("img") && /<img src=x/.test(portal3.window.document.body.textContent));
-  check("XSS: το script του εγγράφου ΔΕΝ εκτελέστηκε", portal3.window.__pwned === undefined && ed.window.__pwned === undefined);
+  const xssRow = [...portal3.window.document.querySelectorAll(".row")].find((r) => /Δοκιμή XSS/.test(r.textContent));
+  check("XSS: η γραμμή του εγγράφου στο portal είναι κουμπί-σύνδεσμος προς τη σελίδα του άρθρου", xssRow.tagName === "A" && /^\/team-article\.html\?id=/.test(xssRow.getAttribute("href")));
+  const xssPage = brEd.open(readFileSync(join(REPO, "public", "team-article.html"), "utf8"), xssRow.getAttribute("href"));
+  await waitFor(() => xssPage.window.document.querySelector("#article"));
+  check("XSS: ο τίτλος εμφανίζεται ως κείμενο, δεν δημιουργείται στοιχείο img", !xssPage.window.document.querySelector("img") && /<img src=x/.test(xssPage.window.document.querySelector("#article-title").textContent));
+  check("XSS: το κείμενο του άρθρου (χωρίς φορτωμένο αναγνώστη) εμφανίζεται ΜΟΝΟ ως κείμενο, με το <script> ως γράμματα", !xssPage.window.document.querySelector("#article-body script") && /<script>window\.__pwned=1/.test(xssPage.window.document.querySelector("#article-body").textContent));
+  check("XSS: το script του εγγράφου ΔΕΝ εκτελέστηκε", portal3.window.__pwned === undefined && ed.window.__pwned === undefined && xssPage.window.__pwned === undefined);
 }
 
 // ============================================================================ 12. Αντιφάσεις
@@ -1266,8 +1270,9 @@ section("16. team-editor (εισερχόμενα), team-admin και portal: π�
   const pe = browserFor("emp_cc@demo.gr")("portal.html");
   const recentRow = await waitFor(() => byText(pe, ".row", /Όρια πληρωμών/));
   check("portal: το έγγραφο με εκκρεμές συμπλήρωμα εμφανίζεται στο «Τι άλλαξε πρόσφατα» με σήμανση συμπλήρωμα", !!recentRow && /συμπλήρωμα/.test(recentRow.textContent));
-  click(pe, recentRow);
-  check("portal: ο αναγνώστης δείχνει τις ενημερώσεις που δεν έχουν ενσωματωθεί, πάνω από το κείμενο", !!(await waitFor(() => $(pe, ".overlay .reader") && /Πρόσφατες ενημερώσεις που δεν έχουν ενσωματωθεί/.test($(pe, ".overlay .reader").textContent) && /Προσωρινή αλλαγή ωραρίου/.test($(pe, ".overlay .reader").textContent))));
+  check("portal: η γραμμή του εγγράφου είναι σύνδεσμος-κουμπί προς τη σελίδα του άρθρου", recentRow.tagName === "A" && recentRow.getAttribute("href") === "/team-article.html?id=" + encodeURIComponent(DOC2.pay), recentRow.getAttribute("href"));
+  const pendPage = browserFor("emp_cc@demo.gr")("team-article.html", "?id=" + encodeURIComponent(DOC2.pay));
+  check("σελίδα άρθρου: δείχνει τις ενημερώσεις που δεν έχουν ενσωματωθεί, ΠΑΝΩ από το κείμενο", !!(await waitFor(() => $(pendPage, "#pending-box") && /Πρόσφατες ενημερώσεις που δεν έχουν ενσωματωθεί/.test($(pendPage, "#pending-box").textContent) && /Προσωρινή αλλαγή ωραρίου/.test($(pendPage, "#pending-box").textContent))) && !!($(pendPage, "#pending-box").compareDocumentPosition($(pendPage, "#article-body")) & 4));
   check("portal υπαλλήλου: ΔΕΝ υπάρχουν σύνδεσμοι εισερχομένων ή διαχείρισης", !$(pe, "#staff-link") && !$(pe, "#admin-link"));
   const pd = browserFor("ed_cc@demo.gr")("portal.html");
   const staff = await waitFor(() => $(pd, "#staff-link"));
@@ -1474,8 +1479,15 @@ function uiFor(email) {
     if (method !== "GET") headers.Origin = BASE;
     return workerNew.fetch(new Request(url, { method, headers, body: init.body }), env);
   };
-  return (file, query = "") => new JSDOMu(readFileSync(join(REPO, "public", file), "utf8"), { url: BASE + "/" + file + query, runScripts: "dangerously", pretendToBeVisual: true, virtualConsole: new VCu(),
-    beforeParse(w) { w.fetch = bridge; w.TextDecoder = TextDecoder; w.confirm = () => true; } });
+  // inject: { "/vendor/reader.js": κώδικας, ... }. Στην παραγωγή τα αρχεία vendor φορτώνουν με <script src="...">, που το jsdom δεν φορτώνει. Εδώ η ετικέτα
+  // αντικαθίσταται με το ίδιο το περιεχόμενο ΣΤΗ ΘΕΣΗ της, άρα τρέχει με την ίδια σειρά και μετά το <body>, όπως στον browser. Χωρίς inject, τα αρχεία
+  // «δεν φορτώνουν» (ίδια συμπεριφορά με αποτυχία δικτύου) και οι σελίδες πέφτουν στα απλά πεδία και στο σκέτο κείμενο.
+  return (file, query = "", inject = {}) => {
+    let html = readFileSync(join(REPO, "public", file), "utf8");
+    for (const [src, code] of Object.entries(inject)) html = html.replace('<script src="' + src + '"></script>', () => "<script>" + code.split("</script").join("<\\/script") + "</script>");
+    return new JSDOMu(html, { url: BASE + "/" + file + query, runScripts: "dangerously", pretendToBeVisual: true, virtualConsole: new VCu(),
+      beforeParse(w) { w.fetch = bridge; w.TextDecoder = TextDecoder; w.confirm = () => true; } });
+  };
 }
 const $u = (dom, sel) => dom.window.document.querySelector(sel);
 const $$u = (dom, sel) => [...dom.window.document.querySelectorAll(sel)];
@@ -2422,6 +2434,7 @@ section("27b. Οθόνη διαχείρισης: λίστα ανθρώπων, μ
   await uiWait(() => projectsOf(memberId(U(9))).fin === "editor");
   await idle(dom);
   check("επικόλληση χωρίς δημιουργία: ο υπάρχων μπαίνει ως Editor, οι άγνωστοι ΔΕΝ δημιουργούνται", projectsOf(memberId(U(9))).fin === "editor" && !db.prepare("select 1 from team_members where email = 'pastea@bulk.gr'").get());
+  await uiWait(() => /Δεν προστέθηκαν:/.test(($u(dom, "#paste-result") || {}).textContent || "")); // η οθόνη ξαναζωγραφίζεται μόλις ολοκληρωθεί η φόρτωση
   check("... η λίστα «δεν προστέθηκαν» μένει ορατή και λέει τι να κάνεις", /Δεν προστέθηκαν: pastea@bulk\.gr, pasteb@bulk\.gr/.test($u(dom, "#paste-result").textContent) && /Δημιουργία νέων μελών/.test($u(dom, "#paste-result").textContent), $u(dom, "#paste-result").textContent);
   // με «Δημιουργία νέων μελών» και πρόσκληση
   $u(dom, "#paste-emails").value = "pastea@bulk.gr\npasteb@bulk.gr";
@@ -2851,7 +2864,7 @@ function uxProblems(dom, names = []) {
   const doc = dom.window.document;
   const out = [];
   const clone = doc.body.cloneNode(true);
-  clone.querySelectorAll("script,style").forEach((e) => e.remove()); // ο κώδικας της σελίδας δεν είναι ορατό κείμενο
+  clone.querySelectorAll("script,style,.prose").forEach((e) => e.remove()); // ο κώδικας της σελίδας και το ΚΕΙΜΕΝΟ των άρθρων (.prose, γραμμένο από τον συντάκτη) δεν ελέγχονται
   let t = clone.textContent;
   doc.querySelectorAll("[aria-label],[placeholder],[title]").forEach((e) => { t += " " + (e.getAttribute("aria-label") || "") + " " + (e.getAttribute("placeholder") || "") + " " + (e.getAttribute("title") || ""); });
   for (const n of [...names].filter(Boolean).sort((a, b) => b.length - a.length)) t = t.split(n).join(" ");
@@ -2861,7 +2874,7 @@ function uxProblems(dom, names = []) {
   // ΜΙΑ λέξη για το τμήμα: το «έργο» δεν επιτρέπεται πουθενά (ο αρχάριος θα νόμιζε ότι είναι άλλο πράγμα)
   const mixed = t.match(/.{0,24}(?<![\p{L}])[ΈέΕε]ργ(?:ο|ου|α|ων)(?![\p{L}]).{0,24}/gu);
   if (mixed) out.push("δεύτερη λέξη για το τμήμα (έργο): " + mixed.slice(0, 2).join(" | "));
-  doc.querySelectorAll("a").forEach((a) => { if (!/(^|\s)btn(\s|$)/.test(a.className)) out.push("link χωρίς μορφή κουμπιού: " + a.textContent.trim().slice(0, 30)); });
+  doc.querySelectorAll("a").forEach((a) => { if (!a.closest(".prose") && !/(^|\s)btn(\s|$)/.test(a.className)) out.push("link χωρίς μορφή κουμπιού: " + a.textContent.trim().slice(0, 30)); }); // οι σύνδεσμοι ΜΕΣΑ στο κείμενο άρθρου είναι περιεχόμενο
   doc.querySelectorAll(".linkbtn,.linkrow,.backlink").forEach((e) => out.push("παλιό link-κουμπί: " + e.textContent.trim().slice(0, 30)));
   doc.querySelectorAll("[style]").forEach((e) => { const m = /font-size:\s*([\d.]+)px/.exec(e.getAttribute("style")); if (m && Number(m[1]) < 13) out.push("μικρό γράμμα: " + m[1] + "px"); });
   return out;
@@ -2998,7 +3011,7 @@ section("29. Οθόνες: επιλογή ακροατηρίου, ετικέτε
     const surfaced = (dom) => {
       const doc = dom.window.document;
       const clone = doc.body.cloneNode(true);
-      clone.querySelectorAll("script,style").forEach((e) => e.remove()); // ο κώδικας της σελίδας δεν είναι ορατό κείμενο
+      clone.querySelectorAll("script,style,.prose").forEach((e) => e.remove()); // ο κώδικας της σελίδας και το ΚΕΙΜΕΝΟ των άρθρων (.prose, γραμμένο από τον συντάκτη) δεν ελέγχονται
       let t = clone.textContent;
       doc.querySelectorAll("[aria-label],[placeholder],[title]").forEach((e) => { t += " " + (e.getAttribute("aria-label") || "") + " " + (e.getAttribute("placeholder") || "") + " " + (e.getAttribute("title") || ""); });
       for (const n of dataNames) t = t.split(n).join(" "); // τα ονόματα που έβαλαν οι χρήστες δεν μετράνε
@@ -3039,7 +3052,7 @@ section("29. Οθόνες: επιλογή ακροατηρίου, ετικέτε
   await uiWait(() => $$u(pt, ".row").length > 0);
   check("portal: χωρίς απλό link, παλιό link-κουμπί, μικρό γράμμα ή λατινική λέξη", uxProblems(pt, [...db.prepare("select name from departments").all().map((r) => r.name), ...db.prepare("select title from team_documents").all().map((r) => r.title)]).length === 0, uxProblems(pt, [...db.prepare("select name from departments").all().map((r) => r.name), ...db.prepare("select title from team_documents").all().map((r) => r.title)]));
   check("portal: ο ρόλος φαίνεται στα ελληνικά (Συντάκτης) και η έξοδος είναι κουμπί «Έξοδος»", /Συντάκτης/.test($u(pt, ".brand").textContent) && $u(pt, "#logout").tagName === "BUTTON" && /(^|\s)btn(\s|$)/.test($u(pt, "#logout").className) && $u(pt, "#logout").textContent === "Έξοδος");
-  check("portal: κάθε γραμμή εγγράφου είναι κουμπί (class btn secondary listbtn)", $$u(pt, ".row").length > 0 && $$u(pt, ".row").every((r) => r.tagName === "BUTTON" && /listbtn/.test(r.className)));
+  check("portal: κάθε γραμμή εγγράφου είναι σύνδεσμος ντυμένος ως κουμπί (a.btn secondary listbtn) προς τη σελίδα του άρθρου", $$u(pt, ".row").length > 0 && $$u(pt, ".row").every((r) => r.tagName === "A" && /listbtn/.test(r.className) && /btn secondary/.test(r.className) && /^\/team-article\.html\?id=/.test(r.getAttribute("href"))));
   check("portal: τίτλος στήλης «Έγγραφα που βλέπεις»", $$u(pt, "h2").some((h) => h.textContent === "Έγγραφα που βλέπεις"));
   // Τα έγγραφα του τεστ είναι φρέσκα, άρα εμφανίζονται ΚΑΙ στη στήλη «Τι άλλαξε πρόσφατα» (χωρίς ετικέτα «κοινό»). Ψάχνουμε μόνο στη στήλη εγγράφων.
   const docsColumn = $$u(pt, "h2").find((h) => h.textContent === "Έγγραφα που βλέπεις").parentNode;
@@ -3051,9 +3064,9 @@ section("29. Οθόνες: επιλογή ακροατηρίου, ετικέτε
   submitU(pt, ".searchrow");
   await uiWait(() => $u(pt, ".answer .source"));
   check("portal: η απάντηση φέρει ετικέτα «Απάντηση από AI»", /Απάντηση από AI/.test($u(pt, ".answer .label").textContent) && !!$u(pt, ".answer .label .pill"), $u(pt, ".answer .label").textContent);
-  clickU(pt, sharedRow);
-  const rdr = await uiWait(() => $u(pt, ".overlay .reader"));
-  check("portal: ο αναγνώστης δείχνει project, «κοινό με …» και ημερομηνία ενημέρωσης", !!rdr && /UI Γάμμα/.test(rdr.querySelector(".facts").textContent) && /κοινό με: UI Άλφα/.test(rdr.querySelector(".facts").textContent) && /ενημερώθηκε/.test(rdr.querySelector(".facts").textContent), rdr && rdr.querySelector(".facts").textContent);
+  const sharedArt = uiFor("ui_ed@demo.gr")("team-article.html", "?" + sharedRow.getAttribute("href").split("?")[1]);
+  const rdr = await uiWait(() => $u(sharedArt, "#article"));
+  check("σελίδα άρθρου: δείχνει το τμήμα, «κοινό με …» και ημερομηνία ενημέρωσης", !!rdr && /UI Γάμμα/.test(rdr.querySelector(".facts").textContent) && /κοινό με: UI Άλφα/.test(rdr.querySelector(".facts").textContent) && /ενημερώθηκε/.test(rdr.querySelector(".facts").textContent), rdr && rdr.querySelector(".facts").textContent);
 }
 
 // ============================================================================ 30. Προφίλ χώρου και τοίχοι πελατών (API)
@@ -3544,7 +3557,7 @@ section("31. Οθόνες call center: τύπος χώρου, πελάτες κ�
 section("32. UX για αρχάριους: όλα φαίνονται ως κουμπιά, 44px στόχοι, γράμματα όχι μικρότερα από 13px");
 {
   const cssText = readFileSync(join(REPO, "public", "team.css"), "utf8");
-  const pages = ["portal.html", "team-editor.html", "team-admin.html"].map((n) => [n, readFileSync(join(REPO, "public", n), "utf8")]);
+  const pages = ["portal.html", "team-editor.html", "team-admin.html", "team-article.html"].map((n) => [n, readFileSync(join(REPO, "public", n), "utf8")]);
   const everything = [["team.css", cssText], ...pages];
   check("team.css: ύψος κουμπιών και πεδίων 44px (WCAG 2.5.5)", /--h-btn:\s*44px/.test(cssText) && /--h-input:\s*44px/.test(cssText));
   const small = [];
@@ -3554,7 +3567,8 @@ section("32. UX για αρχάριους: όλα φαίνονται ως κου
   }
   check("κανένα γράμμα μικρότερο από 13px σε team.css και στις τρεις σελίδες (CSS και inline)", small.length === 0, small);
   check("τα πεδία κειμένου έχουν 16px (το iPhone δεν μεγεθύνει τη σελίδα όταν τα πατάς)", /--fs-md:\s*1rem/.test(cssText) && /input\[type=text\][^{]*\{[^}]*font-size:\s*var\(--fs-md\)/.test(cssText));
-  const under = everything.filter(([, src]) => /text-decoration:\s*underline/.test(src)).map(([n]) => n);
+  // ΜΙΑ εξαίρεση: οι σύνδεσμοι ΜΕΣΑ στο κείμενο ενός άρθρου (.prose a) είναι περιεχόμενο του συντάκτη και μένουν υπογραμμισμένοι
+  const under = everything.filter(([, src]) => /text-decoration:\s*underline/.test(src.replace(/\.prose a\{[^}]*\}/g, ""))).map(([n]) => n);
   check("καμία σελίδα και το team.css δεν υπογραμμίζουν κείμενο (τίποτα δεν φαίνεται ως απλό link)", under.length === 0, under);
   const old = everything.filter(([, src]) => /\b(linkbtn|linkrow|backlink)\b/.test(src)).map(([n]) => n);
   check("δεν έχουν μείνει οι παλιές κλάσεις link-κουμπιών (linkbtn, linkrow, backlink)", old.length === 0, old);
@@ -3572,10 +3586,10 @@ section("32. UX για αρχάριους: όλα φαίνονται ως κου
 section("33. Μενού λογαριασμού (κύκλος με αρχικά, τέρμα δεξιά) και κυκλάκι με αριθμό: portal, editor, διαχείριση");
 {
   const START = "// ==== ΜΕΝΟΥ ΧΡΗΣΤΗ", END = "// ==== ΤΕΛΟΣ ΚΟΙΝΟΥ ΜΠΛΟΚ ====";
-  const pageNames = ["portal.html", "team-editor.html", "team-admin.html"];
+  const pageNames = ["portal.html", "team-editor.html", "team-admin.html", "team-article.html"];
   const blocks = pageNames.map((n) => { const src = readFileSync(join(REPO, "public", n), "utf8"); const a = src.indexOf(START), b = src.indexOf(END); return { count: src.split(START).length - 1, text: a >= 0 && b > a ? src.slice(a, b + END.length) : "" }; });
-  check("κοινό μπλοκ μενού: υπάρχει ΜΙΑ φορά σε κάθε μία από τις τρεις σελίδες", blocks.every((b) => b.count === 1 && b.text.length > 500), blocks.map((b) => b.count));
-  check("κοινό μπλοκ μενού: ίδιο αυτολεξεί στις τρεις σελίδες (ένα σημείο αλήθειας)", blocks[0].text === blocks[1].text && blocks[1].text === blocks[2].text);
+  check("κοινό μπλοκ μενού: υπάρχει ΜΙΑ φορά σε κάθε μία από τις τέσσερις σελίδες (portal, editor, διαχείριση, άρθρο)", blocks.every((b) => b.count === 1 && b.text.length > 500), blocks.map((b) => b.count));
+  check("κοινό μπλοκ μενού: ίδιο αυτολεξεί στις τέσσερις σελίδες (ένα σημείο αλήθειας)", blocks.every((b) => b.text === blocks[0].text));
   const cssText = readFileSync(join(REPO, "public", "team.css"), "utf8");
   check("team.css: το μενού κρύβεται πραγματικά με το hidden (αλλιώς το display του το αφήνει ανοιχτό)", /\.user-menu\[hidden\]\s*\{\s*display:\s*none/.test(cssText));
   check("team.css: ο κύκλος του λογαριασμού έχει μέγεθος κουμπιού (var(--h-btn)) και κολλά δεξιά", /\.avatar-btn\s*\{[^}]*width:\s*var\(--h-btn\)[^}]*height:\s*var\(--h-btn\)/.test(cssText) && /\.user-menu-wrap\s*\{[^}]*margin-left:\s*auto/.test(cssText));
@@ -3691,6 +3705,346 @@ section("33. Μενού λογαριασμού (κύκλος με αρχικά, 
   await uiWait(() => $u(pe, "#email"));
   const meEmp = await call(P33, "GET", "/team/me");
   check("«Έξοδος» από το μενού του portal: επιστροφή στη φόρμα email και η συνεδρία λήγει", !!$u(pe, "#email") && meEmp.status === 401, meEmp.status);
+}
+
+// ============================================================================ 34. Άρθρα σε Markdown: ο βοηθός και ο έλεγχος αντιφάσεων διαβάζουν ΚΑΘΑΡΟ κείμενο
+section("34. Άρθρα σε Markdown: ο βοηθός και ο έλεγχος αντιφάσεων διαβάζουν ΚΑΘΑΡΟ κείμενο (τα παλιά έγγραφα σκέτου κειμένου μένουν όπως ήταν)");
+{
+  const { markdownToPlainText: plain } = await import(pathToFileURL(join(TMP, "modified", "src", "team", "markdown.js")).href);
+  const eq = (name, md, expected) => check("καθαρό κείμενο: " + name, plain(md) === expected, plain(md));
+  eq("οι τίτλοι χάνουν τα #", "# Α\n\n## Β ##\n\n### Γ", "Α\n\nΒ\n\nΓ");
+  eq("έντονα, πλάγια, διαγραμμένα και κώδικας χάνουν τη σύνταξη", "Με **έντονα**, *πλάγια*, ~~διαγραμμένα~~ και `κώδικα`.", "Με έντονα, πλάγια, διαγραμμένα και κώδικα.");
+  eq("το έντονο ΜΕΣΑ σε φράση δεν σπάει το παράθεμα («σε πέντε εργάσιμες ημέρες»)", "γίνεται **σε πέντε** εργάσιμες ημέρες", "γίνεται σε πέντε εργάσιμες ημέρες");
+  eq("λίστες: κρατούν τις κουκκίδες, τα * και + γίνονται -", "- α\n* β\n+ γ\n\n1. ένα\n2. δύο", "- α\n- β\n- γ\n\n1. ένα\n2. δύο");
+  eq("το παράθεμα χάνει το >", "> Παράθεμα\n>> βαθύτερο", "Παράθεμα\nβαθύτερο");
+  eq("κώδικας σε πλαίσιο: μένει το περιεχόμενο και ΔΕΝ διαβάζεται ως μορφοποίηση", "```js\nconst a = **1**;\n```\nμετά", "const a = **1**;\nμετά");
+  eq("σύνδεσμος: κείμενο και (διεύθυνση), χωρίς τίτλο", "Δες το [εγχειρίδιο](https://example.com/g \"τ\") και <https://auto.gr>", "Δες το εγχειρίδιο (https://example.com/g) και https://auto.gr");
+  eq("σύνδεσμος με ίδιο κείμενο και διεύθυνση: γράφεται μία φορά", "[https://x.gr](https://x.gr)", "https://x.gr");
+  eq("εικόνα: μένει η περιγραφή ως [Εικόνα: ...], όχι η διεύθυνσή της", "Πριν ![Στιγμιότυπο](/team/media/m-1) μετά ![](/team/media/m-2)", "Πριν [Εικόνα: Στιγμιότυπο] μετά [Εικόνα]");
+  eq("η οριζόντια γραμμή φεύγει", "Πάνω\n\n---\n\nΚάτω", "Πάνω\n\nΚάτω");
+  eq("πίνακας: γραμμές με |, χωρίς τη γραμμή διαχωρισμού", "\n| Α | Β |\n| --- | --- |\n| 1 | 2 |\n", "Α | Β\n1 | 2");
+  eq("οι ξεφευγμένοι χαρακτήρες (5\\*3, snake\\_case) γίνονται κανονικοί", "5\\*3 και snake\\_case\\_name", "5*3 και snake_case_name");
+  eq("παλιό κείμενο με * και _ μέσα σε λέξεις ΔΕΝ αλλάζει", "Τιμή 5*3 = 15 και snake_case_name και a * b * c", "Τιμή 5*3 = 15 και snake_case_name και a * b * c");
+  eq("ασύμπτωτα ** _ ` μένουν ως έχουν", "Ένα ** που δεν κλείνει και ένα _ μόνο και ` backtick", "Ένα ** που δεν κλείνει και ένα _ μόνο και ` backtick");
+  eq("οντότητες HTML γίνονται χαρακτήρες", "&lt;b&gt; &amp; &quot;x&quot;", "<b> & \"x\"");
+  eq("αλλαγή γραμμής στο τέλος (δύο κενά ή \\)", "ένα  \nδύο\\\nτρία", "ένα\nδύο\nτρία");
+  eq("CRLF", "# Τ\r\n\r\nΚ **ε**\r\n", "Τ\n\nΚ ε");
+  check("καθαρό κείμενο: κενό, null και undefined δίνουν κενό", plain("") === "" && plain(null) === "" && plain(undefined) === "" && plain("  \n ") === "");
+  const legacy = ["Βήμα 1: άνοιξε το σύστημα\nΒήμα 2: πάτα Αποθήκευση\n\nΣημείωση: δες το Παράρτημα Α.", "Η επιστροφή γίνεται εντός 14 ημερών. Ώρες: 9:00-17:00. Ά έ ή ί ό ύ ώ.", "Τηλέφωνο 210-1234567, email info@acme.gr, ποσό 45,50 € (ΦΠΑ 24%)."];
+  check("παλιά έγγραφα σκέτου κειμένου: το κείμενο μένει ΑΚΡΙΒΩΣ ίδιο", legacy.every((t) => plain(t) === t), legacy.map(plain));
+  check("το σύμβολο που χρησιμοποιεί ο μετατροπέας εσωτερικά δεν μπορεί να εισαχθεί από το κείμενο", plain("α \uE000B0\uE000 β \uE000I0\uE000") === "α B0 β I0");
+  // ΑΠΟΔΟΣΗ: ο μετατροπέας τρέχει σε ΚΑΘΕ αποθήκευση άρθρου μέσα στον Worker. Κακόβουλο ή τυχαίο κείμενο δεν πρέπει να τον καθυστερεί (τετραγωνικός χρόνος).
+  // Μέτρηση: πριν τη διόρθωση, «50.000 κενά και ένα γράμμα» κρατούσε 4,3 δευτερόλεπτα. Τα όρια εδώ είναι ΓΕΝΝΑΙΟΔΩΡΑ (ώστε να μη χαλά σε αργό μηχάνημα) αλλά πολύ χαμηλότερα από τον τετραγωνικό χρόνο.
+  {
+    const hostile = {
+      "50.000 κενά και ένα γράμμα": " ".repeat(50000) + "a",
+      "6.000 ασύμπτωτα **": "**a ".repeat(6000),
+      "6.000 ασύμπτωτα ~~": "~~a ".repeat(6000),
+      "6.000 ασύμπτωτα ***": "***a ".repeat(6000),
+      "6.000 ασύμπτωτα *": "*a ".repeat(6000),
+      "6.000 ασύμπτωτα _": "_a ".repeat(6000),
+      "6.000 [ ": "[".repeat(6000),
+      "3.000 [a](": "[a](".repeat(3000),
+      "3.000 ![a": "![a".repeat(3000),
+      "6.000 backtick": "`".repeat(6000),
+      "3.000 γραμμές πίνακα": "| a | b |\n".repeat(3000),
+      "3.000 γραμμές διαχωρισμού πίνακα": "| a |\n| --- |\n".repeat(1500),
+      "1.500 ασύμπτωτα ```": "```\ncode\n".repeat(1500),
+      "50.000 κενά πριν από λίστα": " ".repeat(50000) + "- a",
+      "20.000 κενές γραμμές": "\n".repeat(20000) + "a",
+      "κανονικό κείμενο 200 KB": "Η επιστροφή προϊόντος γίνεται εντός 14 ημερών. ".repeat(4300),
+    };
+    const ms = {}; let worst = 0;
+    for (const [k, v] of Object.entries(hostile)) { const t0 = performance.now(); plain(v); ms[k] = Math.round(performance.now() - t0); worst = Math.max(worst, ms[k]); }
+    check("απόδοση καθαρού κειμένου: " + Object.keys(hostile).length + " κακόβουλες ή ακραίες είσοδοι (έως 200 KB), ΚΑΜΙΑ δεν ξεπερνά το 1 δευτερόλεπτο (πριν: 4,3 s στα 50.000 κενά)", worst < 1000, ms);
+    check("απόδοση καθαρού κειμένου: το άθροισμα όλων των κακόβουλων δειγμάτων μένει κάτω από 3 δευτερόλεπτα", Object.values(ms).reduce((a, b) => a + b, 0) < 3000, ms);
+    check("όριο μορφοποίησης: έντονο έως 600 χαρακτήρες χάνει τα **, μεγαλύτερο μένει όπως γράφτηκε (δεν ψάχνει αόριστα το κλείσιμο)", plain("**" + "x".repeat(500) + "**") === "x".repeat(500) && plain("**" + "x".repeat(700) + "**") === "**" + "x".repeat(700) + "**");
+    check("όριο γραμμής: γραμμή μεγαλύτερη από 10.000 χαρακτήρες δεν περνά από τη μορφοποίηση inline (μένει όπως γράφτηκε), οι υπόλοιπες γραμμές κανονικά", plain("**" + "x ".repeat(6000) + "**\n**κανονικό**") === "**" + "x ".repeat(6000) + "**\nκανονικό");
+    check("απόδοση: το κείμενο μιας ασύμπτωτης μορφοποίησης διατηρείται (τίποτα δεν χάνεται σιωπηλά)", plain("**a ".repeat(100)).startsWith("**a **a") && plain("**a ".repeat(100)).length >= 300);
+  }
+
+  // ---------------------------------------------------------- ολοκληρωμένο: αποθήκευση, ευρετήριο, αντιφάσεις, συμπληρώματα
+  db.prepare("insert into team_workspaces (id,name,status,created_at) values ('team-md34','MD34 Demo','pilot',?)").run(new Date().toISOString());
+  const A34 = "md34_admin@demo.gr";
+  db.prepare("insert into team_members (workspace_id,email,role,status,created_at) values ('team-md34',?,'admin','active',?)").run(A34, new Date().toISOString());
+  S[A34] = (await login(A34)).cookie;
+  const ap = async (m, pth, body) => { const res = await call(A34, m, pth, body); return { status: res.status, data: await readJson(res) }; };
+  const dept = (await ap("POST", "/team/admin/departments", { name: "Παραδόσεις" })).data.id;
+  state.judge = [{ x: "σε πέντε εργάσιμες ημέρες", y: "σε δύο ημέρες", topic: "Παράδοση MD34" }];
+  const d1 = await ap("POST", "/team/documents", { title: "Παράδοση Α", departmentId: dept, text: "Η παράδοση γίνεται σε δύο ημέρες. MD34-A" });
+  const MD = "# Παράδοση Β\n\nΗ παράδοση γίνεται **σε πέντε** εργάσιμες ημέρες. MD34-B\n\n- Δες τις [οδηγίες](https://example.com/x)\n- Τιμή 5\\*3\n\n| Ενέργεια | Όριο |\n| --- | --- |\n| Επιστροφή | 14 ημέρες |";
+  const d2 = await ap("POST", "/team/documents", { title: "Παράδοση Β", departmentId: dept, text: MD });
+  check("προετοιμασία: τα δύο έγγραφα αποθηκεύτηκαν", d1.status === 201 && d2.status === 201, [d1.status, d2.status]);
+  const vecsOf = (id) => [...env.VECTORIZE.vectors.values()].filter((v) => v.metadata.documentId === id && v.metadata.kind === undefined);
+  const v2 = vecsOf(d2.data.id).map((v) => v.metadata.text).join(" ");
+  check("ευρετήριο: ο βοηθός βλέπει ΚΑΘΑΡΟ κείμενο, χωρίς **, # ή συνδέσμους [..](..) (το | μένει μόνο ως διαχωριστικό κελιών πίνακα)", !/\*\*|#|\]\(/.test(v2) && /σε πέντε εργάσιμες ημέρες/.test(v2) && /Παράδοση Β/.test(v2), v2);
+  check("ευρετήριο: οι σύνδεσμοι κρατούν τη διεύθυνση και τα ξεφευγμένα σύμβολα γίνονται κανονικά", /οδηγίες \(https:\/\/example\.com\/x\)/.test(v2) && /Τιμή 5\*3/.test(v2), v2);
+  check("ευρετήριο: ο πίνακας γίνεται κείμενο με τα κελιά του (Επιστροφή, 14 ημέρες)", /Ενέργεια \| Όριο/.test(v2) && /Επιστροφή \| 14 ημέρες/.test(v2), v2);
+  const got2 = await ap("GET", "/team/documents/" + d2.data.id);
+  check("το άρθρο αποθηκεύεται ΑΚΡΙΒΩΣ όπως γράφτηκε (Markdown), όχι το καθαρό κείμενο", got2.data.fullText === MD, got2.data.fullText);
+  check("παλιό έγγραφο σκέτου κειμένου: το ευρετήριο έχει ακριβώς το ίδιο κείμενο όπως πριν", vecsOf(d1.data.id).map((v) => v.metadata.text).join(" ") === "Η παράδοση γίνεται σε δύο ημέρες. MD34-A");
+  const cs = (await readJson(await call(A34, "GET", "/team/contradictions?status=open"))).contradictions;
+  check("αντιφάσεις: η φράση «σε πέντε εργάσιμες ημέρες» ΠΑΡΟΛΟ ΠΟΥ στο Markdown έχει έντονο στη μέση, βρέθηκε και επαληθεύτηκε", cs.some((c) => c.topic === "Παράδοση MD34"), cs.map((c) => c.topic));
+  const chk = await ap("POST", `/team/documents/${d2.data.id}/check`);
+  check("χειροκίνητος έλεγχος αντιφάσεων σε άρθρο Markdown: δουλεύει (200, χωρίς αποτυχία)", chk.status === 200 && chk.data.failed === 0, chk.data);
+
+  // άρθρο μόνο με εικόνα, και άρθρο που γίνεται κενό καθαρό κείμενο
+  const di = await ap("POST", "/team/documents", { title: "Μόνο εικόνα", departmentId: dept, text: "![Στιγμιότυπο οθόνης](/team/media/m-1)" });
+  check("άρθρο μόνο με εικόνα: αποθηκεύεται και ο βοηθός βλέπει «[Εικόνα: ...]»", di.status === 201 && vecsOf(di.data.id).some((v) => /\[Εικόνα: Στιγμιότυπο οθόνης\]/.test(v.metadata.text)), di.status);
+  const dh = await ap("POST", "/team/documents", { title: "Μόνο γραμμή", departmentId: dept, text: "---" });
+  check("άρθρο που γίνεται κενό ως καθαρό κείμενο: αποθηκεύεται και έχει ΤΟΥΛΑΧΙΣΤΟΝ ένα κομμάτι στο ευρετήριο (δεν σπάει το Vectorize με άδεια λίστα)", dh.status === 201 && vecsOf(dh.data.id).length >= 1, dh.status);
+
+  // συμπλήρωμα: το LLM που ενσωματώνει το κείμενο πρέπει να κρατά τη σύνταξη Markdown
+  const up = await ap("POST", "/team/updates", { documentId: d2.data.id, text: "Από σήμερα η παράδοση γίνεται σε τρεις ημέρες." });
+  state.prompts.length = 0;
+  const pr = await ap("POST", `/team/updates/${up.data.id}/propose`);
+  check("συμπλήρωμα: η πρόταση ενσωμάτωσης ζητά ρητά να κρατηθεί η σύνταξη Markdown (τίτλοι, λίστες, πίνακες, σύνδεσμοι)", pr.status === 200 && state.prompts.some((p) => /Το κείμενο του εγγράφου είναι σε Markdown: κράτα ΑΚΡΙΒΩΣ τη σύνταξή του/.test(p)), state.prompts.map((p) => p.slice(0, 80)));
+  state.judge = null;
+}
+
+// ============================================================================ 35. Αναγνώστης άρθρων (public/vendor/reader.js) και σελίδα ανάγνωσης
+section("35. Σελίδα ανάγνωσης άρθρου: μορφοποίηση, περιεχόμενα, εκτύπωση, δικαιώματα, ασφάλεια (οι επιθέσεις XSS στον ίδιο τον αναγνώστη: tests\\vendor-bundles.test.mjs)");
+const READER_SRC = readFileSync(process.env.IDMON_READER_BUNDLE || join(REPO, "public", "vendor", "reader.js"), "utf8");
+{
+  // (τα αυτοτελή τεστ του αναγνώστη: 21 επιθέσεις XSS, κανόνες συνδέσμων, εικόνων, πινάκων και τίτλων μεταφέρθηκαν στο tests\vendor-bundles.test.mjs, ενότητα A)
+
+  // ---------------------------------------------------------- σελίδα ανάγνωσης (jsdom με φορτωμένο αναγνώστη)
+  db.prepare("insert into team_workspaces (id,name,status,created_at) values ('team-art35','ART35 Demo','pilot',?)").run(new Date().toISOString());
+  const A35 = "art35_admin@demo.gr", E35 = "art35_editor@demo.gr", P35 = "art35_emp@demo.gr", O35 = "art35_other@demo.gr", N35 = "art35_none@demo.gr";
+  db.prepare("insert into team_members (workspace_id,email,role,status,created_at) values ('team-art35',?,'admin','active',?)").run(A35, new Date().toISOString());
+  S[A35] = (await login(A35)).cookie;
+  const ap = async (m, pth, body) => { const res = await call(A35, m, pth, body); return { status: res.status, data: await readJson(res) }; };
+  const dep = (await ap("POST", "/team/admin/departments", { name: "Εξυπηρέτηση" })).data.id;
+  const dep2 = (await ap("POST", "/team/admin/departments", { name: "Λογιστήριο" })).data.id;
+  await ap("POST", "/team/admin/members", { email: E35, role: "member", projectRoles: { [dep]: "editor" }, sendInvite: false }); S[E35] = (await login(E35)).cookie;
+  await ap("POST", "/team/admin/members", { email: P35, role: "member", projectRoles: { [dep]: "member" }, sendInvite: false }); S[P35] = (await login(P35)).cookie;
+  await ap("POST", "/team/admin/members", { email: O35, role: "member", projectRoles: { [dep2]: "member" }, sendInvite: false }); S[O35] = (await login(O35)).cookie;
+  const MDART = "# Οδηγός επιστροφών\n\nΕισαγωγή με **έντονα** και [σύνδεσμο](https://example.com/guide). ART35-MARK\n\n## Βήματα\n\n1. Πρώτο\n2. Δεύτερο\n\n## Πίνακας ορίων\n\n| Ενέργεια | Όριο |\n| --- | --- |\n| Επιστροφή | 14 ημέρες |\n\n### Λεπτομέρειες\n\n> Σημαντικό παράθεμα\n\n![Στιγμιότυπο](/team/media/m-1) ![Εξωτερική](https://evil.example/a.png)\n\n<script>window.__x=1</script> <img src=x onerror=\"window.__x=1\"> [κακό](javascript:window.__x=1)";
+  const art = (await ap("POST", "/team/documents", { title: "Οδηγός επιστροφών", departmentId: dep, text: MDART })).data.id;
+  const artShort = (await ap("POST", "/team/documents", { title: "Σύντομο άρθρο", departmentId: dep, text: "## Μία ενότητα\n\nκείμενο\n\n## Δεύτερη\n\nάλλο κείμενο" })).data.id;
+  const artLegacy = (await ap("POST", "/team/documents", { title: "Παλιό έγγραφο", departmentId: dep, text: "Βήμα 1: άνοιξε το σύστημα\nΒήμα 2: πάτα Αποθήκευση" })).data.id;
+  const artXssTitle = (await ap("POST", "/team/documents", { title: "<img src=x onerror=\"window.__x=1\">Τίτλος", departmentId: dep, text: "Απλό κείμενο." })).data.id;
+  const open = (email, id, inject = { "/vendor/reader.js": READER_SRC }) => uiFor(email)("team-article.html", id === undefined ? "" : "?id=" + encodeURIComponent(id), inject);
+  const names35 = ["Οδηγός επιστροφών", "Σύντομο άρθρο", "Παλιό έγγραφο", "Εξυπηρέτηση", "Λογιστήριο", "ART35 Demo", "<img src=x onerror=\"window.__x=1\">Τίτλος"];
+
+  const pa = open(P35, art);
+  await uiWait(() => $u(pa, "#article"));
+  const body = $u(pa, "#article-body");
+  check("σελίδα άρθρου: ο τίτλος, τα facts (τμήμα, ημερομηνία) και το κείμενο εμφανίζονται", $u(pa, "#article-title").textContent === "Οδηγός επιστροφών" && /Εξυπηρέτηση/.test($u(pa, ".facts").textContent) && /ενημερώθηκε/.test($u(pa, ".facts").textContent) && /ART35-MARK/.test(body.textContent));
+  check("σελίδα άρθρου: η μορφοποίηση φαίνεται (έντονα, λίστα, παράθεμα, πίνακας μέσα σε .table-wrap, τίτλοι)", !!body.querySelector("strong") && body.querySelectorAll("ol li").length === 2 && !!body.querySelector("blockquote") && !!body.querySelector(".table-wrap table th") && body.querySelectorAll("h2").length === 2 && body.querySelectorAll("h3").length === 1);
+  check("σελίδα άρθρου: ΚΑΜΙΑ ετικέτα script, iframe, style, svg και κανένα attribute onerror ή javascript: στο άρθρο με τις επιθέσεις", !body.querySelector("script,iframe,style,svg") && ![...body.querySelectorAll("*")].some((e) => [...e.attributes].some((a) => /^on|javascript:/i.test(a.name + a.value))));
+  check("σελίδα άρθρου: η εικόνα από /team/media/ υπάρχει, η εικόνα από άλλο site ΟΧΙ", body.querySelectorAll("img").length === 1 && body.querySelector("img").getAttribute("src") === "/team/media/m-1");
+  check("σελίδα άρθρου: οι σύνδεσμοι του κειμένου ανοίγουν σε νέα καρτέλα με rel=noopener noreferrer nofollow, και ο javascript: σύνδεσμος ΔΕΝ είναι σύνδεσμος", [...body.querySelectorAll("a")].every((a) => a.getAttribute("rel") === "noopener noreferrer nofollow" && a.getAttribute("target") === "_blank" && /^https?:/.test(a.getAttribute("href"))) && body.querySelectorAll("a").length === 1);
+  check("σελίδα άρθρου: το ωμό HTML του κειμένου φαίνεται ως ΚΕΙΜΕΝΟ και δεν εκτελέστηκε", /<script>window\.__x=1/.test(body.textContent) && pa.window.__x === undefined);
+  const toc = $u(pa, "#toc");
+  const tocItems = $$u(pa, "#toc a.toc-item");
+  check("σελίδα άρθρου: τα περιεχόμενα (3 τίτλοι) είναι κουμπιά-σύνδεσμοι προς #h-1, #h-2, #h-3 και ο τρίτος (υπότιτλος) είναι εσοχή", !!toc && toc.tagName === "NAV" && tocItems.length === 3 && tocItems.every((a, i) => a.getAttribute("href") === "#h-" + (i + 1) && /btn secondary/.test(a.className)) && /(^|\s)l3(\s|$)/.test(tocItems[2].className) && !/(^|\s)l3(\s|$)/.test(tocItems[0].className));
+  check("σελίδα άρθρου: κάθε σύνδεσμος των περιεχομένων δείχνει σε υπαρκτό τίτλο", tocItems.every((a) => !!pa.window.document.getElementById(a.getAttribute("href").slice(1))));
+  { const histBefore = pa.window.history.length; pa.window.document.getElementById("h-2").scrollIntoView = () => { pa.window.__scrolled = "h-2"; };
+    const ev = new pa.window.Event("click", { bubbles: true, cancelable: true }); tocItems[1].dispatchEvent(ev);
+    check("σελίδα άρθρου: το κλικ σε στοιχείο των περιεχομένων πηγαίνει στον τίτλο ΧΩΡΙΣ να προσθέσει εγγραφή στο ιστορικό (ώστε το «← Πίσω» να γυρίζει στην αναζήτηση)", ev.defaultPrevented === true && pa.window.__scrolled === "h-2" && pa.window.history.length === histBefore && pa.window.location.hash === "#h-2", [ev.defaultPrevented, pa.window.__scrolled, histBefore, pa.window.history.length, pa.window.location.hash]); }
+  const ps = open(P35, artShort);
+  await uiWait(() => $u(ps, "#article"));
+  check("σελίδα άρθρου: με μόνο 2 τίτλους ΔΕΝ υπάρχουν περιεχόμενα", !$u(ps, "#toc") && $$u(ps, "#article-body h2").length === 2);
+  const pl = open(P35, artLegacy);
+  await uiWait(() => $u(pl, "#article"));
+  check("σελίδα άρθρου: παλιό έγγραφο σκέτου κειμένου κρατά τις αλλαγές γραμμής του", /Βήμα 1: άνοιξε το σύστημα/.test($u(pl, "#article-body").textContent) && !!$u(pl, "#article-body br") && !$u(pl, "#article-body ul,#article-body ol"));
+  const px = open(P35, artXssTitle);
+  await uiWait(() => $u(px, "#article"));
+  check("σελίδα άρθρου: ο τίτλος με HTML εμφανίζεται ως κείμενο (καμία εικόνα) και στον τίτλο της καρτέλας του browser", !$u(px, "img") && /<img src=x/.test($u(px, "#article-title").textContent) && /<img src=x/.test(px.window.document.title) && px.window.__x === undefined);
+
+  const back = $u(pa, "#back-btn");
+  check("σελίδα άρθρου: το «← Πίσω στην αναζήτηση» είναι κουμπί-σύνδεσμος προς /portal.html", back.tagName === "A" && /(^|\s)btn(\s|$)/.test(back.className) && back.getAttribute("href") === "/portal.html" && /← Πίσω/.test(back.textContent));
+  let printed = 0; pa.window.print = () => { printed++; };
+  clickU(pa, $u(pa, "#print-btn"));
+  check("σελίδα άρθρου: το κουμπί «Εκτύπωση» (button) καλεί window.print()", $u(pa, "#print-btn").tagName === "BUTTON" && printed === 1);
+  check("σελίδα άρθρου: υπάλληλος ΔΕΝ βλέπει κουμπί «Επεξεργασία»", !$u(pa, "#edit-btn"));
+  const pe = open(E35, art);
+  await uiWait(() => $u(pe, "#article"));
+  check("σελίδα άρθρου: ο συντάκτης του τμήματος βλέπει κουμπί «Επεξεργασία» προς τον editor με το id του άρθρου", !!$u(pe, "#edit-btn") && $u(pe, "#edit-btn").tagName === "A" && $u(pe, "#edit-btn").getAttribute("href") === "/team-editor.html?doc=" + encodeURIComponent(art) && /btn/.test($u(pe, "#edit-btn").className));
+  const nav = $u(pa, ".topnav");
+  check("σελίδα άρθρου: το μενού λογαριασμού είναι τελευταίο στη σειρά (ίδιο με τις άλλες σελίδες) και δείχνει email, ρόλο και οργανισμό", !!nav && nav.lastElementChild.className === "user-menu-wrap" && (clickU(pa, $u(pa, "#user-menu-btn")), /art35_emp@demo\.gr/.test($u(pa, "#user-menu").textContent) && /Υπάλληλος · ART35 Demo/.test($u(pa, "#user-menu").textContent)));
+  const uxA = uxProblems(pa, names35);
+  check("σελίδα άρθρου με ανοιχτό μενού: καμία παραβίαση UX (απλό link εκτός από τα κείμενο του άρθρου, μικρό γράμμα, λατινική λέξη)", uxA.length === 0, uxA);
+
+  // δικαιώματα: κανένα στοιχείο του άρθρου δεν φαίνεται σε όποιον δεν το δικαιούται
+  const po = open(O35, art);
+  await uiWait(() => $u(po, "#missing"));
+  check("σελίδα άρθρου: υπάλληλος ΑΛΛΟΥ τμήματος βλέπει «Δεν βρήκαμε αυτό το άρθρο» με κουμπί επιστροφής, και ΤΙΠΟΤΑ από το περιεχόμενο", !!$u(po, "#missing") && !$u(po, "#article") && !/ART35-MARK|Οδηγός επιστροφών/.test(po.window.document.body.textContent) && $u(po, "#missing-back").tagName === "A" && /btn/.test($u(po, "#missing-back").className));
+  const pn = open(P35, "doc-που-δεν-υπάρχει");
+  await uiWait(() => $u(pn, "#missing"));
+  check("σελίδα άρθρου: id που δεν υπάρχει δίνει το ΙΔΙΟ μήνυμα με τον μη δικαιούχο (δεν φαίνεται αν υπάρχει το άρθρο)", $u(pn, "#missing").textContent === $u(po, "#missing").textContent);
+  const pz = open(P35, undefined);
+  await uiWait(() => $u(pz, "#missing"));
+  check("σελίδα άρθρου: χωρίς id στη διεύθυνση δίνει το ίδιο μήνυμα", !!$u(pz, "#missing") && !$u(pz, "#article"));
+  const ph = (await ap("POST", "/team/admin/departments", { name: "Κρυφό" })).data.id;
+  await ap("PATCH", `/team/admin/departments/${ph}`, { hidden: true });
+  const hid = (await ap("POST", "/team/documents", { title: "Κρυφό άρθρο", departmentId: ph, text: "Εμπιστευτικό περιεχόμενο. HIDDEN35" })).data.id;
+  const pq = open(P35, hid);
+  await uiWait(() => $u(pq, "#missing"));
+  check("σελίδα άρθρου: άρθρο κρυφού τμήματος δεν ανοίγει σε μέλος άλλου τμήματος (καμία διαρροή)", !!$u(pq, "#missing") && !/HIDDEN35/.test(pq.window.document.body.textContent));
+  const pno = open(N35, art);
+  await new Promise((r) => setTimeout(r, 200));
+  check("σελίδα άρθρου: χωρίς σύνδεση δεν εμφανίζεται τίποτα (πηγαίνει στη σύνδεση) και το άρθρο δεν φαίνεται", !$u(pno, "#article") && !/ART35-MARK/.test(pno.window.document.body.textContent));
+
+  // αν ο αναγνώστης δεν φορτώσει: σκέτο κείμενο, ποτέ HTML
+  const pf = open(P35, art, {});
+  await uiWait(() => $u(pf, "#article"));
+  check("σελίδα άρθρου: αν ο αναγνώστης ΔΕΝ φορτώσει, το κείμενο εμφανίζεται ως σκέτο κείμενο (.raw-text) και τίποτα δεν εκτελείται", !!$u(pf, "#article-body .raw-text") && !$u(pf, "#article-body script,#article-body img,#article-body iframe") && pf.window.__x === undefined);
+
+  // έξοδος από τη σελίδα του άρθρου
+  clickU(pa, $u(pa, "#logout"));
+  await uiWait(() => false, 150);
+  check("«Έξοδος» από το μενού της σελίδας άρθρου: η συνεδρία λήγει (401)", (await call(P35, "GET", "/team/me")).status === 401);
+}
+
+// ============================================================================ 36. WYSIWYG: ο editor άρθρων (public/vendor/editor.js) και η σελίδα του editor
+section("36. WYSIWYG στη σελίδα του editor: γραμμή κουμπιών, σύνδεσμοι, πίνακες, αποθήκευση Markdown (οι εντολές του ίδιου του επεξεργαστή: tests\\vendor-bundles.test.mjs)");
+const EDITOR_SRC = readFileSync(process.env.IDMON_EDITOR_BUNDLE || join(REPO, "public", "vendor", "editor.js"), "utf8");
+const JSDOM_POLY = "Range.prototype.getClientRects = function () { return { length: 0, item: function () { return null; }, [Symbol.iterator]: function* () {} }; };\nRange.prototype.getBoundingClientRect = function () { return { x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 }; };\ndocument.elementFromPoint = function () { return null; };";
+{
+  const setU = (dom, el, v) => { el.value = v; el.dispatchEvent(new dom.window.Event("input", { bubbles: true })); el.dispatchEvent(new dom.window.Event("change", { bubbles: true })); };
+  const submitU = (dom, sel) => $u(dom, sel).dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  // (τα αυτοτελή τεστ εντολών, συνδέσμων, πινάκων και επικόλλησης εικόνων του επεξεργαστή μεταφέρθηκαν στο tests\vendor-bundles.test.mjs, ενότητα B)
+
+  // ---------------------------------------------------------- η σελίδα του editor με τον φορτωμένο επεξεργαστή
+  db.prepare("insert into team_workspaces (id,name,status,created_at) values ('team-rte36','RTE36 Demo','pilot',?)").run(new Date().toISOString());
+  const A36 = "rte36_admin@demo.gr";
+  db.prepare("insert into team_members (workspace_id,email,role,status,created_at) values ('team-rte36',?,'admin','active',?)").run(A36, new Date().toISOString());
+  S[A36] = (await login(A36)).cookie;
+  const ap = async (m, pth, body) => { const res = await call(A36, m, pth, body); return { status: res.status, data: await readJson(res) }; };
+  const dep = (await ap("POST", "/team/admin/departments", { name: "Γραφείο" })).data.id;
+  const legacyId = (await ap("POST", "/team/documents", { title: "Παλιό έγγραφο", departmentId: dep, text: "Βήμα 1: άνοιξε το σύστημα\nΒήμα 2: πάτα Αποθήκευση" })).data.id;
+  const mdText = "# Τίτλος άρθρου\n\n**έντονο** και [σύνδεσμος](https://a.gr/x)\n\n- α\n- β";
+  const mdId = (await ap("POST", "/team/documents", { title: "Άρθρο Markdown", departmentId: dep, text: mdText })).data.id;
+  const names36 = ["Γραφείο", "Παλιό έγγραφο", "Άρθρο Markdown", "RTE36 Demo"];
+  const EDITOR_INJECT = { "/vendor/reader.js": READER_SRC, "/vendor/editor.js": JSDOM_POLY + "\n" + EDITOR_SRC };
+  const openEd = (query, inject = EDITOR_INJECT) => uiFor(A36)("team-editor.html", query, inject);
+
+  const e1 = openEd("");
+  await uiWait(() => $u(e1, "#tab-docs"));
+  clickU(e1, $u(e1, "#tab-docs"));
+  await uiWait(() => $u(e1, ".item.new-doc"));
+  clickU(e1, $u(e1, ".item.new-doc"));
+  await uiWait(() => $u(e1, "#rte"));
+  const labels = $$u(e1, "#rte-toolbar button, .rte-toolbar > button").map((b) => b.textContent);
+  check("editor (σελίδα): νέο άρθρο: ΑΝΤΙ για απλό πεδίο υπάρχει ο WYSIWYG (#rte) και ΔΕΝ υπάρχει το textarea #text", !!$u(e1, "#rte") && !$u(e1, "#text") && !!$u(e1, "#rte .ProseMirror"));
+  check("editor (σελίδα): η γραμμή κουμπιών έχει ΛΕΞΕΙΣ (όχι μόνο εικονίδια): Έντονα, Πλάγια, Τίτλος, Υπότιτλος, Λίστα, Αρίθμηση, Παράθεμα, Σύνδεσμος, Πίνακας, Αναίρεση, Επανάληψη", JSON.stringify(labels) === JSON.stringify(["Έντονα", "Πλάγια", "Τίτλος", "Υπότιτλος", "Λίστα", "Αρίθμηση", "Παράθεμα", "Σύνδεσμος", "Πίνακας", "Αναίρεση", "Επανάληψη"]), labels);
+  const tb = $u(e1, ".rte-toolbar");
+  check("editor (σελίδα): η γραμμή κουμπιών έχει role=toolbar και ελληνικό όνομα, κάθε κουμπί είναι type=button με κλάση btn και tooltip", tb.getAttribute("role") === "toolbar" && /Μορφοποίηση/.test(tb.getAttribute("aria-label")) && [...tb.querySelectorAll("button")].every((b) => b.type === "button" && /(^|\s)btn(\s|$)/.test(b.className) && !!b.getAttribute("title")));
+  check("editor (σελίδα): τα κουμπιά ενεργοποίησης έχουν aria-pressed=false στην αρχή και τα Αναίρεση και Επανάληψη είναι ανενεργά", ["bold", "italic", "h2", "h3", "bulletList", "orderedList", "blockquote", "link"].every((k) => $u(e1, "#tb-" + k).getAttribute("aria-pressed") === "false") && $u(e1, "#tb-undo").disabled === true && $u(e1, "#tb-redo").disabled === true);
+  check("editor (σελίδα): τα εργαλεία πίνακα είναι κρυμμένα μέχρι να μπει πίνακας", $u(e1, "#rte-table-tools").hidden === true);
+  { const prevented = (el) => { const ev = new e1.window.Event("mousedown", { bubbles: true, cancelable: true }); el.dispatchEvent(ev); return ev.defaultPrevented; };
+    const all = [...$$u(e1, ".rte-toolbar > button"), ...$$u(e1, "#rte-table-tools button")];
+    check("editor (σελίδα): ΟΛΑ τα κουμπιά της γραμμής εργαλείων (" + all.length + ") δεν παίρνουν την εστίαση όταν τα πατάς (mousedown prevented): ο κέρσορας μένει στο κείμενο και ο συντάκτης συνεχίζει να γράφει", all.length === 16 && all.every(prevented), all.filter((b) => !prevented(b)).map((b) => b.id));
+    check("editor (σελίδα): τα πεδία του συνδέσμου ΔΕΝ μπλοκάρουν την εστίαση (πρέπει να μπορείς να γράψεις τη διεύθυνση)", (() => { const ev = new e1.window.Event("mousedown", { bubbles: true, cancelable: true }); $u(e1, "#rte-link-url").dispatchEvent(ev); return ev.defaultPrevented === false; })()); }
+  clickU(e1, $u(e1, "#tb-table"));
+  check("editor (σελίδα): «Πίνακας» βάζει πίνακα και ΕΜΦΑΝΙΖΟΝΤΑΙ τα 5 εργαλεία πίνακα (γραμμή, στήλη, διαγραφές)", $u(e1, "#rte-table-tools").hidden === false && $$u(e1, "#rte-table-tools button").map((b) => b.textContent).join("|") === "Γραμμή από κάτω|Στήλη δεξιά|Διαγραφή γραμμής|Διαγραφή στήλης|Διαγραφή πίνακα" && !!$u(e1, "#rte .ProseMirror table"));
+  clickU(e1, $u(e1, "#tb-tableDelete"));
+  check("editor (σελίδα): «Διαγραφή πίνακα» τον αφαιρεί και κρύβει τα εργαλεία πίνακα", !$u(e1, "#rte .ProseMirror table") && $u(e1, "#rte-table-tools").hidden === true);
+  check("editor (σελίδα): η γραμμή συνδέσμου είναι κρυμμένη στην αρχή", $u(e1, "#rte-linkbar").hidden === true);
+  clickU(e1, $u(e1, "#tb-link"));
+  check("editor (σελίδα): «Σύνδεσμος» ανοίγει τη γραμμή με πεδίο διεύθυνσης και κουμπιά Εφαρμογή, Αφαίρεση συνδέσμου, Κλείσιμο", $u(e1, "#rte-linkbar").hidden === false && !!$u(e1, "#rte-link-url") && $u(e1, "#rte-link-apply").textContent === "Εφαρμογή" && $u(e1, "#rte-link-remove").textContent === "Αφαίρεση συνδέσμου" && $u(e1, "#rte-link-close").textContent === "Κλείσιμο");
+  setU(e1, $u(e1, "#rte-link-url"), "javascript:alert(1)");
+  clickU(e1, $u(e1, "#rte-link-apply"));
+  check("editor (σελίδα): σύνδεσμος javascript: απορρίπτεται με μήνυμα στα ελληνικά που λέει τι επιτρέπεται (https://, http://, mailto:) και η γραμμή μένει ανοιχτή", $u(e1, "#rte-note").hidden === false && /https:\/\/, http:\/\/ ή mailto:/.test($u(e1, "#rte-note").textContent) && /err/.test($u(e1, "#rte-note").className) && $u(e1, "#rte-linkbar").hidden === false);
+  clickU(e1, $u(e1, "#rte-link-close"));
+  check("editor (σελίδα): «Κλείσιμο» κλείνει τη γραμμή συνδέσμου", $u(e1, "#rte-linkbar").hidden === true);
+  const pm1 = $u(e1, "#rte .ProseMirror");
+  const evP = new e1.window.Event("paste", { bubbles: true, cancelable: true }); Object.defineProperty(evP, "clipboardData", { value: { files: [{ type: "image/png", name: "s.png" }], types: ["Files"], items: [], getData: () => "" } }); pm1.dispatchEvent(evP);
+  check("editor (σελίδα): επικόλληση εικόνας δείχνει ΕΙΛΙΚΡΙΝΕΣ μήνυμα «η προσθήκη εικόνων έρχεται σύντομα» (δεν υπόσχεται κάτι που δεν υπάρχει) και δεν μπαίνει τίποτα στο κείμενο", evP.defaultPrevented && /Η προσθήκη εικόνων έρχεται σύντομα/.test($u(e1, "#rte-note").textContent) && !pm1.querySelector("img"));
+  check("editor (σελίδα): κάτω από τον editor υπάρχει σύντομη οδηγία για επικόλληση από Word ή Google Docs", /Word ή Google Docs/.test($u(e1, ".rte-hint").textContent));
+  const uxE = uxProblems(e1, names36);
+  check("editor (σελίδα) με WYSIWYG: καμία παραβίαση UX", uxE.length === 0, uxE);
+
+  // υπάρχον έγγραφο σκέτου κειμένου: ανοίγει στον editor με τις γραμμές του και αποθηκεύεται ως Markdown
+  const e2 = openEd("?doc=" + encodeURIComponent(legacyId));
+  await uiWait(() => $u(e2, "#rte .ProseMirror"));
+  check("editor (σελίδα): παλιό έγγραφο σκέτου κειμένου ανοίγει στον WYSIWYG και κρατά τις 2 γραμμές του (αλλαγή γραμμής μέσα στην παράγραφο)", !!$u(e2, "#rte .ProseMirror br") && /Βήμα 1: άνοιξε το σύστημα/.test($u(e2, "#rte .ProseMirror").textContent) && /Βήμα 2: πάτα Αποθήκευση/.test($u(e2, "#rte .ProseMirror").textContent), $u(e2, "#rte .ProseMirror").innerHTML);
+  check("editor (σελίδα): υπάρχει «Άνοιγμα για ανάγνωση» (σύνδεσμος-κουμπί) προς τη σελίδα του άρθρου", !!$u(e2, "#open-page") && $u(e2, "#open-page").tagName === "A" && $u(e2, "#open-page").getAttribute("href") === "/team-article.html?id=" + encodeURIComponent(legacyId) && /btn/.test($u(e2, "#open-page").className));
+  submitU(e2, "#panel form");
+  await uiWait(() => /Αποθηκεύτηκε/.test(($u(e2, "#panel .note") || {}).textContent || ""));
+  const saved1 = db.prepare("select full_text, version from team_documents where id = ?").get(legacyId);
+  check("editor (σελίδα): η αποθήκευση στέλνει MARKDOWN: οι δύο γραμμές μένουν δύο γραμμές (με αλλαγή γραμμής στο τέλος της πρώτης)", /^Βήμα 1: άνοιξε το σύστημα {2}\nΒήμα 2: πάτα Αποθήκευση$/.test(saved1.full_text), saved1.full_text);
+  const vl = [...env.VECTORIZE.vectors.values()].filter((v) => v.metadata.documentId === legacyId && v.metadata.kind === undefined).map((v) => v.metadata.text).join(" ");
+  check("editor (σελίδα): ο βοηθός συνεχίζει να βλέπει το ίδιο καθαρό κείμενο μετά τη μετατροπή σε Markdown (χωρίς τα κενά της αλλαγής γραμμής)", vl === "Βήμα 1: άνοιξε το σύστημα Βήμα 2: πάτα Αποθήκευση", vl);
+
+  // άρθρο Markdown: φαίνεται ως WYSIWYG (τίτλος, έντονο, σύνδεσμος, λίστα) και η αποθήκευση το κρατά αναλλοίωτο
+  const e3 = openEd("?doc=" + encodeURIComponent(mdId));
+  await uiWait(() => $u(e3, "#rte .ProseMirror h1"));
+  const pm3 = $u(e3, "#rte .ProseMirror");
+  check("editor (σελίδα): το άρθρο Markdown φαίνεται ως τελικό κείμενο μέσα στον editor (h1, strong, a, ul)", !!pm3.querySelector("h1") && !!pm3.querySelector("strong") && !!pm3.querySelector("a[href='https://a.gr/x']") && pm3.querySelectorAll("ul li").length === 2 && !/\*\*|^# /.test(pm3.textContent));
+  check("editor (σελίδα): ο σύνδεσμος μέσα στον editor έχει rel=noopener noreferrer nofollow", pm3.querySelector("a").getAttribute("rel") === "noopener noreferrer nofollow");
+  submitU(e3, "#panel form");
+  await uiWait(() => /Αποθηκεύτηκε/.test(($u(e3, "#panel .note") || {}).textContent || ""));
+  const saved3 = db.prepare("select full_text from team_documents where id = ?").get(mdId);
+  check("editor (σελίδα): η αποθήκευση άρθρου Markdown χωρίς αλλαγές ΔΕΝ αλλοιώνει το περιεχόμενο", saved3.full_text.trim() === mdText, saved3.full_text);
+
+  // προσβασιμότητα: το πεδίο κειμένου έχει όνομα, και ο editor έχει role=textbox
+  check("editor (σελίδα): ο επεξεργαστής έχει role=textbox, aria-multiline και όνομα «Κείμενο»", pm3.getAttribute("role") === "textbox" && pm3.getAttribute("aria-multiline") === "true" && pm3.getAttribute("aria-label") === "Κείμενο");
+
+  // χωρίς τον επεξεργαστή (δεν φόρτωσε): μένει το απλό πεδίο, ο συντάκτης δεν μένει χωρίς τρόπο να γράψει
+  const e4 = openEd("?doc=" + encodeURIComponent(legacyId), { "/vendor/reader.js": READER_SRC });
+  await uiWait(() => $u(e4, "#text"));
+  check("editor (σελίδα): αν ο επεξεργαστής ΔΕΝ φορτώσει, μένει το απλό πεδίο κειμένου με το κείμενο του άρθρου", !!$u(e4, "#text") && !$u(e4, "#rte") && /Βήμα 1/.test($u(e4, "#text").value));
+
+  // μόνο ανάγνωση: έγγραφο που ο χρήστης δεν μπορεί να αλλάξει, εμφανίζεται μορφοποιημένο
+  const roUser = "rte36_reader@demo.gr"; await ap("POST", "/team/admin/members", { email: roUser, role: "member", projectRoles: { [dep]: "editor" }, sendInvite: false });
+  const dep2 = (await ap("POST", "/team/admin/departments", { name: "Άλλο γραφείο" })).data.id;
+  const sharedId = (await ap("POST", "/team/documents", { title: "Κοινό άρθρο", departmentId: dep2, text: "## Κοινή ενότητα\n\n**έντονο**", audienceProjectIds: [dep] })).data.id;
+  S[roUser] = (await login(roUser)).cookie;
+  const e5 = uiFor(roUser)("team-editor.html", "?doc=" + encodeURIComponent(sharedId), EDITOR_INJECT);
+  await uiWait(() => $u(e5, "#readonly-body"));
+  check("editor (σελίδα): έγγραφο μόνο για ανάγνωση εμφανίζεται ΜΟΡΦΟΠΟΙΗΜΕΝΟ (h2, strong) μέσα σε .prose, χωρίς φόρμα, με κουμπί «Άνοιγμα σε πλήρη σελίδα»", !!$u(e5, "#readonly-body h2") && !!$u(e5, "#readonly-body strong") && /prose/.test($u(e5, "#readonly-body").className) && !$u(e5, "#panel form") && !!$u(e5, "#open-page") && $u(e5, "#open-page").tagName === "A");
+}
+
+// ============================================================================ 37. Στατικοί έλεγχοι: κεφαλίδες ασφαλείας (CSP), βιβλιοθήκες vendor, SMB αμετάβλητο, μενού
+section("37. Στατικοί έλεγχοι: CSP μόνο για τις σελίδες ομάδων, βιβλιοθήκες με δακτυλικό αποτύπωμα, το SMB δεν αγγίζεται");
+{
+  const pub = (n) => readFileSync(join(REPO, "public", n), "utf8");
+  // ---- _headers
+  const hdr = pub("_headers");
+  const rules = []; let cur = null;
+  for (const line of hdr.split("\n")) {
+    if (!line.trim() || /^\s*#/.test(line)) continue;
+    if (!/^\s/.test(line)) { cur = { path: line.trim(), headers: {} }; rules.push(cur); }
+    else { const m = line.trim().match(/^([A-Za-z-]+):\s*(.*)$/); if (m && cur) cur.headers[m[1].toLowerCase()] = m[2]; }
+  }
+  const TEAM_PATHS = ["/portal", "/portal.html", "/team-admin", "/team-admin.html", "/team-editor", "/team-editor.html", "/team-article", "/team-article.html"];
+  check("_headers: κανόνες ΜΟΝΟ για τις σελίδες ομάδων (με και χωρίς .html), τίποτα άλλο (όχι /* ούτε σελίδα του SMB)", JSON.stringify(rules.map((r) => r.path).sort()) === JSON.stringify([...TEAM_PATHS].sort()), rules.map((r) => r.path));
+  const csp = (r) => r.headers["content-security-policy"] || "";
+  check("_headers: κάθε σελίδα ομάδων έχει CSP με default-src 'none', frame-ancestors 'none', object-src 'none', base-uri 'none', form-action 'self'", rules.every((r) => ["default-src 'none'", "frame-ancestors 'none'", "object-src 'none'", "base-uri 'none'", "form-action 'self'"].every((d) => csp(r).includes(d))));
+  check("_headers: το CSP δεν επιτρέπει ΚΑΝΕΝΑ άλλο site (χωρίς http:, https:, *, data: στα σκριπτ ή στυλ) και τα σκριπτ μόνο 'self' και 'unsafe-inline'", rules.every((r) => !/https?:|\*|\bdata:/.test(csp(r)) && /script-src 'self' 'unsafe-inline'(;|$)/.test(csp(r)) && /connect-src 'self'/.test(csp(r)) && /img-src 'self'(;|$)/.test(csp(r))), rules.map(csp));
+  check("_headers: ΟΛΟΙ οι κανόνες έχουν το ΙΔΙΟ CSP (ένα σημείο αλήθειας)", new Set(rules.map(csp)).size === 1);
+  check("_headers: nosniff, X-Frame-Options DENY και Referrer-Policy same-origin σε κάθε σελίδα", rules.every((r) => r.headers["x-content-type-options"] === "nosniff" && r.headers["x-frame-options"] === "DENY" && r.headers["referrer-policy"] === "same-origin"));
+  // ---- σελίδες: φορτώνουν μόνο τοπικά σκριπτ
+  const pagesAll = ["portal.html", "team-admin.html", "team-editor.html", "team-article.html"].map((n) => [n, pub(n)]);
+  check("σελίδες ομάδων: ΚΑΝΕΝΑ σκριπτ, στυλ ή εικόνα από άλλο site (CSP)", pagesAll.every(([, src]) => !/<(?:script|link|img|iframe)[^>]+(?:src|href)=["']?https?:/i.test(src)), pagesAll.map(([n]) => n));
+  const srcsOf = (src) => [...src.matchAll(/<script\s+src="([^"]+)"/g)].map((m) => m[1]);
+  check("σελίδες ομάδων: η σελίδα άρθρου φορτώνει μόνο τον αναγνώστη, ο editor αναγνώστη και επεξεργαστή, το portal και η διαχείριση κανένα εξωτερικό αρχείο", JSON.stringify(srcsOf(pub("team-article.html"))) === '["/vendor/reader.js"]' && JSON.stringify(srcsOf(pub("team-editor.html"))) === '["/vendor/reader.js","/vendor/editor.js"]' && srcsOf(pub("portal.html")).length === 0 && srcsOf(pub("team-admin.html")).length === 0);
+  check("σελίδες ομάδων: τα αρχεία vendor φορτώνουν ΠΡΙΝ από το κύριο σκριπτ της σελίδας", ["team-article.html", "team-editor.html"].every((n) => { const s = pub(n); return s.indexOf('<script src="/vendor/') >= 0 && s.indexOf('<script src="/vendor/') < s.indexOf("<script>"); }));
+  // ---- vendor: δακτυλικό αποτύπωμα και εκδόσεις
+  const man = JSON.parse(pub("vendor/MANIFEST.json"));
+  const sha = (n) => createHash("sha256").update(readFileSync(join(REPO, "public", "vendor", n))).digest("hex");
+  check("vendor: τα editor.js και reader.js είναι ΑΚΡΙΒΩΣ όσα φτιάχτηκαν από το tools/vendor-build (μέγεθος και SHA-256 στο MANIFEST.json)", ["editor.js", "reader.js"].every((n) => man.files[n] && man.files[n].sha256 === sha(n) && man.files[n].bytes === readFileSync(join(REPO, "public", "vendor", n)).length), man.files);
+  const pkg = JSON.parse(readFileSync(join(REPO, "tools", "vendor-build", "package.json"), "utf8"));
+  const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+  check("vendor: όλες οι εκδόσεις στο tools/vendor-build/package.json είναι ΑΚΡΙΒΕΙΣ (χωρίς ^ ή ~) και το MANIFEST δείχνει ότι εγκαταστάθηκαν ακριβώς αυτές", Object.values(allDeps).every((v) => /^\d+\.\d+\.\d+$/.test(v)) && Object.keys(allDeps).every((k) => man.dependencies[k] && man.dependencies[k].installed === allDeps[k]), man.dependencies);
+  const okLic = /^(MIT|Apache-2\.0|BSD-[23]-Clause|ISC|\(MPL-2\.0 OR Apache-2\.0\))$/;
+  check("vendor: όλες οι βιβλιοθήκες έχουν άδεια MIT, Apache-2.0 ή (MPL-2.0 OR Apache-2.0) (κατάλληλες για εμπορικό προϊόν)", Object.values(man.dependencies).every((d) => okLic.test(String(d.license))), Object.fromEntries(Object.entries(man.dependencies).map(([k, d]) => [k, d.license])));
+  check("vendor: το editor.js εκθέτει IdmonEditor.create και το reader.js εκθέτει IdmonReader.render και renderInto", /IdmonEditor/.test(pub("vendor/editor.js")) && /IdmonReader/.test(pub("vendor/reader.js")));
+  // ---- το SMB δεν αγγίζεται ποτέ
+  let changed = null;
+  try { changed = execFileSync("git", ["diff", "--name-only", "smb-stable-2026-09-30", "--", "public"], { cwd: REPO, encoding: "utf8" }).split("\n").filter(Boolean); } catch { changed = null; }
+  const ALLOWED = /^public\/(portal\.html|team-[a-z]+\.html|team\.css|_headers|vendor\/[A-Za-z.]+)$/;
+  check("το SMB (idmon.app) δεν αγγίζεται: κάθε αρχείο του public που διαφέρει από το production tag είναι σελίδα, στυλ ή αρχείο ΟΜΑΔΩΝ", changed !== null && changed.every((f) => ALLOWED.test(f)), changed);
+  check("το SMB (idmon.app) δεν αγγίζεται: τα κοινά αρχεία (shared.css, shared.js, editor.html, home.html, landing.html, index.html, article.html) είναι ίδια με το production tag", changed !== null && ["shared.css", "shared.js", "editor.html", "home.html", "landing.html", "index.html", "article.html", "developers.html", "widget.js"].every((n) => !changed.includes("public/" + n)), changed);
+  // ---- στυλ
+  const css = pub("team.css");
+  check("team.css: το μενού λογαριασμού παίρνει το πλάτος του περιεχομένου (width:max-content), με ελάχιστο 260px και μέγιστο 400px (το email χωράει σε μία γραμμή)", /\.user-menu\{[^}]*width:\s*max-content[^}]*min-width:\s*260px[^}]*max-width:\s*min\(400px,\s*calc\(100vw - 32px\)\)/.test(css));
+  check("team.css: ΜΟΝΟ οι σύνδεσμοι μέσα σε κείμενο άρθρου (.prose a) είναι υπογραμμισμένοι, κανένας άλλος κανόνας", (css.match(/text-decoration:\s*underline/g) || []).length === 1 && /\.prose a\{[^}]*text-decoration:\s*underline/.test(css));
+  check("team.css: ο editor και το κείμενο άρθρου έχουν στυλ (.prose, .rte, .rte-toolbar, .table-wrap) και τα κουμπιά της γραμμής εργαλείων 44px", /\.prose\{/.test(css) && /\.rte\{/.test(css) && /\.rte-toolbar \.btn\{min-height:\s*var\(--h-btn\)/.test(css) && /\.prose \.table-wrap/.test(css));
+  check("portal: δεν υπάρχει πια παράθυρο πάνω από τη σελίδα (overlay), κανένα openDocument", !/overlay|openDocument/.test(pub("portal.html")));
 }
 
 // ============================================================================ Σύνοψη
