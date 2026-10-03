@@ -1253,7 +1253,7 @@ section("16. team-editor (εισερχόμενα), team-admin και portal: π�
   const U6 = (await readJson(await call("ed_cc@demo.gr", "POST", "/team/updates", { documentId: DOC2.pay, text: "Ενημέρωση για δοκιμή σελίδας." }))).id;
   ed = openEd("team-editor.html", `?doc=${DOC2.pay}`);
   check("έγγραφο με εκκρεμές update: το πλαίσιο updates φαίνεται πάνω από τη φόρμα", !!(await waitFor(() => $(ed, ".pending") && /Ενημέρωση για δοκιμή σελίδας/.test($(ed, ".pending").textContent))));
-  check("... και στη λίστα σημειώνεται ο αριθμός updates", !!byText(ed, ".item", /Όρια πληρωμών.*1 update/));
+  check("... και στη λίστα σημειώνεται ο αριθμός συμπληρωμάτων", !!byText(ed, ".item", /Όρια πληρωμών.*1 συμπλήρωμα/));
   setVal(ed, $(ed, "#update-text"), "Δεύτερη ενημέρωση από τη σελίδα.");
   submit(ed, "#update-form");
   check("προσθήκη update από τη σελίδα: επιτυχία", !!(await waitFor(() => /δημοσιεύτηκε και είναι ήδη αναζητήσιμο/.test(ed.window.document.body.textContent))));
@@ -1265,7 +1265,7 @@ section("16. team-editor (εισερχόμενα), team-admin και portal: π�
   const U7 = (await readJson(await call("ed_cc@demo.gr", "POST", "/team/updates", { documentId: DOC2.pay, text: "Προσωρινή αλλαγή ωραρίου αυτή την εβδομάδα." }))).id;
   const pe = browserFor("emp_cc@demo.gr")("portal.html");
   const recentRow = await waitFor(() => byText(pe, ".row", /Όρια πληρωμών/));
-  check("portal: το έγγραφο με εκκρεμές update εμφανίζεται στο «Τι άλλαξε πρόσφατα» με σήμανση update", !!recentRow && /update/.test(recentRow.textContent));
+  check("portal: το έγγραφο με εκκρεμές συμπλήρωμα εμφανίζεται στο «Τι άλλαξε πρόσφατα» με σήμανση συμπλήρωμα", !!recentRow && /συμπλήρωμα/.test(recentRow.textContent));
   click(pe, recentRow);
   check("portal: ο αναγνώστης δείχνει τις ενημερώσεις που δεν έχουν ενσωματωθεί, πάνω από το κείμενο", !!(await waitFor(() => $(pe, ".overlay .reader") && /Πρόσφατες ενημερώσεις που δεν έχουν ενσωματωθεί/.test($(pe, ".overlay .reader").textContent) && /Προσωρινή αλλαγή ωραρίου/.test($(pe, ".overlay .reader").textContent))));
   check("portal υπαλλήλου: ΔΕΝ υπάρχουν σύνδεσμοι εισερχομένων ή διαχείρισης", !$(pe, "#staff-link") && !$(pe, "#admin-link"));
@@ -1315,7 +1315,7 @@ section("16. team-editor (εισερχόμενα), team-admin και portal: π�
   click(ad, $(ad, ".member-row .open-member"));
   const own = await waitFor(() => $(ad, "#detail-org-role"));
   own.value = "member"; own.dispatchEvent(new ad.window.Event("change", { bubbles: true }));
-  check("ο τελευταίος admin δεν υποβαθμίζεται: το λάθος μένει ορατό μετά την ανανέωση", !!(await waitFor(() => /χωρίς ενεργό admin/.test(ad.window.document.body.textContent))) && db.prepare("select role from team_members where email='admin@demo.gr'").get().role === "admin");
+  check("ο τελευταίος admin δεν υποβαθμίζεται: το λάθος μένει ορατό μετά την ανανέωση", !!(await waitFor(() => /χωρίς ενεργό διαχειριστή/.test(ad.window.document.body.textContent))) && db.prepare("select role from team_members where email='admin@demo.gr'").get().role === "admin");
 
   click(ad, $(ad, "#tab-audit"));
   check("ιστορικό: εμφανίζονται ενέργειες με email και περιγραφή", !!(await waitFor(() => $$(ad, ".log").length > 5)) && /νέο project|σύνδεση|νέο μέλος/.test(ad.window.document.body.textContent));
@@ -1977,7 +1977,7 @@ section("26. Διαχείριση (UX): μηνύματα με όνομα και 
   await openPerson(A.dom, "ux.agent@demo.gr");
   clickU(A.dom, segBtn(A.dom, "cc", "editor"));
   const t1 = await uiWait(() => $u(A.dom, ".toast.ok"));
-  check("μήνυμα: λέει ποιος, τι και πότε (email: project → ρόλος (ώρα))", !!t1 && t1.textContent === `ux.agent@demo.gr: ${ccName} → Editor (12:51:28)`);
+  check("μήνυμα: λέει ποιος, τι και πότε (email: project → ρόλος (ώρα))", !!t1 && t1.textContent === `ux.agent@demo.gr: ${ccName} → Συντάκτης (12:51:28)`);
   check("μήνυμα: σταθερή περιοχή aria-live=polite, το μήνυμα επιτυχίας έχει role=status", !!t1 && $u(A.dom, "#notice").getAttribute("aria-live") === "polite" && t1.getAttribute("role") === "status");
   await uiWait(() => $u(A.dom, ".member-row.changed"));
   check("η γραμμή που άλλαξε επισημαίνεται, και η επισήμανση φεύγει με το χρονόμετρο του 1 δευτερολέπτου",
@@ -2015,7 +2015,7 @@ section("26. Διαχείριση (UX): μηνύματα με όνομα και 
   pick(B.dom, $u(B.dom, "#detail-org-role"), "member");
   const te = await uiWait(() => $u(B.dom, ".toast.err"));
   await settle(B.dom);
-  check("σφάλμα (τελευταίος admin): μένει ορατό ΜΕΤΑ την ανανέωση, role=alert, χωρίς χρονόμετρο εξαφάνισης", onlyAdmin && !!te && /χωρίς ενεργό admin/.test(te.textContent) && te.getAttribute("role") === "alert" && B.live(5000).length === 0 && !!$u(B.dom, ".toast.err"));
+  check("σφάλμα (τελευταίος admin): μένει ορατό ΜΕΤΑ την ανανέωση, role=alert, χωρίς χρονόμετρο εξαφάνισης", onlyAdmin && !!te && /χωρίς ενεργό διαχειριστή/.test(te.textContent) && te.getAttribute("role") === "alert" && B.live(5000).length === 0 && !!$u(B.dom, ".toast.err"));
   clickU(B.dom, $u(B.dom, ".toast.err .x"));
   check("σφάλμα: το κουμπί κλεισίματος το αφαιρεί", !$u(B.dom, ".toast"));
   pick(B.dom, $u(B.dom, "#detail-org-role"), "member");
@@ -2071,7 +2071,7 @@ section("26. Διαχείριση (UX): μηνύματα με όνομα και 
   clickU(C.dom, $u(C.dom, ".confirm-yes"));
   await uiWait(() => roleOf(uxId) === "admin");
   await settle(C.dom);
-  check("«Ναι»: ο ρόλος γίνεται Admin με ένα αίτημα και μήνυμα με όνομα", ctl.patches === 1 && /ux\.agent@demo\.gr: ρόλος Admin \(12:51:28\)/.test(toastText(C.dom) || ""));
+  check("«Ναι»: ο ρόλος γίνεται Διαχειριστής με ένα αίτημα και μήνυμα με όνομα", ctl.patches === 1 && /ux\.agent@demo\.gr: ρόλος Διαχειριστής \(12:51:28\)/.test(toastText(C.dom) || ""));
   check("ο admin δεν έχει γραμμές τμημάτων στην καρτέλα (έχει πρόσβαση παντού)", /πρόσβαση σε όλα τα τμήματα/.test(detailOf(C.dom).textContent) && !$u(C.dom, "#member-detail .prow"));
   ctl.patches = 0;
   pick(C.dom, orgSel(), "member");
@@ -2333,7 +2333,7 @@ section("27b. Οθόνη διαχείρισης: λίστα ανθρώπων, μ
   clickU(dom, $u(dom, "#bulk-apply"));
   await uiWait(() => projectsOf(memberId(U(19))).cc === "editor");
   await idle(dom);
-  check("μαζική προσθήκη ως Editor: και τα 10 άτομα σε ΜΙΑ ενέργεια, με μήνυμα", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19].every((i) => projectsOf(memberId(U(i))).cc === "editor" && storedRoleOf(memberId(U(i))) === "editor") && new RegExp(`10 μέλη: ${ccName} → Editor`).test(toastU(dom)), toastU(dom));
+  check("μαζική προσθήκη ως Συντάκτης: και τα 10 άτομα σε ΜΙΑ ενέργεια, με μήνυμα", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19].every((i) => projectsOf(memberId(U(i))).cc === "editor" && storedRoleOf(memberId(U(i))) === "editor") && new RegExp(`10 μέλη: ${ccName} → Συντάκτης`).test(toastU(dom)), toastU(dom));
   check("... η επιλογή καθαρίζει και το πάνελ κλείνει", $$u(dom, ".member-row .sel:checked").length === 0 && !$u(dom, "#bulk-panel"));
   check("... ΜΙΑ γραμμή ιστορικού για όλη την ενέργεια", auditN("members_bulk_changed") === bulkAudit0 + 1);
 
@@ -2362,7 +2362,7 @@ section("27b. Οθόνη διαχείρισης: λίστα ανθρώπων, μ
   clickU(dom, $u(dom, "#bulk-disable"));
   clickU(dom, $u(dom, "#bulk-apply"));
   await uiWait(() => $u(dom, ".confirm"));
-  check("μαζική απενεργοποίηση ζητά «Σίγουρα;» και ενημερώνει ότι οι admins δεν επηρεάζονται", /οι admins δεν επηρεάζονται/.test($u(dom, ".confirm").textContent) && statusOf27b(memberId(U(20))) === "active");
+  check("μαζική απενεργοποίηση ζητά «Σίγουρα;» και ενημερώνει ότι οι διαχειριστές δεν επηρεάζονται", /οι διαχειριστές δεν επηρεάζονται/.test($u(dom, ".confirm").textContent) && statusOf27b(memberId(U(20))) === "active");
   clickU(dom, $u(dom, ".confirm-yes"));
   await uiWait(() => statusOf27b(memberId(U(29))) === "disabled");
   await idle(dom);
@@ -2381,7 +2381,7 @@ section("27b. Οθόνη διαχείρισης: λίστα ανθρώπων, μ
   clickU(dom, $u(dom, "#bulk-apply"));
   await uiWait(() => /admin παραλείφθηκε/.test(toastU(dom)));
   await idle(dom);
-  check("ο admin στην επιλογή παραλείπεται και το μήνυμα το λέει", /1 admin παραλείφθηκε/.test(toastU(dom)) && storedRoleOf(memberId("admin@demo.gr")) === "admin", toastU(dom));
+  check("ο διαχειριστής στην επιλογή παραλείπεται και το μήνυμα το λέει", /1 διαχειριστής παραλείφθηκε/.test(toastU(dom)) && storedRoleOf(memberId("admin@demo.gr")) === "admin", toastU(dom));
 
   // ------------------------------------------------------------ καρτέλα ατόμου μέσα από τη λίστα
   typeU(dom, "#people-q", U(5));
@@ -2401,7 +2401,7 @@ section("27b. Οθόνη διαχείρισης: λίστα ανθρώπων, μ
   const finMembers = db.prepare("select count(*) c from member_departments md join team_members m on m.id = md.member_id where md.department_id = 'fin' and m.workspace_id = 'team-demo' and m.status = 'active'").get().c;
   const finEditors = db.prepare("select count(*) c from team_project_editors e join team_members m on m.id = e.member_id where e.project_id = 'fin' and m.workspace_id = 'team-demo' and m.status = 'active'").get().c;
   const finDocs = db.prepare("select count(*) c from team_documents where workspace_id = 'team-demo' and department_id = 'fin'").get().c;
-  check("σελίδα project: τίτλος και μετρητές μελών, editors και εγγράφων", new RegExp(finName).test($u(dom, "#project-page h2").textContent) && $u(dom, "#project-meta").textContent === `${pl(finMembers, "μέλος", "μέλη")} · ${pl(finEditors, "editor", "editors")} · ${pl(finDocs, "έγγραφο", "έγγραφα")}`, $u(dom, "#project-meta").textContent);
+  check("σελίδα τμήματος: τίτλος και μετρητές μελών, συντακτών και εγγράφων", new RegExp(finName).test($u(dom, "#project-page h2").textContent) && $u(dom, "#project-meta").textContent === `${pl(finMembers, "μέλος", "μέλη")} · ${pl(finEditors, "συντάκτης", "συντάκτες")} · ${pl(finDocs, "έγγραφο", "έγγραφα")}`, $u(dom, "#project-meta").textContent);
   check("σελίδα project: το πολύ 25 μέλη ανά σελίδα, με σελιδοποίηση", $$u(dom, ".proj-member-row").length === Math.min(25, finMembers) && new RegExp(`από ${finMembers} `).test($u(dom, "#proj-info").textContent));
   typeU(dom, "#proj-q", U(8));
   await uiWait(() => $$u(dom, ".proj-member-row").length === 1);
@@ -2844,6 +2844,30 @@ const D = {};
 }
 }
 
+// ------------------------------------------------------------------ UX για αρχάριους: τι ελέγχεται σε ΚΑΘΕ οθόνη (jsdom)
+// Επιστρέφει λίστα προβλημάτων: λατινική λέξη-ένοχος μέσα σε ορατό κείμενο (και aria-label, placeholder, title), <a> που δεν είναι ντυμένο ως κουμπί,
+// παλιά link-κουμπιά, και inline μικρό γράμμα. Τα ονόματα που έβαλαν οι χρήστες (τμήματα, πελάτες, τίτλοι) και τα emails δεν μετράνε.
+function uxProblems(dom, names = []) {
+  const doc = dom.window.document;
+  const out = [];
+  const clone = doc.body.cloneNode(true);
+  clone.querySelectorAll("script,style").forEach((e) => e.remove()); // ο κώδικας της σελίδας δεν είναι ορατό κείμενο
+  let t = clone.textContent;
+  doc.querySelectorAll("[aria-label],[placeholder],[title]").forEach((e) => { t += " " + (e.getAttribute("aria-label") || "") + " " + (e.getAttribute("placeholder") || "") + " " + (e.getAttribute("title") || ""); });
+  for (const n of [...names].filter(Boolean).sort((a, b) => b.length - a.length)) t = t.split(n).join(" ");
+  t = t.replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, " ");
+  const jargon = t.match(/.{0,24}(?:project|update|admin|editor).{0,24}/gi);
+  if (jargon) out.push("λατινική λέξη: " + jargon.slice(0, 2).join(" | "));
+  // ΜΙΑ λέξη για το τμήμα: το «έργο» δεν επιτρέπεται πουθενά (ο αρχάριος θα νόμιζε ότι είναι άλλο πράγμα)
+  const mixed = t.match(/.{0,24}(?<![\p{L}])[ΈέΕε]ργ(?:ο|ου|α|ων)(?![\p{L}]).{0,24}/gu);
+  if (mixed) out.push("δεύτερη λέξη για το τμήμα (έργο): " + mixed.slice(0, 2).join(" | "));
+  doc.querySelectorAll("a").forEach((a) => { if (!/(^|\s)btn(\s|$)/.test(a.className)) out.push("link χωρίς μορφή κουμπιού: " + a.textContent.trim().slice(0, 30)); });
+  doc.querySelectorAll(".linkbtn,.linkrow,.backlink").forEach((e) => out.push("παλιό link-κουμπί: " + e.textContent.trim().slice(0, 30)));
+  doc.querySelectorAll("[style]").forEach((e) => { const m = /font-size:\s*([\d.]+)px/.exec(e.getAttribute("style")); if (m && Number(m[1]) < 13) out.push("μικρό γράμμα: " + m[1] + "px"); });
+  return out;
+}
+
+
 // ============================================================================ 29. Οθόνες ακροατηρίου και διαχείρισης (jsdom)
 section("29. Οθόνες: επιλογή ακροατηρίου, ετικέτες «κοινό», «Τι διαβάζει», επιβεβαιώσεις, μετρητές χωρίς ανενεργούς, ετικέτα AI");
 { // ένα μπλοκ: δικά του δεδομένα (νέα projects και μέλη), ανεξάρτητα από τις προηγούμενες ενότητες
@@ -2910,7 +2934,7 @@ section("29. Οθόνες: επιλογή ακροατηρίου, ετικέτε
   check("Projects: πληθυντικός και ανενεργοί χωριστά («1 μέλος · … · +1 απενεργοποιημένο»)", /^1 μέλος · \d+ έγγραφ(ο|α) · \+1 απενεργοποιημένο$/.test(deptRowOf("UI Άλφα").querySelector(".meta").textContent), deptRowOf("UI Άλφα").querySelector(".meta").textContent);
   clickU(ad, deptRowOf("UI Άλφα").querySelector(".open-project"));
   await uiWait(() => $u(ad, "#project-page"));
-  check("σελίδα project: οι απενεργοποιημένοι δεν μετράνε και κρύβονται από προεπιλογή", /^1 μέλος · 1 editor · /.test($u(ad, "#project-meta").textContent) && $$u(ad, ".proj-member-row").length === 1, $u(ad, "#project-meta").textContent);
+  check("σελίδα τμήματος: οι απενεργοποιημένοι δεν μετράνε και κρύβονται από προεπιλογή", /^1 μέλος · 1 συντάκτης · /.test($u(ad, "#project-meta").textContent) && $$u(ad, ".proj-member-row").length === 1, $u(ad, "#project-meta").textContent);
   check("σελίδα project: «Εμφάνιση απενεργοποιημένων (1)»", /Εμφάνιση απενεργοποιημένων \(1\)/.test($u(ad, "#proj-show-disabled").parentNode.textContent));
   tickU(ad, $u(ad, "#proj-show-disabled"), true);
   await uiWait(() => $$u(ad, ".proj-member-row").length === 2);
@@ -2981,7 +3005,7 @@ section("29. Οθόνες: επιλογή ακροατηρίου, ετικέτε
       return t;
     };
     const leaks = [];
-    const scan = (label, dom) => { const m = surfaced(dom).match(/.{0,24}project.{0,24}/gi); if (m) leaks.push(label + ": " + m.slice(0, 2).join(" | ")); };
+    const scan = (label, dom) => { const m = uxProblems(dom, dataNames); if (m.length) leaks.push(label + ": " + m.slice(0, 3).join(" | ")); };
     for (const tabName of ["departments", "documents", "members", "audit", "departments"]) {
       clickU(ad, $u(ad, "#tab-" + tabName));
       await uiWait(() => !$u(ad, ".busy"));
@@ -3004,7 +3028,7 @@ section("29. Οθόνες: επιλογή ακροατηρίου, ετικέτε
     await uiWait(() => $u(ad, "#member-detail"));
     scan("admin/καρτέλα ατόμου", ad);
     scan("editor/έγγραφο με ακροατήριο", ed);
-    check("προφίλ «Εταιρεία»: η λέξη «project» δεν εμφανίζεται πουθενά στις οθόνες admin και editor (μόνο «τμήμα»)", leaks.length === 0, leaks);
+    check("προφίλ «Εταιρεία»: καμία οθόνη admin ή editor δεν έχει απλό link, παλιό link-κουμπί, μικρό γράμμα ή λατινική λέξη (project, update, admin, editor)", leaks.length === 0, leaks);
     check("προφίλ «Εταιρεία»: το tab λέγεται «Τμήματα»", $u(ad, "#tab-departments").textContent === "Τμήματα");
   }
 
@@ -3013,6 +3037,9 @@ section("29. Οθόνες: επιλογή ακροατηρίου, ετικέτε
   await uiWait(() => $u(pt, "#q"));
   check("portal: μόνιμη σημείωση ότι ο βοηθός είναι AI (άρθρο 50 του AI Act)", !!$u(pt, "#ai-note") && /AI/.test($u(pt, "#ai-note").textContent));
   await uiWait(() => $$u(pt, ".row").length > 0);
+  check("portal: χωρίς απλό link, παλιό link-κουμπί, μικρό γράμμα ή λατινική λέξη", uxProblems(pt, [...db.prepare("select name from departments").all().map((r) => r.name), ...db.prepare("select title from team_documents").all().map((r) => r.title)]).length === 0, uxProblems(pt, [...db.prepare("select name from departments").all().map((r) => r.name), ...db.prepare("select title from team_documents").all().map((r) => r.title)]));
+  check("portal: ο ρόλος φαίνεται στα ελληνικά (Συντάκτης) και η έξοδος είναι κουμπί «Έξοδος»", /Συντάκτης/.test($u(pt, ".brand").textContent) && $u(pt, "#logout").tagName === "BUTTON" && /(^|\s)btn(\s|$)/.test($u(pt, "#logout").className) && $u(pt, "#logout").textContent === "Έξοδος");
+  check("portal: κάθε γραμμή εγγράφου είναι κουμπί (class btn secondary listbtn)", $$u(pt, ".row").length > 0 && $$u(pt, ".row").every((r) => r.tagName === "BUTTON" && /listbtn/.test(r.className)));
   check("portal: τίτλος στήλης «Έγγραφα που βλέπεις»", $$u(pt, "h2").some((h) => h.textContent === "Έγγραφα που βλέπεις"));
   // Τα έγγραφα του τεστ είναι φρέσκα, άρα εμφανίζονται ΚΑΙ στη στήλη «Τι άλλαξε πρόσφατα» (χωρίς ετικέτα «κοινό»). Ψάχνουμε μόνο στη στήλη εγγράφων.
   const docsColumn = $$u(pt, "h2").find((h) => h.textContent === "Έγγραφα που βλέπεις").parentNode;
@@ -3358,6 +3385,33 @@ section("31. Οθόνες call center: τύπος χώρου, πελάτες κ�
   check("χώρος «Εταιρεία»: φαίνεται η κάρτα «Τύπος χώρου» με το κουμπί αλλαγής", /Εταιρεία/.test($u(ad, "#profile-card").textContent) && /Αλλαγή σε/.test($u(ad, "#profile-switch").textContent));
   check("χώρος «Εταιρεία»: δεν υπάρχει φόρμα πελάτη ούτε επιλογέας πελάτη", !$u(ad, "#add-client") && !$u(ad, "select.move-client"));
   check("χώρος «Εταιρεία»: το tab λέγεται «Τμήματα»", $u(ad, "#tab-departments").textContent === "Τμήματα");
+  // ------------------------------------------------------------ νέος χώρος: «Ξεκίνα εδώ» και άδειες οθόνες που οδηγούν
+  {
+    const sc = $u(ad, "#start-card");
+    check("νέος χώρος: φαίνεται το «Ξεκίνα εδώ» με τρία βήματα και κανένα δεν είναι ολοκληρωμένο", !!sc && $$u(ad, "#start-card .step").length === 3 && $$u(ad, "#start-card .step.done").length === 0);
+    check("«Ξεκίνα εδώ»: ΜΟΝΟ το πρώτο βήμα έχει κύριο (πορτοκαλί) κουμπί, τα άλλα είναι δευτερεύοντα", $u(ad, "#step-structure-btn").className === "btn" && $u(ad, "#step-people-btn").className === "btn secondary" && $u(ad, "#step-doc-btn").className === "btn secondary");
+    check("«Ξεκίνα εδώ»: το βήμα «Γράψε έγγραφο» είναι σύνδεσμος ντυμένος ως κουμπί προς τον editor", $u(ad, "#step-doc-btn").tagName === "A" && $u(ad, "#step-doc-btn").getAttribute("href") === "/team-editor.html");
+    clickU(ad, $u(ad, "#step-structure-btn"));
+    check("«Ξεκίνα εδώ»: το πρώτο κουμπί πηγαίνει τον κέρσορα στο πεδίο νέου τμήματος", ad.window.document.activeElement && ad.window.document.activeElement.id === "new-dept");
+    clickU(ad, $u(ad, "#step-people-btn"));
+    check("«Ξεκίνα εδώ»: το δεύτερο κουμπί ανοίγει την καρτέλα Άνθρωποι", !!(await uiWait(() => /active/.test($u(ad, "#tab-members").className))) && !$u(ad, "#start-card"));
+    clickU(ad, $u(ad, "#tab-documents"));
+    const de = await uiWait(() => $u(ad, "#docs-empty"));
+    check("καρτέλα Έγγραφα χωρίς έγγραφα: εξήγηση και κουμπί «Γράψε το πρώτο έγγραφο» (σύνδεσμος ντυμένος ως κουμπί)", !!de && /Δεν υπάρχει κανένα έγγραφο/.test(de.textContent) && $u(ad, "#first-doc").tagName === "A" && $u(ad, "#first-doc").className === "btn" && $u(ad, "#first-doc").getAttribute("href") === "/team-editor.html");
+    clickU(ad, $u(ad, "#tab-audit"));
+    check("καρτέλα Ιστορικό χωρίς ενέργειες: λέει τι θα δει εδώ ο χρήστης", !!(await uiWait(() => $$u(ad, ".hint").find((e) => /Εδώ θα βλέπεις ποιος άλλαξε τι και πότε/.test(e.textContent)))) || $$u(ad, ".log").length > 0);
+    clickU(ad, $u(ad, "#tab-departments"));
+    await uiWait(() => $u(ad, "#profile-switch"));
+    await person("ui31_emp@demo.gr", {});
+    const pa = uiFor(ADM)("portal.html");
+    await uiWait(() => $u(pa, "#docs-empty"));
+    check("portal (διαχειριστής) χωρίς έγγραφα: εξήγηση και κουμπί «Γράψε το πρώτο έγγραφο»", $u(pa, "#first-doc").tagName === "A" && $u(pa, "#first-doc").className === "btn" && /Δεν υπάρχουν έγγραφα ακόμα/.test($u(pa, "#docs-empty").textContent));
+    check("portal (διαχειριστής): τα «Διαχείριση» και «Εισερχόμενα και έγγραφα» είναι σύνδεσμοι ντυμένοι ως κουμπιά", $u(pa, "#admin-link").tagName === "A" && /btn secondary/.test($u(pa, "#admin-link").className) && $u(pa, "#staff-link").tagName === "A" && /btn secondary/.test($u(pa, "#staff-link").className));
+    const pe = uiFor("ui31_emp@demo.gr")("portal.html");
+    await uiWait(() => $u(pe, "#docs-empty"));
+    check("portal (υπάλληλος) χωρίς έγγραφα: εξήγηση χωρίς κουμπί (δεν μπορεί να γράψει έγγραφα)", /Όταν ο υπεύθυνος του τμήματός σου ανεβάσει έγγραφα/.test($u(pe, "#docs-empty").textContent) && !$u(pe, "#first-doc") && !$u(pe, "#admin-link") && !$u(pe, "#staff-link"));
+  }
+
   clickU(ad, $u(ad, "#profile-switch"));
   const conf = await uiWait(() => $u(ad, ".confirm"));
   check("αλλαγή τύπου: ζητά επιβεβαίωση που εξηγεί τον τοίχο και δεν αλλάζει τίποτα ακόμα", !!conf && /τοίχος/.test(conf.textContent) && (await ov()).profile === "company");
@@ -3367,7 +3421,7 @@ section("31. Οθόνες call center: τύπος χώρου, πελάτες κ�
   await uiWait(() => $u(ad, ".confirm-yes"));
   clickU(ad, $u(ad, ".confirm-yes"));
   check("«Ναι»: ο χώρος γίνεται call center και εμφανίζεται η φόρμα νέου πελάτη", !!(await uiWait(() => $u(ad, "#add-client"))) && (await ov()).profile === "multi_client");
-  check("call center: το tab γίνεται «Projects» και η επικεφαλίδα «Πελάτες και projects» (η λέξη project μένει στο call center)", $u(ad, "#tab-departments").textContent === "Projects" && $$u(ad, "h2").some((h) => h.textContent === "Πελάτες και projects"));
+  check("call center: το tab λέγεται «Τμήματα» και η επικεφαλίδα «Πελάτες και τμήματα» (ΜΙΑ λέξη παντού, όχι «projects» ούτε «έργα»)", $u(ad, "#tab-departments").textContent === "Τμήματα" && $$u(ad, "h2").some((h) => h.textContent === "Πελάτες και τμήματα"));
 
   // ------------------------------------------------------------ πελάτες και τμήματα από την οθόνη
   setU(ad, $u(ad, "#new-client"), "Apple UI");
@@ -3424,6 +3478,9 @@ section("31. Οθόνες call center: τύπος χώρου, πελάτες κ�
   const errToast = await uiWait(() => $u(ad, ".toast.err"));
   check("μεταφορά με κοινά έγγραφα: μήνυμα σφάλματος που λέει πόσα και τι να κάνει ο admin, χωρίς το λανθασμένο «του ίδιου πελάτη»", !!errToast && /Δεν μεταφέρεται/.test(errToast.textContent) && /1 έγγραφο/.test(errToast.textContent) && /Αφαίρεσε πρώτα/.test(errToast.textContent) && /σε άλλον πελάτη ή στα εσωτερικά/.test(errToast.textContent) && !/του ίδιου πελάτη/.test(errToast.textContent), errToast && errToast.textContent);
   check("... και το project μένει στον Apple UI", (await ov()).departments.find((d) => d.id === dTech).clientId === cA.id);
+  const techRowOk = () => { const r = $$u(ad, ".dept-row").find((x) => x.querySelector(".name") && x.querySelector(".name").textContent === "Technical" && x.closest(".client-group").getAttribute("data-client") === cA.id); return r && !r.classList.contains("busy") && Array.from(r.querySelectorAll("select,input,button")).every((c) => !c.disabled) ? r : null; };
+  check("μετά το 409 η γραμμή ξεκλειδώνει: τα κουμπιά, το όνομα και ο επιλογέας πελάτη ξαναγίνονται ενεργά", !!(await uiWait(techRowOk)));
+  check("... και ο επιλογέας δείχνει ξανά τον Apple UI (όχι τον πελάτη που απορρίφθηκε)", techSel().value === cA.id);
   // διαγραφή άδειου πελάτη και προστασία του μη άδειου
   setU(ad, $u(ad, "#new-client"), "Κενός UI");
   submitU(ad, "#add-client");
@@ -3467,6 +3524,48 @@ section("31. Οθόνες call center: τύπος χώρου, πελάτες κ�
   const one = uiFor("ui31_one@demo.gr")("portal.html");
   await uiWait(() => $u(one, "#q"));
   check("portal: πράκτορας ενός πελάτη: καμία επιλογή πελάτη και το «Ρώτα» είναι ενεργό", !$u(one, "#wallrow") && $u(one, "form.searchrow button").disabled === false);
+
+  // ------------------------------------------------------------ σάρωση UX: οθόνες call center
+  {
+    const namesU = [...db.prepare("select name from departments").all().map((r) => r.name), ...db.prepare("select name from team_clients").all().map((r) => r.name),
+      ...db.prepare("select short_name from team_project_clients").all().map((r) => r.short_name), ...db.prepare("select title from team_documents").all().map((r) => r.title)];
+    clickU(ad, $u(ad, "#tab-departments"));
+    await uiWait(() => $u(ad, "#add-client"));
+    const pAd = uxProblems(ad, namesU);
+    check("call center, διαχείριση: χωρίς απλό link, παλιό link-κουμπί, μικρό γράμμα ή λατινική λέξη (project, update, admin, editor)", pAd.length === 0, pAd);
+    const pEd = uxProblems(ed, namesU);
+    check("call center, editor: χωρίς απλό link, παλιό link-κουμπί, μικρό γράμμα ή λατινική λέξη", pEd.length === 0, pEd);
+    const pPt = uxProblems(pt, namesU);
+    check("call center, portal με επιλογή πελάτη: χωρίς απλό link, παλιό link-κουμπί, μικρό γράμμα ή λατινική λέξη", pPt.length === 0, pPt);
+  }
+}
+
+// ============================================================================ 32. UX για αρχάριους: στατικοί έλεγχοι (κουμπιά, μεγέθη, γράμματα)
+section("32. UX για αρχάριους: όλα φαίνονται ως κουμπιά, 44px στόχοι, γράμματα όχι μικρότερα από 13px");
+{
+  const cssText = readFileSync(join(REPO, "public", "team.css"), "utf8");
+  const pages = ["portal.html", "team-editor.html", "team-admin.html"].map((n) => [n, readFileSync(join(REPO, "public", n), "utf8")]);
+  const everything = [["team.css", cssText], ...pages];
+  check("team.css: ύψος κουμπιών και πεδίων 44px (WCAG 2.5.5)", /--h-btn:\s*44px/.test(cssText) && /--h-input:\s*44px/.test(cssText));
+  const small = [];
+  for (const [n, src] of everything) {
+    for (const m of src.matchAll(/font-size:\s*([\d.]+)(px|rem)/g)) { const px = m[2] === "rem" ? Number(m[1]) * 16 : Number(m[1]); if (px < 13) small.push(`${n}: ${m[0]}`); }
+    for (const m of src.matchAll(/--fs-[a-z]+:\s*([\d.]+)rem/g)) { if (Number(m[1]) * 16 < 13) small.push(`${n}: ${m[0]}`); }
+  }
+  check("κανένα γράμμα μικρότερο από 13px σε team.css και στις τρεις σελίδες (CSS και inline)", small.length === 0, small);
+  check("τα πεδία κειμένου έχουν 16px (το iPhone δεν μεγεθύνει τη σελίδα όταν τα πατάς)", /--fs-md:\s*1rem/.test(cssText) && /input\[type=text\][^{]*\{[^}]*font-size:\s*var\(--fs-md\)/.test(cssText));
+  const under = everything.filter(([, src]) => /text-decoration:\s*underline/.test(src)).map(([n]) => n);
+  check("καμία σελίδα και το team.css δεν υπογραμμίζουν κείμενο (τίποτα δεν φαίνεται ως απλό link)", under.length === 0, under);
+  const old = everything.filter(([, src]) => /\b(linkbtn|linkrow|backlink)\b/.test(src)).map(([n]) => n);
+  check("δεν έχουν μείνει οι παλιές κλάσεις link-κουμπιών (linkbtn, linkrow, backlink)", old.length === 0, old);
+  const badLinks = [];
+  for (const [n, src] of pages) {
+    for (const m of src.matchAll(/h\("a",\s*\{[^}]*\}/g)) if (!/class:\s*"[^"]*\bbtn\b/.test(m[0])) badLinks.push(`${n}: ${m[0].slice(0, 70)}`);
+  }
+  check("κάθε σύνδεσμος που φτιάχνουν οι σελίδες (h(\"a\", ...)) έχει class btn", badLinks.length === 0, badLinks);
+  check("τα στατικά αρχεία δεν έχουν <a> στο markup (όλα μπαίνουν με το h(), άρα περνούν από τον έλεγχο παραπάνω)", pages.every(([, src]) => !/<a\s[^>]*href/.test(src.split("<script>")[0].replace(/<link[^>]*>/g, ""))));
+  const body = pages.map(([, src]) => src.split("<script>").slice(1).join("")).join("\n");
+  check("οι σελίδες δεν έχουν ούτε μία λατινική ετικέτα ρόλου (Admin, Editor) ως κείμενο κουμπιού ή επιλογής", !/text:\s*"(Admin|Editor|admin|editor)"/.test(body) && !/option\("[a-z]+",\s*"(Admin|Editor)"\)/.test(body));
 }
 
 // ============================================================================ Σύνοψη

@@ -3,7 +3,9 @@
    Δεν φορτώνεται από καμία σελίδα του SMB και δεν αλλάζει το shared.css. Φορτώνεται ΜΕΤΑ το shared.css και το συμπληρώνει.
 
    Αρχές (2 Οκτ 2026):
-   - ΜΙΑ κλίμακα γραμμάτων σε rem (κατώτατο όριο ~12,5px) και ΜΙΑ κλίμακα ύψους κουμπιών, αντί για διαφορετικά px σε κάθε σελίδα.
+   - ΜΙΑ κλίμακα γραμμάτων σε rem (κατώτατο όριο 13px, κείμενο και πεδία 16px) και ΜΙΑ κλίμακα ύψους κουμπιών (44px), αντί για διαφορετικά px σε κάθε σελίδα.
+   - 3 Οκτ 2026 (UX για αρχάριους): ΤΙΠΟΤΑ δεν φαίνεται ως απλό υπογραμμισμένο link. Κάθε ενέργεια ΚΑΙ κάθε μετάβαση φαίνεται ως κουμπί
+     (οι μεταβάσεις μένουν <a> με κλάση btn, για να δουλεύουν Ctrl+κλικ, Πίσω και οι αναγνώστες οθόνης). Στόχοι κλικ 44px (WCAG 2.5.5, πάνω από το ελάχιστο 24px του 2.5.8).
    - Κουμπιά με σκούρο κείμενο πάνω στο ζεστό accent (5,8:1 αντίθεση, όπως το .cta-primary του SMB). Το λευκό είχε 2,9:1.
    - Ορατός δακτύλιος focus για πληκτρολόγιο. Στόχοι κλικ τουλάχιστον 24x24px (WCAG 2.2, 2.5.8).
    - Περίγραμμα πεδίων με αντίθεση ~3:1 (τα πεδία φαίνονται πού είναι).
@@ -14,9 +16,9 @@
   --on-accent:#15151c;            /* σκούρο κείμενο πάνω στο accent */
   --field-border:#6f6f7d;         /* περίγραμμα πεδίων, ~3,4:1 πάνω στην επιφάνεια */
   --focus:#F0A58B;                /* δακτύλιος focus, ανοιχτότερο από το accent για να φαίνεται και πάνω του */
-  --fs-xs:.78rem; --fs-sm:.84rem; --fs-md:.92rem; --fs-lg:1.06rem; --fs-xl:1.3rem; --fs-num:1.7rem;
+  --fs-xs:.8125rem; --fs-sm:.875rem; --fs-md:1rem; --fs-lg:1.125rem; --fs-xl:1.35rem; --fs-num:1.7rem;
   --r:8px; --r-lg:10px;
-  --h-btn:36px; --h-input:40px;
+  --h-btn:44px; --h-input:44px;
 }
 
 html{-webkit-text-size-adjust:100%;}
@@ -34,10 +36,10 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
 .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
   padding:14px 0;border-bottom:1px solid var(--border);margin-bottom:18px;}
 .topbar h1{font-size:var(--fs-lg);margin:0;font-weight:600;}
-.topbar a{font-size:var(--fs-sm);margin-left:14px;}
+.topnav{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
 .tabs{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap;}
 .tab{background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:var(--r);
-  padding:8px 16px;min-height:var(--h-btn);font-size:var(--fs-md);cursor:pointer;font-family:inherit;}
+  padding:8px 18px;min-height:var(--h-btn);font-size:var(--fs-md);cursor:pointer;font-family:inherit;}
 .tab:hover{border-color:var(--text-soft);}
 .tab.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600;}
 
@@ -62,41 +64,45 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
 .chip{font-size:var(--fs-xs);padding:2px 9px;border-radius:999px;background:var(--surface-2);color:var(--text-soft);border:1px solid var(--border);display:inline-block;}
 .chip.ed{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);}
 /* ετικέτα που ακολουθεί όνομα ή email: κενό από το CSS, όχι από κενά μέσα στο κείμενο */
-.linkrow + .chip,.linkrow + .pill,.name + .pill,.name + .chip{margin-left:8px;}
+.name + .pill,.name + .chip{margin-left:8px;}
 
 /* ---- κουμπιά (ΜΙΑ κλίμακα) */
-.btn{min-height:var(--h-btn);padding:0 16px;border-radius:var(--r);border:1px solid transparent;background:var(--accent);
-  color:var(--on-accent);font-size:var(--fs-sm);font-weight:700;cursor:pointer;font-family:inherit;line-height:1.2;}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;text-align:center;text-decoration:none;
+  min-height:var(--h-btn);padding:8px 18px;border-radius:var(--r);border:1px solid transparent;background:var(--accent);
+  color:var(--on-accent);font-size:var(--fs-md);font-weight:700;cursor:pointer;font-family:inherit;line-height:1.25;}
 .btn:hover{filter:brightness(1.08);}
-.btn.lg{min-height:48px;padding:0 22px;font-size:var(--fs-md);}
+a.btn:hover{color:var(--on-accent);}
+.btn.lg{min-height:52px;padding:0 24px;font-size:var(--fs-lg);}
 .btn.secondary{background:var(--surface-2);color:var(--text);border-color:var(--border);font-weight:600;}
-.btn.secondary:hover{filter:none;border-color:var(--text-soft);}
+.btn.secondary:hover,a.btn.secondary:hover{filter:none;border-color:var(--accent);color:var(--text);}
+/* κουμπί που είναι ΚΑΙ γραμμή λίστας (ο χρήστης καταλαβαίνει ότι πατιέται): αριστερή στοίχιση, πλήρες πλάτος */
+.btn.listbtn{display:flex;width:100%;justify-content:space-between;align-items:center;gap:10px;text-align:left;font-weight:600;margin-top:8px;}
+.btn.listbtn.active{border-color:var(--accent);background:var(--accent-soft);}
+.btn.listbtn::after{content:"›";color:var(--text-soft);font-size:1.3em;line-height:1;flex:none;}
 .btn.danger{background:none;color:var(--danger);border-color:var(--danger);font-weight:600;}
 .btn.danger:hover{filter:none;background:rgba(229,100,107,.12);}
 .btn:disabled{opacity:.55;cursor:default;filter:none;}
-.linkbtn{color:var(--text-soft);background:none;border:none;font-size:inherit;cursor:pointer;text-decoration:underline;padding:4px 2px;font-family:inherit;}
-.linkbtn:hover{color:var(--text);}
-.xbtn,.x{background:none;border:none;color:var(--text-soft);font-size:1.15rem;line-height:1;cursor:pointer;
-  min-width:28px;min-height:28px;border-radius:6px;font-family:inherit;}
-.xbtn:hover,.x:hover{color:var(--text);background:var(--surface-2);}
+.xbtn,.x{background:var(--surface-2);border:1px solid var(--border);color:var(--text);font-size:1.3rem;line-height:1;cursor:pointer;
+  min-width:var(--h-btn);min-height:var(--h-btn);border-radius:var(--r);font-family:inherit;}
+.xbtn:hover,.x:hover{border-color:var(--danger);color:var(--danger);}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
 .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
 
 /* ---- πεδία */
 label{display:block;font-size:var(--fs-sm);color:var(--text-soft);margin:12px 0 4px;}
-input[type=text],input[type=email],select,textarea{padding:9px 12px;min-height:var(--h-input);border-radius:var(--r);
+input[type=text],input[type=email],input[type=search],select,textarea{padding:9px 12px;min-height:var(--h-input);border-radius:var(--r);
   border:1px solid var(--field-border);background:var(--bg);color:var(--text);font-size:var(--fs-md);font-family:inherit;}
 textarea{width:100%;min-height:240px;line-height:1.6;resize:vertical;}
 textarea.small{min-height:90px;}
 input::placeholder,textarea::placeholder{color:var(--text-soft);opacity:.75;}
 select{max-width:100%;}
-input[type=checkbox]{width:18px;height:18px;margin:3px;accent-color:var(--accent);cursor:pointer;flex:none;}
-.checks{display:flex;gap:10px;flex-wrap:wrap;font-size:var(--fs-sm);}
-.checks label,label.check{display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin:0;color:var(--text);font-size:var(--fs-sm);}
+input[type=checkbox]{width:24px;height:24px;margin:0;accent-color:var(--accent);cursor:pointer;flex:none;}
+.checks{display:flex;gap:10px;flex-wrap:wrap;font-size:var(--fs-md);}
+.checks label,label.check{display:inline-flex;align-items:center;gap:10px;cursor:pointer;margin:0;color:var(--text);font-size:var(--fs-md);min-height:var(--h-btn);}
 
 /* ---- επιλογή ακροατηρίου ("Ποιος άλλος το διαβάζει;") */
 details.audience{border:1px solid var(--border);border-radius:var(--r);background:var(--surface-2);margin:14px 0 4px;}
-details.audience > summary{cursor:pointer;list-style:none;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;border-radius:var(--r);}
+details.audience > summary{cursor:pointer;list-style:none;padding:10px 14px;min-height:var(--h-btn);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;border-radius:var(--r);}
 details.audience > summary::-webkit-details-marker{display:none;}
 details.audience > summary::before{content:"▸";color:var(--text-soft);margin-right:2px;}
 details.audience[open] > summary::before{content:"▾";}
@@ -104,7 +110,7 @@ details.audience > summary .s-title{font-weight:600;font-size:var(--fs-md);margi
 details.audience > summary .s-state{font-size:var(--fs-sm);color:var(--text-soft);}
 .audience-body{padding:2px 14px 14px;}
 .pick-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:2px 14px;margin:8px 0;}
-.pick-list label{display:flex;align-items:center;gap:8px;margin:0;padding:4px 2px;color:var(--text);font-size:var(--fs-md);cursor:pointer;border-radius:6px;}
+.pick-list label{display:flex;align-items:center;gap:10px;margin:0;padding:6px 6px;min-height:var(--h-btn);color:var(--text);font-size:var(--fs-md);cursor:pointer;border-radius:6px;}
 .pick-list label:hover{background:var(--surface);}
 .pick-list label.off{opacity:.5;cursor:default;}
 .audience-foot{font-size:var(--fs-sm);color:var(--text-soft);margin:6px 0 0;}
@@ -129,7 +135,24 @@ details.audience > summary .s-state{font-size:var(--fs-sm);color:var(--text-soft
 @media (prefers-reduced-motion:reduce){.toast{animation:none;}*{scroll-behavior:auto !important;transition:none !important;}}
 
 /* ---- μικρές οθόνες */
+/* ---- άδειες οθόνες και «Ξεκίνα εδώ»: κάθε άδεια οθόνη λέει τι είναι, γιατί είναι άδεια και τι να πατήσεις */
+.emptybox{border:1px dashed var(--field-border);border-radius:var(--r-lg);padding:18px 16px;text-align:center;margin:10px 0;}
+.emptybox p{margin:0 0 12px;color:var(--text-soft);font-size:var(--fs-md);line-height:1.55;}
+.start{border-color:var(--accent);background:var(--accent-soft);}
+.start h2{font-size:var(--fs-lg);}
+.step{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--border);}
+.step .n{width:32px;height:32px;border-radius:50%;background:var(--surface-2);border:1px solid var(--field-border);display:inline-flex;align-items:center;justify-content:center;font-weight:700;flex:none;}
+.step.done .n{background:var(--ok);border-color:var(--ok);color:var(--on-accent);}
+.step .txt{flex:1;min-width:200px;}
+.step .txt strong{display:block;font-size:var(--fs-md);}
+.step .txt span{font-size:var(--fs-sm);color:var(--text-soft);}
+.step.done .txt strong{text-decoration:line-through;color:var(--text-soft);}
+
+/* ---- μικρές οθόνες: τα κουμπιά της κορυφής πιάνουν όλο το πλάτος και είναι εύκολο να πατηθούν με τον αντίχειρα */
 @media (max-width:560px){
-  .topbar a{margin-left:0;margin-right:14px;}
-  .btn{min-height:40px;}
+  .topbar{align-items:stretch;}
+  .topnav{width:100%;}
+  .topnav .btn{flex:1 1 auto;}
+  .actions .btn,.controls .btn{flex:1 1 auto;}
+  .tab{flex:1 1 auto;}
 }

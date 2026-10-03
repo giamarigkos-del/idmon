@@ -32,10 +32,13 @@
   /* έγγραφα */
   .grid{display:grid;grid-template-columns:minmax(240px,320px) 1fr;gap:22px;align-items:start;}
   @media (max-width:760px){.grid{grid-template-columns:1fr;}}
-  .item{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;background:none;border:none;
-    border-top:1px solid var(--border);padding:9px 0;min-height:44px;color:var(--text);cursor:pointer;font-family:inherit;}
+  /* κάθε έγγραφο της λίστας είναι κουμπί */
+  .item{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;background:var(--surface-2);border:1px solid var(--border);
+    border-radius:var(--r);padding:10px 14px;margin-top:8px;min-height:var(--h-btn);color:var(--text);cursor:pointer;font-family:inherit;}
   .item .t{font-size:var(--fs-md);} .item .m{font-size:var(--fs-xs);color:var(--text-soft);} .item.active .t{color:var(--accent);}
-  .item:hover .t{text-decoration:underline;}
+  .item:hover{border-color:var(--accent);} .item.active{border-color:var(--accent);background:var(--accent-soft);}
+  .item.new-doc{background:var(--accent);color:var(--on-accent);border-color:transparent;align-items:center;font-weight:700;margin-top:0;}
+  .item.new-doc .t,.item.new-doc.active .t{color:var(--on-accent);}
   #panel input[type=text],#panel select{width:100%;}
   .ro{font-size:var(--fs-sm);color:var(--text-soft);margin:0 0 6px;}
   .readonly-text{white-space:pre-wrap;line-height:1.7;font-size:var(--fs-md);margin:12px 0 0;}
@@ -52,11 +55,11 @@
   "use strict";
   var app = document.getElementById("app");
   var me = null;
-  // Η λέξη για το τμήμα: στο προφίλ «Εταιρεία» λέγεται «τμήμα», στο call center μένει «project».
+  // Η λέξη για το τμήμα: στο προφίλ «Εταιρεία» λέγεται «τμήμα», και στο call center λέγεται «τμήμα» (ΜΙΑ λέξη παντού: ο αρχάριος δεν πρέπει να αναρωτιέται αν «έργο» και «τμήμα» είναι το ίδιο).
   // Μορφές: s = ενικός, g = γενική ενικού, p = πληθυντικός, gp = γενική πληθυντικού, S/P = με κεφαλαίο.
   var WORDS = {
     company: { s: "τμήμα", g: "τμήματος", p: "τμήματα", gp: "τμημάτων", S: "Τμήμα", P: "Τμήματα" },
-    multi_client: { s: "project", g: "project", p: "projects", gp: "projects", S: "Project", P: "Projects" }
+    multi_client: { s: "τμήμα", g: "τμήματος", p: "τμήματα", gp: "τμημάτων", S: "Τμήμα", P: "Τμήματα" }
   };
   function W() { return me && me.profile === "multi_client" ? WORDS.multi_client : WORDS.company; }
   var departments = [];
@@ -90,26 +93,26 @@
     });
   }
   var ERRORS = {
-    forbidden: "Δεν έχεις δικαίωμα για αυτή την ενέργεια.", invalid_title: "Ο τίτλος είναι κενός ή πολύ μεγάλος.",
+    forbidden: "Δεν έχεις δικαίωμα για αυτή την ενέργεια. Ζήτησε βοήθεια από τον διαχειριστή.", invalid_title: "Ο τίτλος είναι κενός ή πολύ μεγάλος. Γράψε έναν τίτλο έως 200 χαρακτήρες.",
     text_required: "Γράψε κείμενο.", text_too_long: "Το κείμενο είναι πολύ μεγάλο.", invalid_text: "Το κείμενο είναι κενό ή πολύ μεγάλο.",
     ai_unavailable: "Ο πάροχος AI δεν είναι διαθέσιμος. Δοκίμασε ξανά σε λίγο.", bad_proposal: "Η πρόταση δεν ήταν χρήσιμη. Δοκίμασε ξανά ή γράψε το κείμενο μόνος σου.",
-    cooldown: "Έχει ήδη σταλεί υπενθύμιση πρόσφατα.",     not_found: "Δεν βρέθηκε (ίσως άλλαξε στο μεταξύ).", not_open: "Έχει ήδη επιλυθεί.",
+    cooldown: "Έχει ήδη σταλεί υπενθύμιση πρόσφατα.",     not_found: "Δεν βρέθηκε (ίσως άλλαξε στο μεταξύ). Ανανέωσε τη σελίδα.", not_open: "Έχει ήδη επιλυθεί.",
                 audience_not_allowed: "Ένα έγγραφο όλης της εταιρείας το βλέπουν ήδη όλοι: δεν μοιράζεται ξεχωριστά.",
         audience_unavailable: "Η κοινή χρήση εγγράφων δεν είναι ακόμα διαθέσιμη σε αυτόν τον χώρο (λείπει μια ενημέρωση βάσης). Ειδοποίησε τον διαχειριστή.",
     audience_cross_client: "Ένα έγγραφο μοιράζεται μόνο με τμήματα του ΙΔΙΟΥ πελάτη, ποτέ με άλλον πελάτη ή με τα εσωτερικά του call center.",
-    cross_client_move: "Ένα έγγραφο δεν μετακινείται σε project άλλου πελάτη ή σε «όλη η εταιρεία». Δημιούργησε νέο έγγραφο εκεί και σβήσε το παλιό αν χρειάζεται."
+    cross_client_move: "Ένα έγγραφο δεν μετακινείται σε τμήμα άλλου πελάτη ή σε «όλη η εταιρεία». Δημιούργησε νέο έγγραφο εκεί και σβήσε το παλιό αν χρειάζεται."
   };
   function errText(r) {
     var e = r.data && r.data.error;
     var w = W();
     var dyn = {
-      has_pending_updates: "Το " + w.s + " ή ο κύκλος αναγνωστών του εγγράφου δεν αλλάζει όσο υπάρχουν updates που δεν έχουν ενσωματωθεί. Ενσωμάτωσέ τα ή απόρριψέ τα πρώτα.",
+      has_pending_updates: "Το " + w.s + " ή ο κύκλος αναγνωστών του εγγράφου δεν αλλάζει όσο υπάρχουν συμπληρώματα που δεν έχουν ενσωματωθεί. Ενσωμάτωσέ τα ή απόρριψέ τα πρώτα.",
       invalid_audience: "Η επιλογή " + w.gp + " για κοινή χρήση δεν είναι έγκυρη. Ξαναφόρτωσε τη σελίδα και δοκίμασε ξανά.",
       audience_too_large: "Ένα έγγραφο μπορεί να μοιραστεί με το πολύ 10 " + w.p + " συνολικά (μαζί με αυτό που το κατέχει).",
       audience_forbidden: "Μπορείς να μοιράσεις το έγγραφο μόνο με " + w.p + " στα οποία ανήκεις και εσύ.",
       hidden_cannot_have_audience: "Ένα εμπιστευτικό έγγραφο, ή έγγραφο κρυφού " + w.g + ", δεν μοιράζεται με άλλα " + w.p + "."
     };
-    return dyn[e] || ERRORS[e] || "Κάτι πήγε στραβά.";
+    return dyn[e] || ERRORS[e] || "Κάτι πήγε στραβά. Δοκίμασε ξανά ή ανανέωσε τη σελίδα.";
   }
 
   // Διαφορά κειμένου σε επίπεδο προτάσεων (LCS). Επιστρέφει [{type: same|del|add, text}].
@@ -148,9 +151,9 @@
   function renderShell(content) {
     clear(app);
     var total = inbox ? inbox.counts.contradictions + inbox.counts.updates + inbox.counts.questions + (inbox.counts.feedback || 0) : 0;
-    var links = [h("a", { href: "/portal.html", text: "← Πίσω στην αναζήτηση" })];
-    if (me.role === "admin") links.push(h("a", { href: "/team-admin.html", text: "Διαχείριση" }));
-    app.appendChild(h("div", { class: "topbar" }, [h("h1", { text: (me.workspaceName || "") + " · Editor" }), h("div", null, links)]));
+    var links = [h("a", { href: "/portal.html", class: "btn secondary", text: "← Αναζήτηση" })];
+    if (me.role === "admin") links.push(h("a", { href: "/team-admin.html", class: "btn secondary", text: "Διαχείριση" }));
+    app.appendChild(h("div", { class: "topbar" }, [h("h1", { text: (me.workspaceName || "") + " · Συντάκτης" }), h("div", { class: "topnav" }, links)]));
     app.appendChild(h("div", { class: "tabs", role: "tablist" }, [
       h("button", { class: "tab" + (view === "inbox" ? " active" : ""), type: "button", role: "tab", id: "tab-inbox",
         onclick: function () { view = "inbox"; refreshInbox(); }, text: "Εισερχόμενα" + (total ? " (" + total + ")" : "") }),
@@ -224,7 +227,7 @@
         apply.addEventListener("click", function () {
           apply.disabled = true;
           api("/team/updates/" + u.id + "/apply", "POST", { text: text.value }).then(function (a) {
-            if (a.status === 200) { flash = "Το update ενσωματώθηκε (έκδοση " + a.data.version + ")."; refreshInbox(); }
+            if (a.status === 200) { flash = "Το συμπλήρωμα ενσωματώθηκε στο άρθρο (έκδοση " + a.data.version + ")."; refreshInbox(); }
             else { apply.disabled = false; msg.className = "note err"; msg.textContent = errText(a); }
           });
         });
@@ -235,15 +238,15 @@
         area.appendChild(h("div", { class: "actions" }, [apply]));
       });
     });
-    var reject = h("button", { class: "btn danger", type: "button", text: "Απόρριψη update", onclick: function () {
-      if (!window.confirm("Να απορριφθεί αυτό το update;")) return;
+    var reject = h("button", { class: "btn danger", type: "button", text: "Απόρριψη συμπληρώματος", onclick: function () {
+      if (!window.confirm("Να απορριφθεί αυτό το συμπλήρωμα;")) return;
       api("/team/updates/" + u.id + "/reject", "POST").then(function (r) {
         if (r.status === 200) refreshInbox(); else { msg.className = "note err"; msg.textContent = errText(r); }
       });
     } });
     return h("div", { class: "card update" }, [
-      h("h3", { text: "Update στο «" + u.documentTitle + "»" }),
-      h("p", { class: "status", text: u.departmentName + " · οι υπάλληλοι το βλέπουν ήδη ως update" }),
+      h("h3", { text: "Συμπλήρωμα στο «" + u.documentTitle + "»" }),
+      h("p", { class: "status", text: u.departmentName + " · οι υπάλληλοι το βλέπουν ήδη ως συμπλήρωμα" }),
       h("div", { class: "q", style: "font-size:14px;line-height:1.6;white-space:pre-wrap;", text: u.text }),
       h("div", { class: "actions" }, [propose, reject]), msg, area,
     ]);
@@ -291,7 +294,7 @@
     if (flash) { root.appendChild(h("p", { class: "note ok", role: "status", text: flash })); flash = null; }
     root.appendChild(h("div", { class: "counts" }, [
       h("div", { class: "count danger" }, [h("div", { class: "l", text: "Αντιφάσεις" }), h("div", { class: "n", text: String(c.contradictions) })]),
-      h("div", { class: "count warn" }, [h("div", { class: "l", text: "Updates προς ενσωμάτωση" }), h("div", { class: "n", text: String(c.updates) })]),
+      h("div", { class: "count warn" }, [h("div", { class: "l", text: "Συμπληρώματα προς ενσωμάτωση" }), h("div", { class: "n", text: String(c.updates) })]),
       h("div", { class: "count" }, [h("div", { class: "l", text: "Αναπάντητες ερωτήσεις" }), h("div", { class: "n", text: String(c.questions) })]),
       h("div", { class: "count warn" }, [h("div", { class: "l", text: "Αναφορές υπαλλήλων" }), h("div", { class: "n", text: String(c.feedback || 0) })]),
     ]));
@@ -301,9 +304,9 @@
     if (!inbox || !inbox.contradictions.length) root.appendChild(h("div", { class: "empty", text: "Καμία ανοιχτή αντίφαση." }));
     else inbox.contradictions.forEach(function (x) { root.appendChild(contradictionCard(x)); });
 
-    root.appendChild(h("h2", { class: "sec", text: "Updates προς ενσωμάτωση" }));
+    root.appendChild(h("h2", { class: "sec", text: "Συμπληρώματα προς ενσωμάτωση" }));
     root.appendChild(h("p", { class: "hint", text: "Συμπληρώματα που δεν έχουν μπει ακόμα στο βασικό άρθρο. Το σύστημα προτείνει την αλλαγή και εσύ την εγκρίνεις." }));
-    if (!inbox || !inbox.updates.length) root.appendChild(h("div", { class: "empty", text: "Κανένα update σε αναμονή." }));
+    if (!inbox || !inbox.updates.length) root.appendChild(h("div", { class: "empty", text: "Κανένα συμπλήρωμα σε αναμονή. Όταν κάποιος προσθέσει μια πρόσφατη αλλαγή, θα τη δεις εδώ." }));
     else inbox.updates.forEach(function (u) { root.appendChild(updateCard(u)); });
 
     root.appendChild(h("h2", { class: "sec", text: "Αναπάντητες ερωτήσεις" }));
@@ -342,14 +345,15 @@
 
   function renderDocs() {
     var list = h("div", { class: "card" }, [h("h3", { text: "Έγγραφα" })]);
-    list.appendChild(h("button", { class: "item" + (currentId === null ? " active" : ""), type: "button", onclick: function () { prefillTitle = ""; currentId = null; renderDocs(); } }, [
+    list.appendChild(h("button", { class: "item new-doc" + (currentId === null ? " active" : ""), type: "button", onclick: function () { prefillTitle = ""; currentId = null; renderDocs(); } }, [
       h("span", { class: "t", text: "+ Νέο έγγραφο" }),
     ]));
+    if (!docs.length) list.appendChild(h("p", { class: "hint", id: "docs-empty", style: "margin-top:12px;", text: "Δεν υπάρχουν έγγραφα ακόμα. Πάτα «+ Νέο έγγραφο» για να γράψεις το πρώτο: ο βοηθός θα απαντά από αυτό." }));
     docs.forEach(function (d) {
       // UX-5: φαίνεται ποιος το κατέχει και αν μοιράζεται. Ο ιδιοκτήτης βλέπει "κοινό με N projects", ο αναγνώστης "κοινό με το project σου".
       var sharedOut = d.editable && d.audienceCount ? " · κοινό με " + d.audienceCount + (d.audienceCount === 1 ? " " + W().s : " " + W().p) : "";
       var sharedIn = !d.editable && isForeign(d.departmentId) ? " · κοινό με το " + W().s + " σου" : "";
-      var extra = (d.editable ? "" : " · μόνο ανάγνωση") + sharedIn + sharedOut + (d.hidden ? " · εμπιστευτικό" : "") + (d.pendingUpdates ? " · " + d.pendingUpdates.count + " update" : "");
+      var extra = (d.editable ? "" : " · μόνο ανάγνωση") + sharedIn + sharedOut + (d.hidden ? " · εμπιστευτικό" : "") + (d.pendingUpdates ? " · " + d.pendingUpdates.count + (d.pendingUpdates.count === 1 ? " συμπλήρωμα" : " συμπληρώματα") : "");
       list.appendChild(h("button", { class: "item" + (currentId === d.id ? " active" : ""), type: "button", onclick: function () { currentId = d.id; renderDocs(); } }, [
         h("span", { class: "t", text: d.title }), h("span", { class: "m", text: d.departmentName + extra }),
       ]));
@@ -364,7 +368,7 @@
 
   function pendingBlock(list) {
     if (!list || !list.length) return null;
-    var box = h("div", { class: "pending" }, [h("div", { class: "h", text: "Updates που δεν έχουν ενσωματωθεί ακόμα (οι υπάλληλοι τα βλέπουν)" })]);
+    var box = h("div", { class: "pending" }, [h("div", { class: "h", text: "Συμπληρώματα που δεν έχουν ενσωματωθεί ακόμα (οι υπάλληλοι τα βλέπουν)" })]);
     list.forEach(function (u) { box.appendChild(h("div", { style: "white-space:pre-wrap;margin-top:4px;", text: "• " + u.text })); });
     return box;
   }
@@ -408,7 +412,7 @@
       }
       if (doc && doc.hidden) {
         state.textContent = "εμπιστευτικό";
-        body.appendChild(h("p", { class: "hint", text: "Ένα εμπιστευτικό έγγραφο το διαβάζουν μόνο τα μέλη του " + W().g + " και οι admins. Δεν μοιράζεται με άλλα " + W().p + "." }));
+        body.appendChild(h("p", { class: "hint", text: "Ένα εμπιστευτικό έγγραφο το διαβάζουν μόνο τα μέλη του " + W().g + " και οι διαχειριστές. Δεν μοιράζεται με άλλα " + W().p + "." }));
         return;
       }
       var options = pickable();
@@ -434,7 +438,7 @@
         list.appendChild(h("label", { class: cb.disabled ? "off" : "" }, [cb, h("span", { text: d.name })]));
       });
       body.appendChild(list);
-      if (hiddenCount) body.appendChild(h("p", { class: "audience-foot", text: "+ " + hiddenCount + (hiddenCount === 1 ? " ακόμα " + W().s : " ακόμα " + W().p) + " (ορίστηκαν από τον admin, δεν εμφανίζονται και δεν αλλάζουν από εδώ)." }));
+      if (hiddenCount) body.appendChild(h("p", { class: "audience-foot", text: "+ " + hiddenCount + (hiddenCount === 1 ? " ακόμα " + W().s : " ακόμα " + W().p) + " (ορίστηκαν από τον διαχειριστή, δεν εμφανίζονται και δεν αλλάζουν από εδώ)." }));
       body.appendChild(h("p", { class: "audience-foot", id: "audience-count", text: "Το διαβάζουν: " + ownerName() + (others ? " + " + others + (others === 1 ? " " + W().s : " " + W().p) : "") + " · μέχρι " + MAX_AUDIENCE + " " + W().p + " συνολικά" + (total >= MAX_AUDIENCE ? " (έφτασες το όριο)" : "") + "." }));
     }
     redraw();
@@ -450,7 +454,7 @@
         ? "Όλη η εταιρεία · μόνο ανάγνωση"
         : isForeign(doc.departmentId)
           ? doc.departmentName + " · μόνο ανάγνωση. Έγγραφο άλλου " + W().g + ", κοινό με το δικό σου: δεν μπορείς να το αλλάξεις."
-          : doc.departmentName + " · μόνο ανάγνωση. Είσαι μέλος αυτού του " + W().g + " αλλά όχι editor του: δεν μπορείς να το αλλάξεις." }));
+          : doc.departmentName + " · μόνο ανάγνωση. Είσαι μέλος αυτού του " + W().g + " αλλά όχι συντάκτης του: δεν μπορείς να το αλλάξεις." }));
       if (doc.departmentId !== "_all" && doc.audience && (doc.audience.projects.length || doc.audience.hiddenCount)) {
         panel.appendChild(h("p", { class: "ro", text: "Το διαβάζουν και: " + doc.audience.projects.map(function (x) { return x.name; }).join(", ")
           + (doc.audience.hiddenCount ? (doc.audience.projects.length ? " και " : "") + doc.audience.hiddenCount + (doc.audience.hiddenCount === 1 ? " ακόμα " + W().s : " ακόμα " + W().p) : "") + "." }));
@@ -511,24 +515,24 @@
         } }),
       ])), note,
     ]);
-    if (writable.length === 0) { panel.appendChild(h("p", { class: "ro", text: "Δεν έχεις τμήμα στο οποίο να μπορείς να γράψεις. Ζήτησε από τον admin." })); return; }
+    if (writable.length === 0) { panel.appendChild(h("p", { class: "ro", text: "Δεν έχεις τμήμα στο οποίο να μπορείς να γράψεις. Ζήτησε από τον διαχειριστή." })); return; }
     var pb2 = doc ? pendingBlock(doc.pendingUpdates) : null; if (pb2) panel.appendChild(pb2);
     panel.appendChild(form);
 
     if (!isNew) {
       // Προσθήκη update: ένα συμπλήρωμα που φαίνεται αμέσως στους υπαλλήλους και ενσωματώνεται αργότερα με έγκριση.
-      var utext = h("textarea", { class: "small", id: "update-text", "aria-label": "Κείμενο update" });
+      var utext = h("textarea", { class: "small", id: "update-text", "aria-label": "Κείμενο συμπληρώματος" });
       var unote = h("p", { class: "note", role: "status", "aria-live": "polite" });
-      var ubtn = h("button", { class: "btn secondary", type: "submit", text: "Δημοσίευση update" });
+      var ubtn = h("button", { class: "btn secondary", type: "submit", text: "Δημοσίευση συμπληρώματος" });
       panel.appendChild(h("hr", { class: "sep" }));
-      panel.appendChild(h("h3", { text: "Προσθήκη update" }));
+      panel.appendChild(h("h3", { text: "Προσθήκη συμπληρώματος" }));
       panel.appendChild(h("p", { class: "hint", text: "Για μια πρόσφατη αλλαγή που δεν θες να ξαναγράψεις ακόμα όλο το άρθρο. Ο βοηθός και οι υπάλληλοι την βλέπουν αμέσως, και την ενσωματώνεις αργότερα από τα Εισερχόμενα." }));
       panel.appendChild(h("form", { id: "update-form", onsubmit: function (e) {
         e.preventDefault();
         ubtn.disabled = true; unote.className = "note"; unote.textContent = "Δημοσίευση…";
         api("/team/updates", "POST", { documentId: currentId, text: utext.value }).then(function (r) {
           ubtn.disabled = false;
-          if (r.status === 201) { flash = "Το update δημοσιεύτηκε και είναι ήδη αναζητήσιμο."; refreshDocs(); }
+          if (r.status === 201) { flash = "Το συμπλήρωμα δημοσιεύτηκε και είναι ήδη αναζητήσιμο."; refreshDocs(); }
           else { unote.className = "note err"; unote.textContent = errText(r); }
         });
       } }, [utext, h("div", { class: "actions" }, [ubtn]), unote]));

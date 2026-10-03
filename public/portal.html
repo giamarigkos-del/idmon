@@ -19,8 +19,7 @@
   .topbar{margin-bottom:22px;}
   .brand{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:var(--fs-md);font-weight:600;}
   .pill{background:var(--accent-soft);color:var(--accent);}
-  .userbox{display:flex;align-items:center;gap:12px;font-size:var(--fs-sm);color:var(--text-soft);}
-  .userbox a{color:var(--text-soft);text-decoration:underline;margin:0;}
+  .userbox{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:var(--fs-sm);color:var(--text-soft);}
   .avatar{width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent);
     display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-xs);font-weight:600;}
   /* Πράκτορας που δουλεύει για περισσότερους από έναν πελάτες: ο βοηθός ψάχνει σε ΕΝΑΝ πελάτη τη φορά, γι' αυτό η επιλογή είναι εμφανής. */
@@ -40,13 +39,10 @@
   .answer .handoff{margin:10px 0 0;padding-top:8px;border-top:1px solid var(--border);font-size:var(--fs-sm);color:var(--text-soft);}
   .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:22px;}
   .cols h2{font-size:var(--fs-md);margin:0 0 6px;font-weight:600;}
-  .row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;min-height:44px;
-    border-top:1px solid var(--border);font-size:var(--fs-md);width:100%;background:none;border-left:none;
-    border-right:none;border-bottom:none;color:var(--text);text-align:left;cursor:pointer;font-family:inherit;}
-  .row:hover .title{text-decoration:underline;}
-  .row .title{min-width:0;}
-  .row .meta{font-size:var(--fs-xs);color:var(--text-soft);white-space:nowrap;display:inline-flex;align-items:center;gap:6px;}
-  .empty{padding:9px 0;border-top:1px solid var(--border);}
+  /* κάθε γραμμή λίστας είναι κουμπί (class btn secondary listbtn στο team.css): ο χρήστης καταλαβαίνει ότι πατιέται */
+  .row .title{min-width:0;text-align:left;overflow-wrap:anywhere;}
+  .row .meta{font-size:var(--fs-xs);color:var(--text-soft);display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto;}
+  .empty{padding:10px 0;}
   .badge{font-size:var(--fs-xs);padding:2px 8px;border-radius:999px;white-space:nowrap;background:var(--warn-bg);color:var(--warn-border);}
   .badge.new{background:rgba(79,174,124,.16);color:var(--ok);}
   /* σύνδεση */
@@ -96,7 +92,7 @@
   // Αναφορά προς τον υπεύθυνο του τμήματος: "η απάντηση είναι λάθος / ξεπερασμένη". Δεν στέλνεται ταυτότητα, μόνο το
   // έγγραφο-πηγή, το είδος και η ερώτηση.
   function feedbackRow(documentId, question) {
-    var row = h("div", { class: "feedback", style: "display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:12.5px;color:var(--text-soft);" });
+    var row = h("div", { class: "feedback", style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;font-size:var(--fs-sm);color:var(--text-soft);" });
     function send(kind) {
       fetch("/team/feedback", {
         method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
@@ -107,8 +103,8 @@
       }).catch(function () { row.textContent = "Δεν στάλθηκε. Δοκίμασε ξανά."; });
     }
     row.appendChild(h("span", { text: "Ήταν σωστή η απάντηση;" }));
-    row.appendChild(h("button", { class: "linkbtn", type: "button", text: "Είναι λάθος", onclick: function () { send("wrong"); } }));
-    row.appendChild(h("button", { class: "linkbtn", type: "button", text: "Είναι ξεπερασμένη", onclick: function () { send("outdated"); } }));
+    row.appendChild(h("button", { class: "btn secondary", type: "button", text: "Είναι λάθος", onclick: function () { send("wrong"); } }));
+    row.appendChild(h("button", { class: "btn secondary", type: "button", text: "Είναι ξεπερασμένη", onclick: function () { send("outdated"); } }));
     return row;
   }
   function h(tag, props, children) {
@@ -146,7 +142,7 @@
     var s = (parts[0] || "?").charAt(0) + (parts[1] ? parts[1].charAt(0) : "");
     return s.toUpperCase();
   }
-  var ROLE_LABEL = { admin: "Admin", editor: "Editor", employee: "Υπάλληλος" };
+  var ROLE_LABEL = { admin: "Διαχειριστής", editor: "Συντάκτης", employee: "Υπάλληλος" };
 
   function daysAgo(iso) {
     var d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
@@ -237,8 +233,8 @@
     clear(app);
     var deptPills = (me.departments || []).map(function (d) { return h("span", { class: "pill", text: d.name }); });
     var rolePill = h("span", { class: "pill muted", text: ROLE_LABEL[me.role] || me.role });
-    var manage = me.role === "employee" ? null : h("a", { href: "/team-editor.html", id: "staff-link", text: "Εισερχόμενα και έγγραφα" });
-    var adminLink = me.role === "admin" ? h("a", { href: "/team-admin.html", id: "admin-link", text: "Διαχείριση" }) : null;
+    var manage = me.role === "employee" ? null : h("a", { href: "/team-editor.html", id: "staff-link", class: "btn secondary", text: "Εισερχόμενα και έγγραφα" });
+    var adminLink = me.role === "admin" ? h("a", { href: "/team-admin.html", id: "admin-link", class: "btn secondary", text: "Διαχείριση" }) : null;
     if (manage) {
       api("/team/inbox").then(function (r) {
         if (r.status !== 200) return;
@@ -246,13 +242,13 @@
         if (total > 0) manage.textContent = "Εισερχόμενα και έγγραφα (" + total + ")";
       });
     }
-    var logout = h("button", { class: "linkbtn", type: "button", text: "Αποσύνδεση", onclick: function () {
+    var logout = h("button", { class: "btn secondary", id: "logout", type: "button", text: "Έξοδος", onclick: function () {
       api("/team/logout", "POST").then(function () { chatHistory = []; renderLogin(); });
     } });
 
     app.appendChild(h("div", { class: "topbar" }, [
       h("div", { class: "brand" }, [h("span", { text: me.workspaceName || "Idmon" })].concat(deptPills, [rolePill])),
-      h("div", { class: "userbox" }, [manage, adminLink, h("span", { class: "avatar", "aria-hidden": "true", text: initials(me.email) }), logout]),
+      h("div", { class: "userbox topnav" }, [manage, adminLink, h("span", { class: "avatar", "aria-hidden": "true", text: initials(me.email) }), logout]),
     ]));
 
     var input = h("input", { type: "text", id: "q", placeholder: "Ρώτα για μια διαδικασία…", "aria-label": "Ερώτηση", autocomplete: "off", maxlength: "1000" });
@@ -318,20 +314,27 @@
       function lastChange(d) { return d.pendingUpdates ? d.pendingUpdates.latestAt : d.updatedAt; }
       var freshDocs = docs.filter(function (d) { return d.pendingUpdates || (d.updatedAt && daysAgo(d.updatedAt) <= 14); })
         .sort(function (a, b) { return String(lastChange(b)).localeCompare(String(lastChange(a))); }).slice(0, 6);
-      if (!freshDocs.length) recentCol.appendChild(h("div", { class: "empty", text: "Καμία αλλαγή τις τελευταίες 14 ημέρες." }));
+      if (!freshDocs.length) recentCol.appendChild(h("div", { class: "empty", text: "Καμία αλλαγή τις τελευταίες 14 ημέρες. Εδώ θα βλέπεις ποια έγγραφα άλλαξαν πρόσφατα." }));
       freshDocs.forEach(function (d) {
-        var label = d.pendingUpdates ? "update " + agoText(d.pendingUpdates.latestAt) : "ενημερώθηκε " + agoText(d.updatedAt);
-        recentCol.appendChild(h("button", { class: "row", type: "button", onclick: function () { openDocument(d.id); } }, [
+        var label = d.pendingUpdates ? "συμπλήρωμα " + agoText(d.pendingUpdates.latestAt) : "ενημερώθηκε " + agoText(d.updatedAt);
+        recentCol.appendChild(h("button", { class: "row btn secondary listbtn", type: "button", onclick: function () { openDocument(d.id); } }, [
           h("span", { class: "title", text: d.title }),
           h("span", { class: "badge", text: label }),
         ]));
       });
-      if (!docs.length) docsCol.appendChild(h("div", { class: "empty", text: "Δεν υπάρχουν έγγραφα ακόμα." }));
+      if (!docs.length) {
+        // Άδεια οθόνη = οδηγός: τι είναι, γιατί είναι άδεια, τι να κάνεις (ο συντάκτης και ο διαχειριστής έχουν κουμπί, ο υπάλληλος εξήγηση).
+        var emptyBox = h("div", { class: "empty emptybox", id: "docs-empty" }, [h("p", { text: me.role === "employee"
+          ? "Δεν υπάρχουν έγγραφα ακόμα. Όταν ο υπεύθυνος του τμήματός σου ανεβάσει έγγραφα, θα εμφανιστούν εδώ και ο βοηθός θα μπορεί να απαντά από αυτά."
+          : "Δεν υπάρχουν έγγραφα ακόμα. Ο βοηθός απαντά μόνο από τα έγγραφα που γράφεις, γι' αυτό ξεκίνα από ένα." })]);
+        if (me.role !== "employee") emptyBox.appendChild(h("a", { href: "/team-editor.html", class: "btn", id: "first-doc", text: "Γράψε το πρώτο έγγραφο" }));
+        docsCol.appendChild(emptyBox);
+      }
       // "Κοινό": έγγραφο άλλου project που μοιράζεται με τα δικά σου (ο admin τα βλέπει όλα, άρα δεν χρειάζεται ετικέτα).
       var own = {}; (me.departments || []).forEach(function (x) { own[x.id] = true; });
       docs.forEach(function (d) {
         var shared = me.role !== "admin" && d.departmentId !== "_all" && !own[d.departmentId];
-        docsCol.appendChild(h("button", { class: "row", type: "button", onclick: function () { openDocument(d.id); } }, [
+        docsCol.appendChild(h("button", { class: "row btn secondary listbtn", type: "button", onclick: function () { openDocument(d.id); } }, [
           h("span", { class: "title", text: d.title }),
           h("span", { class: "meta" }, [h("span", { text: d.departmentName }), shared ? h("span", { class: "pill shared", text: "κοινό" }) : null]),
         ]));
@@ -402,7 +405,7 @@
             var s = ev.primarySource;
             box.appendChild(h("div", { class: "source" }, [
               h("span", { text: "Πηγή: " + (s.title || "έγγραφο") + " · " + s.departmentName + (s.isUpdate ? " (πρόσφατη ενημέρωση)" : "") }),
-              h("button", { class: "linkbtn", type: "button", text: "Άνοιγμα άρθρου", onclick: function () { openDocument(s.documentId); } }),
+              h("button", { class: "btn secondary", type: "button", text: "Άνοιγμα άρθρου", onclick: function () { openDocument(s.documentId); } }),
             ]));
             box.appendChild(feedbackRow(s.documentId, question));
           }

@@ -39,8 +39,8 @@
   .listhead{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:var(--fs-sm);color:var(--text-soft);padding:6px 0;}
   .who{display:flex;align-items:center;gap:10px;min-width:0;}
   .av{width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-xs);font-weight:600;flex:none;}
-  .linkrow{background:none;border:none;color:var(--text);font-weight:600;font-size:var(--fs-md);cursor:pointer;padding:2px 0;font-family:inherit;text-align:left;}
-  .linkrow:hover{text-decoration:underline;}
+  .open-member{justify-content:flex-start;text-align:left;overflow-wrap:anywhere;}
+  .open-member + .chip,.open-member + .pill{margin-left:8px;}
   .chips{display:inline-flex;gap:4px;flex-wrap:wrap;margin-top:3px;}
   .row.open{background:var(--surface-2);border-radius:var(--r);}
   .detail{margin-top:12px;background:var(--surface-2);}
@@ -48,13 +48,11 @@
   .detail-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;}
   .prow{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--border);font-size:var(--fs-md);}
   .seg{display:inline-flex;border:1px solid var(--field-border);border-radius:var(--r);overflow:hidden;}
-  .seg button{border:none;background:var(--bg);color:var(--text-soft);padding:5px 12px;min-height:30px;font-size:var(--fs-sm);cursor:pointer;font-family:inherit;}
+  .seg button{border:none;background:var(--bg);color:var(--text-soft);padding:6px 14px;min-height:var(--h-btn);font-size:var(--fs-md);cursor:pointer;font-family:inherit;}
   .seg button:hover{color:var(--text);}
   .seg button.on{background:var(--accent-soft);color:var(--accent);font-weight:600;}
   .pager{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;font-size:var(--fs-sm);color:var(--text-soft);}
   .pager .grow{flex:1;}
-  .backlink{background:none;border:none;color:var(--text-soft);cursor:pointer;font-size:var(--fs-sm);padding:4px 0;font-family:inherit;margin-bottom:8px;}
-  .backlink:hover{text-decoration:underline;color:var(--text);}
   .pastebox{margin-top:14px;padding-top:12px;border-top:1px solid var(--border);}
   .group{margin-top:6px;}
   .group-body{margin:0 0 6px 10px;padding-left:14px;border-left:2px solid var(--border);}
@@ -62,7 +60,7 @@
   .client-row{border-top:1px solid var(--border);margin-top:10px;}
   .client-row .name{font-size:var(--fs-lg);}
   .client-row .pill{margin-left:8px;}
-  select.move-client{max-width:230px;}
+  select.move-client{max-width:300px;}
   .reading{margin-top:12px;}
   .reading details.audience{margin:0;background:var(--bg);}
   .reading-row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border);font-size:var(--fs-sm);}
@@ -80,11 +78,11 @@
   var app = document.getElementById("app");
   var me = null;
   var data = null; // overview
-  // Η λέξη για το τμήμα: στο προφίλ «Εταιρεία» λέγεται «τμήμα», στο call center μένει «project».
+  // Η λέξη για το τμήμα: στο προφίλ «Εταιρεία» λέγεται «τμήμα», και στο call center λέγεται «τμήμα» (ΜΙΑ λέξη παντού: ο αρχάριος δεν πρέπει να αναρωτιέται αν «έργο» και «τμήμα» είναι το ίδιο).
   // Μορφές: s = ενικός, g = γενική ενικού, p = πληθυντικός, gp = γενική πληθυντικού, S/P = με κεφαλαίο.
   var WORDS = {
     company: { s: "τμήμα", g: "τμήματος", p: "τμήματα", gp: "τμημάτων", S: "Τμήμα", P: "Τμήματα" },
-    multi_client: { s: "project", g: "project", p: "projects", gp: "projects", S: "Project", P: "Projects" }
+    multi_client: { s: "τμήμα", g: "τμήματος", p: "τμήματα", gp: "τμημάτων", S: "Τμήμα", P: "Τμήματα" }
   };
   function W() { return data && data.profile === "multi_client" ? WORDS.multi_client : WORDS.company; }
   var audit = null;
@@ -192,10 +190,10 @@
     no.focus(); // ασφαλής προεπιλογή: το "Όχι"
   }
   var ERRORS = {
-    invalid_name: "Το όνομα είναι κενό ή πολύ μεγάλο.", invalid_email: "Το email δεν είναι σωστό.",
-    invalid_role: "Μη έγκυρος ρόλος.", email_in_use: "Αυτό το email χρησιμοποιείται ήδη.",
-    last_admin: "Ο χώρος δεν μπορεί να μείνει χωρίς ενεργό admin. Όρισε πρώτα άλλον admin.", forbidden: "Δεν έχεις δικαίωμα.", not_found: "Δεν βρέθηκε.",
-    network: "Δεν υπάρχει σύνδεση με τον server. Η αλλαγή δεν έγινε, δοκίμασε ξανά.",
+    invalid_name: "Το όνομα είναι κενό ή πολύ μεγάλο.", invalid_email: "Το email δεν είναι σωστό. Έλεγξε ότι είναι γραμμένο σωστά.",
+    invalid_role: "Μη έγκυρος ρόλος.", email_in_use: "Αυτό το email χρησιμοποιείται ήδη (ένα email ανήκει σε έναν μόνο οργανισμό).",
+    last_admin: "Ο χώρος δεν μπορεί να μείνει χωρίς ενεργό διαχειριστή. Όρισε πρώτα άλλον διαχειριστή.", forbidden: "Δεν έχεις δικαίωμα για αυτή την ενέργεια.", not_found: "Δεν βρέθηκε. Ανανέωσε τη σελίδα και δοκίμασε ξανά.",
+    network: "Δεν υπάρχει σύνδεση με το διαδίκτυο ή με την υπηρεσία. Η αλλαγή δεν έγινε. Δοκίμασε ξανά.",
     invalid_changes: "Η αλλαγή δεν είναι έγκυρη.",
     invalid_members: "Η επιλογή μελών δεν είναι έγκυρη.", invalid_emails: "Ένα από τα emails δεν είναι σωστό.",
     no_targets: "Δεν επιλέχθηκε κανένα μέλος.", too_many: "Πάρα πολλά μέλη σε ένα αίτημα. Το πολύ 100.",
@@ -225,12 +223,12 @@
       invalid_departments: "Μη έγκυρα " + w.p + ".",
       invalid_projects: "Ένα από τα " + w.p + " δεν είναι έγκυρο."
     };
-    return dyn[e] || ERRORS[e] || "Κάτι πήγε στραβά.";
+    return dyn[e] || ERRORS[e] || "Κάτι πήγε στραβά. Δοκίμασε ξανά ή ανανέωσε τη σελίδα.";
   }
-  var ROLE_LABEL = { admin: "Admin", member: "Μέλος", editor: "Editor", employee: "Υπάλληλος" };
+  var ROLE_LABEL = { admin: "Διαχειριστής", member: "Μέλος", editor: "Συντάκτης", employee: "Υπάλληλος" };
   var ACTION_LABEL = {
     login: "σύνδεση", document_hidden: "σήμανση εμπιστευτικού", document_unhidden: "άρση εμπιστευτικού", feedback_closed: "κλείσιμο αναφορών υπαλλήλων", rechecks_run: "εκτέλεση επανελέγχων", document_created: "νέο έγγραφο", document_updated: "αλλαγή εγγράφου", document_deleted: "διαγραφή εγγράφου",
-    update_created: "νέο update", update_applied: "ενσωμάτωση update", update_rejected: "απόρριψη update", update_proposal_generated: "πρόταση ενσωμάτωσης",
+    update_created: "νέο συμπλήρωμα", update_applied: "ενσωμάτωση συμπληρώματος", update_rejected: "απόρριψη συμπληρώματος", update_proposal_generated: "πρόταση ενσωμάτωσης",
     contradiction_dismissed: "«δεν είναι αντίφαση»", contradiction_reminder: "υπενθύμιση αντίφασης", contradiction_check: "έλεγχος αντιφάσεων",
     contradiction_check_failed: "αποτυχία ελέγχου αντιφάσεων",     member_added: "νέο μέλος", member_role_changed: "αλλαγή ρόλου",     member_disabled: "απενεργοποίηση μέλους", member_enabled: "ενεργοποίηση μέλους", question_dismissed: "παράβλεψη ερώτησης",
     members_bulk_status: "μαζική αλλαγή κατάστασης",
@@ -259,7 +257,7 @@
     clear(app);
     app.appendChild(h("div", { class: "topbar" }, [
       h("h1", { text: (me.workspaceName || "") + " · Διαχείριση" }),
-      h("div", null, [h("a", { href: "/team-editor.html", text: "Εισερχόμενα και έγγραφα" }), h("a", { href: "/portal.html", text: "← Αναζήτηση" })]),
+      h("div", { class: "topnav" }, [h("a", { href: "/team-editor.html", class: "btn secondary", text: "Εισερχόμενα και έγγραφα" }), h("a", { href: "/portal.html", class: "btn secondary", text: "← Αναζήτηση" })]),
     ]));
     var tabs = [["departments", W().P], ["documents", "Έγγραφα"], ["members", "Άνθρωποι"], ["audit", "Ιστορικό ενεργειών"]];
     app.appendChild(h("div", { class: "tabs", role: "tablist" }, tabs.map(function (t) {
@@ -303,20 +301,20 @@
     var controls = [name, rename, toggle, h("button", { class: "btn secondary open-project", type: "button", text: "Μέλη", onclick: function () { beginAction(); proj.openId = d.id; proj.q = ""; proj.page = 0; proj.result = ""; proj.showDisabled = false; render(); } })];
     if (data.profile === "multi_client") {
       // Μεταφορά σε άλλον πελάτη (ή στα εσωτερικά): σοβαρή ενέργεια, ζητά επιβεβαίωση. Ο server την αρνείται αν θα έμενε κοινό έγγραφο πάνω από τον τοίχο.
-      var move = h("select", { class: "move-client", "aria-label": "Πελάτης του project " + d.name }, [option("", "Εσωτερικό (χωρίς πελάτη)")].concat(data.clients.map(function (c) { return option(c.id, c.name); })));
+      var move = h("select", { class: "move-client", "aria-label": "Πελάτης του " + W().g + " " + d.name }, [option("", "Εσωτερικό (χωρίς πελάτη)")].concat(data.clients.map(function (c) { return option(c.id, c.name); })));
       move.value = d.clientId || "";
       move.addEventListener("change", function () {
         var target = move.value;
         var targetClient = data.clients.filter(function (c) { return c.id === target; })[0];
         function revert() { move.value = d.clientId || ""; }
         var question = target
-          ? "Το project θα μεταφερθεί στον πελάτη «" + targetClient.name + "» και το όνομά του θα γίνει «" + targetClient.name + " · " + shown + "». Τα μέλη και τα έγγραφά του μένουν. Σίγουρα;"
-          : "Το project θα γίνει εσωτερικό του call center (χωρίς πελάτη). Σίγουρα;";
+          ? "Το " + W().s + " θα μεταφερθεί στον πελάτη «" + targetClient.name + "» και το όνομά του θα γίνει «" + targetClient.name + " · " + shown + "». Τα μέλη και τα έγγραφά του μένουν. Σίγουρα;"
+          : "Το " + W().s + " θα γίνει εσωτερικό του call center (χωρίς πελάτη). Σίγουρα;";
         confirmFirst(deptRow, deptControls, question, function () {
           beginAction();
           api("/team/admin/departments/" + encodeURIComponent(d.id) + "/client", "PUT", { clientId: target || null }).then(function (r) {
             if (r.status === 200) { ok(shown + ": " + (target ? "μεταφέρθηκε στον πελάτη " + targetClient.name : "έγινε εσωτερικό")); changed("dept-" + d.id); load(); }
-            else { fail(errText(r)); revert(); }
+            else { fail(errText(r)); revert(); load(); }
           });
         }, revert);
       });
@@ -418,17 +416,56 @@
     });
   }
 
+  // «Ξεκίνα εδώ»: 3 απλά βήματα για τον πρώτο διαχειριστή. Φαίνεται όσο μένει κάποιο ανολοκλήρωτο και βγαίνει μόνο του όταν τελειώσουν.
+  function focusEl(el) { if (!el) return; if (el.scrollIntoView) el.scrollIntoView({ block: "center" }); el.focus(); }
+  function startCard() {
+    var multi = data.profile === "multi_client";
+    var members = data.departments.reduce(function (a, d) { return a + (d.memberCount || 0); }, 0);
+    var docCount = (data.companyWideDocumentCount || 0) + data.departments.reduce(function (a, d) { return a + (d.documentCount || 0); }, 0);
+    var step1 = multi ? data.clients.length > 0 && data.departments.some(function (d) { return !!d.clientId; }) : data.departments.length > 0;
+    var steps = [
+      { done: step1, id: "step-structure",
+        title: multi ? "Φτιάξε τον πρώτο πελάτη και ένα τμήμα του" : "Φτιάξε το πρώτο τμήμα",
+        hint: multi ? "Πελάτης είναι η εταιρεία για την οποία δουλεύετε, π.χ. «Telecom A». Μέσα σε κάθε πελάτη φτιάχνεις τμήματα." : "Τμήμα είναι μια ομάδα ανθρώπων με δικά της έγγραφα, π.χ. «Εξυπηρέτηση πελατών».",
+        label: multi ? "Πρόσθεσε πελάτη" : "Φτιάξε τμήμα",
+        act: function () { focusEl(multi ? (data.clients.length ? document.querySelector(".add-in-client input") : document.getElementById("new-client")) : document.getElementById("new-dept")); } },
+      { done: members > 0, id: "step-people", title: "Πρόσθεσε τους ανθρώπους σου",
+        hint: "Γράψε ή επικόλλησε τα emails τους. Δεν χρειάζονται κωδικούς: παίρνουν έναν σύνδεσμο στο email.",
+        label: "Πρόσθεσε ανθρώπους", act: function () { tab = "members"; render(); } },
+      { done: docCount > 0, id: "step-doc", title: "Γράψε το πρώτο έγγραφο",
+        hint: "Ο βοηθός απαντά μόνο από τα έγγραφά σου. Ένα έγγραφο αρκεί για να ξεκινήσεις.", label: "Γράψε έγγραφο", href: "/team-editor.html" },
+    ];
+    if (steps.every(function (s) { return s.done; })) return null;
+    var firstOpen = steps.filter(function (s) { return !s.done; })[0];
+    var card = h("div", { class: "card start", id: "start-card" }, [
+      h("h2", { text: "Ξεκίνα εδώ" }),
+      h("p", { class: "hint", text: "Τρία μικρά βήματα και η ομάδα σου είναι έτοιμη." }),
+    ]);
+    steps.forEach(function (s, i) {
+      
+      var action = s.done ? null : (s.href ? h("a", { class: "btn" + (s === firstOpen ? "" : " secondary"), href: s.href, id: s.id + "-btn", text: s.label }) : h("button", { class: "btn" + (s === firstOpen ? "" : " secondary"), type: "button", id: s.id + "-btn", text: s.label, onclick: s.act }));
+      card.appendChild(h("div", { class: "step" + (s.done ? " done" : ""), id: s.id }, [
+        h("span", { class: "n", "aria-hidden": "true", text: s.done ? "✓" : String(i + 1) }),
+        h("div", { class: "txt" }, [h("strong", { text: s.title }), h("span", { text: s.hint })]),
+        action,
+      ]));
+    });
+    return card;
+  }
+
   function departmentsView() {
     var open = proj.openId ? deptById(proj.openId) : null;
     if (open) return projectView(open);
     proj.openId = null;
     var multi = data.profile === "multi_client";
     var wrap = h("div", null);
+    var startBox = startCard();
+    if (startBox) wrap.appendChild(startBox);
     var box = h("div", { class: "card" }, [
-      h("h2", { text: multi ? "Πελάτες και projects" : "Τμήματα" }),
+      h("h2", { text: multi ? "Πελάτες και τμήματα" : "Τμήματα" }),
       h("p", { class: "hint", text: multi
-        ? "Κάθε πελάτης είναι τοίχος: τα έγγραφά του δεν μοιράζονται ποτέ με άλλον πελάτη. Μέσα σε έναν πελάτη τα τμήματα μοιράζονται ελεύθερα έγγραφα. Ένα κρυφό project το βλέπουν μόνο τα μέλη του και οι admins. Με το «Μέλη» ανοίγεις τη σελίδα του project."
-        : "Ένα κρυφό τμήμα το βλέπουν μόνο τα μέλη του και οι admins: τα έγγραφά του δεν μοιράζονται με άλλα τμήματα και μια αντίφαση μαζί του εμφανίζεται χωρίς περιεχόμενο. Με το «Μέλη» ανοίγεις τη σελίδα του τμήματος." }),
+        ? "Κάθε πελάτης είναι τοίχος: τα έγγραφά του δεν μοιράζονται ποτέ με άλλον πελάτη. Μέσα σε έναν πελάτη τα τμήματα μοιράζονται ελεύθερα έγγραφα. Ένα κρυφό τμήμα το βλέπουν μόνο τα μέλη του και οι διαχειριστές. Με το «Μέλη» ανοίγεις τη σελίδα του τμήματος."
+        : "Ένα κρυφό τμήμα το βλέπουν μόνο τα μέλη του και οι διαχειριστές: τα έγγραφά του δεν μοιράζονται με άλλα τμήματα και μια αντίφαση μαζί του εμφανίζεται χωρίς περιεχόμενο. Με το «Μέλη» ανοίγεις τη σελίδα του τμήματος." }),
     ]);
     var msg = h("p", { class: "note", role: "status", "aria-live": "polite" });
     box.appendChild(h("div", { class: "row" }, [
@@ -482,7 +519,7 @@
     var parts = name.split(/\s+/);
     return ((parts[0] || "?").charAt(0) + (parts[1] ? parts[1].charAt(0) : "")).toUpperCase();
   }
-  function roleWord(role) { return role === "editor" ? "Editor" : role === "member" ? "Μέλος" : "αφαιρέθηκε"; }
+  function roleWord(role) { return role === "editor" ? "Συντάκτης" : role === "member" ? "Μέλος" : "αφαιρέθηκε"; }
   function option(value, text) { return h("option", { value: value, text: text }); }
   function projectOptions(placeholder) { return [option("", placeholder)].concat(data.departments.map(function (d) { return option(d.id, d.name); })); }
   function selectedIds() { return Object.keys(people.selected).map(Number).filter(function (id) { return !!memberById(id); }); }
@@ -490,7 +527,7 @@
   // Δύο κουμπιά «Μέλος | Editor» (αντί για dropdown): φαίνεται η τρέχουσα τιμή και αλλάζει με ένα κλικ.
   function segControl(current, label, onPick) {
     var wrap = h("span", { class: "seg", role: "group", "aria-label": label });
-    [["member", "Μέλος"], ["editor", "Editor"]].forEach(function (p) {
+    [["member", "Μέλος"], ["editor", "Συντάκτης"]].forEach(function (p) {
       wrap.appendChild(h("button", { class: "seg-" + p[0] + (current === p[0] ? " on" : ""), type: "button", "aria-pressed": current === p[0] ? "true" : "false", text: p[1],
         onclick: function () { if (current !== p[0]) onPick(p[0]); } }));
     });
@@ -557,12 +594,12 @@
       if (cb.checked) people.selected[m.id] = true; else delete people.selected[m.id];
       drawPeople();
     });
-    var open = h("button", { class: "linkrow open-member", type: "button", text: m.email, onclick: function () { people.openId = m.id; people.focusDetail = true; drawPeople(); } });
+    var open = h("button", { class: "btn secondary open-member", type: "button", text: m.email, onclick: function () { people.openId = m.id; people.focusDetail = true; drawPeople(); } });
     return h("div", { class: "row member-row" + (people.openId === m.id ? " open" : ""), "data-key": "member-" + m.id }, [
       h("div", { class: "who" }, [
         cb, h("span", { class: "av", "aria-hidden": "true", text: initials(m.email) }),
         h("div", null, [
-          h("div", null, [open, m.role === "admin" ? h("span", { class: "chip ed", text: "Admin" }) : null, m.status === "disabled" ? h("span", { class: "pill off", text: "απενεργοποιημένο" }) : null]),
+          h("div", null, [open, m.role === "admin" ? h("span", { class: "chip ed", text: "Διαχειριστής" }) : null, m.status === "disabled" ? h("span", { class: "pill off", text: "απενεργοποιημένο" }) : null]),
           projectChips(m),
         ]),
       ]),
@@ -573,7 +610,7 @@
   function bulkSummary(d, project, word) {
     var parts = [plural(d.updated, "μέλος", "μέλη") + (project ? ": " + project.name + " → " + word : "")];
     if (d.created) parts.push(plural(d.created, "νέο μέλος δημιουργήθηκε", "νέα μέλη δημιουργήθηκαν"));
-    if (d.skippedAdmins) parts.push(plural(d.skippedAdmins, "admin παραλείφθηκε", "admins παραλείφθηκαν"));
+    if (d.skippedAdmins) parts.push(plural(d.skippedAdmins, "διαχειριστής παραλείφθηκε", "διαχειριστές παραλείφθηκαν"));
     if (d.notAdded && d.notAdded.length) parts.push(plural(d.notAdded.length, "δεν προστέθηκε", "δεν προστέθηκαν"));
     return parts.join(" · ");
   }
@@ -603,7 +640,7 @@
     var mode = people.bulk;
     var panel = h("div", { class: "bulkpanel", id: "bulk-panel" });
     var project = mode === "disable" ? null : h("select", { id: "bulk-project", "aria-label": W().S }, projectOptions("Διάλεξε " + W().s));
-    var role = mode === "add" ? h("select", { id: "bulk-role", "aria-label": "Ρόλος στο " + W().s }, [option("member", "Μέλος"), option("editor", "Editor")]) : null;
+    var role = mode === "add" ? h("select", { id: "bulk-role", "aria-label": "Ρόλος στο " + W().s }, [option("member", "Μέλος"), option("editor", "Συντάκτης")]) : null;
     var apply = h("button", { class: "btn", id: "bulk-apply", type: "button", text: mode === "add" ? "Εφαρμογή" : mode === "remove" ? "Αφαίρεση" : "Απενεργοποίηση" });
     var cancel = h("button", { class: "btn secondary", id: "bulk-cancel", type: "button", text: "Άκυρο", onclick: function () { people.bulk = null; drawBulk(); } });
     apply.addEventListener("click", function () {
@@ -615,7 +652,7 @@
         confirmFirst(panel, panel, "Θα αφαιρεθούν " + plural(ids.length, "μέλος", "μέλη") + " από το " + d.name + ". Σίγουρα;", function () { runBulkMemberships(panel, ids, project.value, null); });
         return;
       }
-      confirmFirst(panel, panel, "Θα κλείσουν οι συνδέσεις τους (οι admins δεν επηρεάζονται). Σίγουρα;", function () { runBulkStatus(panel, ids, "disabled"); });
+      confirmFirst(panel, panel, "Θα κλείσουν οι συνδέσεις τους (οι διαχειριστές δεν επηρεάζονται). Σίγουρα;", function () { runBulkStatus(panel, ids, "disabled"); });
     });
     [project, role, apply, cancel].forEach(function (c) { if (c) panel.appendChild(c); });
     return panel;
@@ -661,7 +698,7 @@
     orgRole.addEventListener("change", function () {
       if (orgRole.value === "admin" && prevOrg !== "admin") {
         confirmFirst(card, controls, "Θα έχει πρόσβαση παντού. Σίγουρα;",
-          function () { patch({ role: "admin" }, m.email + ": ρόλος Admin"); },
+          function () { patch({ role: "admin" }, m.email + ": ρόλος Διαχειριστής"); },
           function () { orgRole.value = prevOrg; });
         return;
       }
@@ -680,12 +717,12 @@
     card.appendChild(h("div", { class: "detail-head" }, [
       h("div", { class: "who" }, [h("span", { class: "av", "aria-hidden": "true", text: initials(m.email) }), h("div", null, [
         h("div", { class: "name", text: m.email }),
-        h("div", { class: "meta", text: "Ρόλος οργανισμού: " + (m.role === "admin" ? "Admin" : "Μέλος") + (m.status === "disabled" ? " · απενεργοποιημένο" : "") }),
+        h("div", { class: "meta", text: "Ρόλος οργανισμού: " + (m.role === "admin" ? "Διαχειριστής" : "Μέλος") + (m.status === "disabled" ? " · απενεργοποιημένο" : "") }),
       ])]),
       controls,
     ]));
     if (m.role === "admin") {
-      card.appendChild(h("p", { class: "hint", text: "Ο admin έχει πρόσβαση σε όλα τα " + W().p + "." }));
+      card.appendChild(h("p", { class: "hint", text: "Ο διαχειριστής έχει πρόσβαση σε όλα τα " + W().p + "." }));
       return card;
     }
     var mine = data.departments.filter(function (d) { return m.projectRoles && m.projectRoles[d.id]; });
@@ -776,12 +813,12 @@
   function membersView() {
     var box = h("div", { class: "card" }, [
       h("h2", { text: "Άνθρωποι" }),
-      h("p", { class: "hint", text: "Κάθε άτομο έχει ρόλο ανά " + W().s + ": Μέλος (ρωτά και διαβάζει) ή Editor (γράφει στο συγκεκριμένο " + W().s + "). Ο ρόλος οργανισμού Admin δίνει πρόσβαση παντού. Άνοιξε ένα άτομο για να αλλάξεις τα " + W().p + " του, ή επίλεξε πολλούς για μαζική αλλαγή." }),
+      h("p", { class: "hint", text: "Κάθε άτομο έχει ρόλο ανά " + W().s + ": Μέλος (ρωτά και διαβάζει) ή Συντάκτης (γράφει στο συγκεκριμένο " + W().s + "). Ο ρόλος οργανισμού Διαχειριστής δίνει πρόσβαση παντού. Άνοιξε ένα άτομο για να αλλάξεις τα " + W().p + " του, ή επίλεξε πολλούς για μαζική αλλαγή." }),
     ]);
     var q = h("input", { type: "text", id: "people-q", placeholder: "Αναζήτηση email", "aria-label": "Αναζήτηση email", value: people.q });
     var pj = h("select", { id: "people-project", "aria-label": "Φίλτρο " + W().g }, projectOptions("Όλα τα " + W().p));
     pj.value = people.project;
-    var rf = h("select", { id: "people-role", "aria-label": "Φίλτρο ρόλου" }, [option("", "Όλοι οι ρόλοι"), option("editor", "Editor"), option("admin", "Admin"), option("disabled", "Απενεργοποιημένοι")]);
+    var rf = h("select", { id: "people-role", "aria-label": "Φίλτρο ρόλου" }, [option("", "Όλοι οι ρόλοι"), option("editor", "Συντάκτης"), option("admin", "Διαχειριστής"), option("disabled", "Απενεργοποιημένοι")]);
     rf.value = people.roleFilter;
     function refilter() { people.q = q.value; people.project = pj.value; people.roleFilter = rf.value; people.page = 0; drawPeople(); }
     q.addEventListener("input", refilter);
@@ -809,7 +846,7 @@
     var email = h("input", { type: "email", class: "grow", id: "new-email", placeholder: "email νέου ατόμου", "aria-label": "Email νέου ατόμου" });
     var role = h("select", { id: "new-role", "aria-label": "Ρόλος οργανισμού νέου ατόμου" }, ["member", "admin"].map(function (r) { return option(r, ROLE_LABEL[r]); }));
     var newProject = h("select", { id: "new-project", "aria-label": W().S + " νέου ατόμου" }, projectOptions("Κανένα " + W().s + " ακόμα"));
-    var newRole = h("select", { id: "new-project-role", "aria-label": "Ρόλος στο " + W().s }, [option("member", "Μέλος"), option("editor", "Editor")]);
+    var newRole = h("select", { id: "new-project-role", "aria-label": "Ρόλος στο " + W().s }, [option("member", "Μέλος"), option("editor", "Συντάκτης")]);
     var invite = h("input", { type: "checkbox", id: "new-invite", checked: true, "aria-label": "Στείλε πρόσκληση με email" });
     box.appendChild(h("form", { class: "add", id: "add-member", onsubmit: function (e) {
       e.preventDefault();
@@ -834,9 +871,9 @@
     var members = proj.showDisabled ? everyone : activeOnly;
     var editors = activeOnly.filter(function (m) { return m.projectRoles[d.id] === "editor"; }).length;
     var box = h("div", { class: "card", id: "project-page" });
-    box.appendChild(h("button", { class: "backlink", id: "project-back", type: "button", text: "← Όλα τα " + W().p, onclick: function () { beginAction(); proj.openId = null; render(); } }));
+    box.appendChild(h("button", { class: "btn secondary", id: "project-back", type: "button", text: "← Όλα τα " + W().p, onclick: function () { beginAction(); proj.openId = null; render(); } }));
     box.appendChild(h("h2", null, [document.createTextNode(d.name), d.hidden ? h("span", { class: "pill hid", text: " κρυφό" }) : null]));
-    box.appendChild(h("p", { class: "hint", id: "project-meta", text: plural(activeOnly.length, "μέλος", "μέλη") + " · " + plural(editors, "editor", "editors") + " · " + plural(d.documentCount, "έγγραφο", "έγγραφα") }));
+    box.appendChild(h("p", { class: "hint", id: "project-meta", text: plural(activeOnly.length, "μέλος", "μέλη") + " · " + plural(editors, "συντάκτης", "συντάκτες") + " · " + plural(d.documentCount, "έγγραφο", "έγγραφα") }));
 
     var q = h("input", { type: "text", id: "proj-q", placeholder: "Αναζήτηση μέσα στο " + W().s, "aria-label": "Αναζήτηση μέσα στο " + W().s, value: proj.q });
     var list = h("div", { id: "proj-list" });
@@ -876,7 +913,7 @@
 
     // προσθήκη πολλών ανθρώπων με επικόλληση emails (ο συνηθισμένος τρόπος σε BPO: μια ομάδα νέων πρακτόρων μπαίνει μαζί)
     var paste = h("textarea", { id: "paste-emails", "aria-label": "Emails, ένα ανά γραμμή", placeholder: "nikos@bpo.gr\nmaria@bpo.gr" });
-    var pasteRole = h("select", { id: "paste-role", "aria-label": "Ρόλος στο " + W().s }, [option("member", "Μέλος"), option("editor", "Editor")]);
+    var pasteRole = h("select", { id: "paste-role", "aria-label": "Ρόλος στο " + W().s }, [option("member", "Μέλος"), option("editor", "Συντάκτης")]);
     // Οι επιλογές μένουν όπως τις άφησες και μετά από μια προσθήκη (ο χρήστης συνήθως προσθέτει πολλές παρτίδες με τον ίδιο τρόπο).
     var create = h("input", { type: "checkbox", id: "paste-create", "aria-label": "Δημιουργία νέων μελών" });
     create.checked = !!proj.create;
@@ -930,11 +967,15 @@
   function documentsView() {
     var box = h("div", { class: "card" }, [
       h("h2", { text: "Έγγραφα" }),
-      h("p", { class: "hint", text: "Ένα εμπιστευτικό έγγραφο το διαβάζουν μόνο οι admins και τα μέλη του ίδιου " + W().g + ": δεν μοιράζεται με άλλα " + W().p + " και μια αντίφαση μαζί του εμφανίζεται χωρίς περιεχόμενο. Η κοινή χρήση ενός εγγράφου με άλλα " + W().p + " ορίζεται από την οθόνη επεξεργασίας του εγγράφου. Έγγραφα «όλης της εταιρείας» δεν μπορούν να γίνουν εμπιστευτικά." }),
+      h("p", { class: "hint", text: "Ένα εμπιστευτικό έγγραφο το διαβάζουν μόνο οι διαχειριστές και τα μέλη του ίδιου " + W().g + ": δεν μοιράζεται με άλλα " + W().p + " και μια αντίφαση μαζί του εμφανίζεται χωρίς περιεχόμενο. Η κοινή χρήση ενός εγγράφου με άλλα " + W().p + " ορίζεται από την οθόνη επεξεργασίας του εγγράφου. Έγγραφα «όλης της εταιρείας» δεν μπορούν να γίνουν εμπιστευτικά." }),
     ]);
     var msg = h("p", { class: "note", role: "status", "aria-live": "polite" });
     var docs = (docsData && docsData.documents) || [];
-    if (!docs.length) box.appendChild(h("div", { class: "hint", text: "Κανένα έγγραφο ακόμα." }));
+    if (!docs.length) {
+      var de = h("div", { class: "empty emptybox", id: "docs-empty" }, [h("p", { text: "Δεν υπάρχει κανένα έγγραφο ακόμα. Τα έγγραφα είναι οι οδηγίες και οι διαδικασίες από τις οποίες απαντά ο βοηθός." })]);
+      de.appendChild(h("a", { href: "/team-editor.html", class: "btn", id: "first-doc", text: "Γράψε το πρώτο έγγραφο" }));
+      box.appendChild(de);
+    }
     docs.forEach(function (d) {
       var docRow, docControls;
       var sharedWith = (d.audienceProjectIds || []).map(function (id) { var x = deptById(id); return x ? x.name : "άγνωστο " + W().s; });
@@ -983,7 +1024,7 @@
       h("p", { class: "hint", text: "Οι τελευταίες 100 διαχειριστικές ενέργειες. Δεν καταγράφονται οι ερωτήσεις των υπαλλήλων ούτε το τι διάβασαν. Διατήρηση: " + (audit ? audit.retentionDays : 365) + " ημέρες." }),
     ]);
     var entries = (audit && audit.entries) || [];
-    if (!entries.length) box.appendChild(h("div", { class: "hint", text: "Καμία ενέργεια ακόμα." }));
+    if (!entries.length) box.appendChild(h("div", { class: "hint", text: "Καμία ενέργεια ακόμα. Εδώ θα βλέπεις ποιος άλλαξε τι και πότε." }));
     entries.forEach(function (e) {
       box.appendChild(h("div", { class: "row log" }, [
         h("span", null, [h("span", { class: "a", text: e.actor }), document.createTextNode(" · " + actionLabel(e.action) + (e.target ? " · " + (e.targetLabel || e.target) : "") + (e.detail && typeof e.detail.count === "number" && /^members_bulk_/.test(e.action) ? " · " + plural(e.detail.count, "μέλος", "μέλη") : ""))]),
