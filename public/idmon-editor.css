@@ -1,0 +1,99 @@
+/* public/idmon-editor.css (4 Οκτ 2026)
+ * Εμφάνιση του κειμένου άρθρου (.prose) και του επεξεργαστή: γραμμή εργαλείων, μπάρες συνδέσμου και πίνακα, επιφάνεια γραφής.
+ * Κοινό για τις σελίδες ομάδων (team-editor.html, team-article.html) και, στο στάδιο 2, τον editor του SMB. Πάει ΜΑΖΙ με το public/idmon-toolbar.js.
+ * Δεν έχει δικά του χρώματα: χρησιμοποιεί τα tokens της σελίδας που το φορτώνει (--accent, --surface, --border, --text κ.λπ., από το shared.css).
+ * Τα tokens που το shared.css δεν έχει (μεγέθη, ύψος κουμπιού, ακτίνα, πεδίο, εστίαση) έχουν εδώ προεπιλογή με :where(:root) (μηδενική ειδικότητα):
+ * όποια σελίδα ορίζει τα δικά της (π.χ. το team.css) κερδίζει πάντα, ανεξάρτητα από τη σειρά φόρτωσης. */
+:where(:root){--field-border:#6f6f7d;--focus:#F0A58B;--fs-xs:.8125rem;--fs-sm:.875rem;--fs-md:1rem;--fs-lg:1.125rem;--fs-xl:1.35rem;--h-btn:44px;--h-input:44px;--r:8px;}
+/* ---- ΚΕΙΜΕΝΟ ΑΡΘΡΟΥ (.prose): ίδια εμφάνιση στη σελίδα ανάγνωσης, στον editor (WYSIWYG) και στην ανάγνωση μέσα στον editor ---- */
+.prose{font-size:var(--fs-md);line-height:1.75;color:var(--text);overflow-wrap:anywhere;}
+.prose > :first-child{margin-top:0;}
+.prose h1{font-size:1.6rem;line-height:1.3;margin:1.4em 0 .5em;}
+.prose h2{font-size:1.35rem;line-height:1.3;margin:1.5em 0 .5em;padding-bottom:.25em;border-bottom:1px solid var(--border);}
+.prose h3{font-size:1.15rem;line-height:1.35;margin:1.3em 0 .4em;}
+.prose h4,.prose h5,.prose h6{font-size:1rem;margin:1.2em 0 .3em;}
+.prose p{margin:0 0 1em;}
+.prose ul,.prose ol{margin:0 0 1em;padding-left:1.6em;}
+.prose li{margin:.25em 0;}
+.prose li > p{margin:0;}
+.prose blockquote{margin:0 0 1em;padding:.2em 1em;border-left:3px solid var(--accent);background:var(--surface-2);color:var(--text-soft);}
+.prose blockquote p:last-child{margin-bottom:0;}
+.prose code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;background:var(--surface-2);padding:.1em .35em;border-radius:4px;}
+.prose pre{margin:0 0 1em;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);overflow:auto;}
+.prose pre code{background:none;padding:0;}
+/* Οι σύνδεσμοι ΜΕΣΑ στο κείμενο ενός άρθρου είναι περιεχόμενο που έγραψε ο συντάκτης (όχι κουμπιά του περιβάλλοντος): μένουν υπογραμμισμένοι ώστε να φαίνεται ότι πατιούνται. */
+.prose a{color:var(--accent);text-decoration:underline;text-underline-offset:2px;}
+.prose img{display:block;max-width:100%;height:auto;margin:0 0 1em;border:1px solid var(--border);border-radius:var(--r);}
+.prose hr{margin:1.5em 0;border:0;border-top:1px solid var(--border);}
+.prose .table-wrap,.prose .tableWrapper{max-width:100%;margin:0 0 1em;overflow-x:auto;}
+.prose table{border-collapse:collapse;min-width:100%;}
+.prose th,.prose td{min-width:70px;padding:8px 12px;border:1px solid var(--border);text-align:left;vertical-align:top;}
+.prose th{background:var(--surface-2);font-weight:700;}
+.prose td > p,.prose th > p{margin:0;}
+
+/* ---- Βασικά στυλ κουμπιών (.btn) και πεδίων κειμένου ΜΟΝΟ μέσα στον επεξεργαστή (.rte). Ίδια δήλωση με του team.css, ώστε η γραμμή να φαίνεται το ίδιο και σε σελίδες
+   που δεν φορτώνουν το team.css (SMB). Στις σελίδες ομάδων το αποτέλεσμα είναι ίδιο, γιατί οι τιμές είναι οι ίδιες. Δεν επηρεάζουν τίποτα έξω από το .rte. ---- */
+.rte .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;text-align:center;text-decoration:none;
+  min-height:var(--h-btn);padding:8px 18px;border-radius:var(--r);border:1px solid transparent;background:var(--accent);
+  color:var(--on-accent);font-size:var(--fs-md);font-weight:700;cursor:pointer;font-family:inherit;line-height:1.25;}
+.rte .btn:hover{filter:brightness(1.08);}
+.rte .btn.secondary{background:var(--surface-2);color:var(--text);border-color:var(--border);font-weight:600;}
+.rte .btn.secondary:hover{filter:none;border-color:var(--accent);color:var(--text);}
+.rte .btn.danger{background:none;color:var(--danger);border-color:var(--danger);font-weight:600;}
+.rte .btn.danger:hover{filter:none;background:rgba(229,100,107,.12);}
+.rte .btn:disabled{opacity:.55;cursor:default;filter:none;}
+.rte input[type=text]{padding:9px 12px;min-height:var(--h-input);border-radius:var(--r);border:1px solid var(--field-border);background:var(--bg);color:var(--text);font-size:var(--fs-md);font-family:inherit;}
+.rte input::placeholder{color:var(--text-soft);opacity:.75;}
+
+/* ---- WYSIWYG ΕΠΕΞΕΡΓΑΣΤΗΣ (.rte): γραμμή κουμπιών 44px με λέξεις, και από κάτω το άρθρο όπως θα φανεί ---- */
+.rte{margin:0 0 14px;border:1px solid var(--field-border);border-radius:var(--r);background:var(--surface);}
+.rte:focus-within{border-color:var(--accent);box-shadow:0 0 0 2px var(--focus);}
+.rte-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:2px 4px;padding:6px 8px;background:var(--surface-2);border-bottom:1px solid var(--border);border-radius:var(--r) var(--r) 0 0;}
+/* Συμπαγής γραμμή με εικονίδια (4 Οκτ 2026): ομάδες χωρισμένες με λεπτή γραμμή, tooltip στο hover, ενεργό εργαλείο με το χρώμα accent */
+.tb-group{display:flex;align-items:center;min-width:0;}
+.tb-buttons{display:flex;flex-wrap:nowrap;gap:2px;}
+.tb-sep{flex:none;width:1px;height:24px;margin:0 4px;background:var(--border);}
+.rte-toolbar .btn{min-height:var(--h-btn);min-width:var(--h-btn);padding:0;font-size:var(--fs-sm);}
+.rte-toolbar .btn.tb{background:transparent;border-color:transparent;color:var(--text);font-weight:600;}
+.rte-toolbar .btn.tb:hover{background:var(--surface);border-color:var(--border);}
+.rte-toolbar .btn.tb svg{display:block;pointer-events:none;}
+@media (pointer:fine){.rte-toolbar .btn.tb{min-height:36px;min-width:34px;}}
+.rte-toolbar .btn[aria-pressed="true"],.rte-toolbar .btn.tb[aria-pressed="true"]:hover{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
+.tb-menuwrap{position:relative;display:inline-flex;}
+.tb-menu{position:absolute;z-index:20;top:calc(100% + 4px);left:0;min-width:200px;padding:4px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:0 8px 24px rgba(0,0,0,.45);}
+.tb-menu[hidden]{display:none;}
+.tb-menu-item{display:block;width:100%;min-height:var(--h-btn);padding:6px 12px;text-align:left;background:none;border:1px solid transparent;border-radius:6px;color:var(--text);font-family:inherit;font-size:var(--fs-md);cursor:pointer;}
+.tb-menu-item:hover{background:var(--surface-2);}
+.tb-menu-item[aria-checked="true"]{background:var(--accent-soft);color:var(--accent);}
+.tb-menu-h2{font-size:var(--fs-xl);font-weight:700;}
+.tb-menu-h3{font-size:var(--fs-lg);font-weight:700;}
+.rte-toolbar .tb-morebtn{display:none;}
+.rte-toolbar{position:relative;}
+.rte-toolbar .btn.tb{-webkit-touch-callout:none;touch-action:manipulation;}
+.tb-tip{position:absolute;z-index:30;max-width:min(280px,calc(100% - 8px));padding:6px 10px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.45);font-size:var(--fs-xs);line-height:1.35;pointer-events:none;}
+.tb-tip[hidden]{display:none;}
+.rte-toolbar .btn:disabled{opacity:.45;cursor:not-allowed;}
+.rte-context{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px;border-bottom:1px solid var(--border);}
+.rte-context[hidden],.rte-linkbar[hidden],.rte-altbar[hidden]{display:none;}
+.rte-context .lbl{font-size:var(--fs-sm);color:var(--text-soft);margin-right:4px;}
+.rte-linkbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px;border-bottom:1px solid var(--border);}
+.rte-linkbar input{flex:1 1 220px;min-width:0;}
+.rte-altbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px;border-bottom:1px solid var(--border);}
+.rte-altbar input{flex:1 1 260px;min-width:0;}
+.rte-body .ProseMirror img.ProseMirror-selectednode{outline:3px solid var(--accent);outline-offset:2px;}
+/* Το ProseMirror βάζει γύρω από κάθε inline εικόνα κρυφά <img class="ProseMirror-separator"> (για τον κέρσορα). Δεν πρέπει να παίρνουν τα στυλ των εικόνων (πλαίσιο, περιθώριο, display:block). */
+.rte-body .ProseMirror img.ProseMirror-separator{display:inline !important;width:0;height:0;margin:0 !important;padding:0;border:0 !important;}
+.rte-body .ProseMirror img{display:inline-block;vertical-align:bottom;}
+.rte-note{padding:8px 12px;font-size:var(--fs-sm);color:var(--text-soft);border-bottom:1px solid var(--border);}
+.rte-note.err{color:var(--danger);}
+.rte-body{padding:14px 16px;min-height:320px;max-height:70vh;overflow:auto;}
+.rte-body .ProseMirror{min-height:290px;outline:none;}
+.rte-body .ProseMirror .selectedCell{background:var(--accent-soft);}
+.rte-body .ProseMirror .column-resize-handle{display:none;}
+.rte-hint{margin:6px 0 0;font-size:var(--fs-sm);color:var(--text-soft);}
+@media (max-width:560px){.rte-body{padding:12px;max-height:none;}}
+.rte{container-type:inline-size;}
+/* Η γραμμή κρύβει τα λιγότερο συχνά εργαλεία πίσω από το «⋯» όταν ο ΙΔΙΟΣ ο editor είναι στενός (όχι μόνο όταν η οθόνη είναι μικρή: σε δύο στήλες ο editor είναι στενός και σε μεγάλη οθόνη) */
+@container (max-width:560px){.rte-toolbar{flex-wrap:wrap;gap:0;padding:4px;}.tb-buttons{gap:0;}.rte-toolbar .btn.tb{min-width:40px;}.tb-sep{display:none;}
+  .rte-toolbar .tb-more-item{display:none;}.rte-toolbar.tb-expanded .tb-more-item{display:inline-flex;}.rte-toolbar .tb-morebtn{display:inline-flex;}
+  .rte-toolbar.tb-expanded .tb-morebtn{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}}

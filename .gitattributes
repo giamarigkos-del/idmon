@@ -1,0 +1,2 @@
+# Αρχεία vendor: ΜΗΝ αλλάζουν οι αλλαγές γραμμής. Το SHA-256 στο MANIFEST.json πρέπει να ταιριάζει byte προς byte και σε Windows (core.autocrlf)
+public/vendor/** -text

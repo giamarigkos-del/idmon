@@ -1,0 +1,56 @@
+{
+ "note": "Αντίγραφο από το public/vendor/MANIFEST.json της διακλάδωσης team-experiment (παράγεται από tools/vendor-build/build.mjs εκεί). Το SMB χρησιμοποιεί ΜΟΝΟ το editor.js (ο αναγνώστης reader.js δεν χρειάζεται: η προεπισκόπηση γίνεται με marked και DOMPurify). Το τεστ tests/editor-tiptap.mjs ελέγχει ότι το αρχείο δεν άλλαξε με το χέρι. Για νέα έκδοση: ξαναχτίζεται στο team-experiment και αντιγράφεται ΜΑΖΙ με το νέο hash εδώ.",
+ "files": {
+  "editor.js": {
+   "bytes": 512531,
+   "sha256": "2000c696195f66c1afe2ed1824474438e30079c8ea022e54fb08352c68d4a32a"
+  }
+ },
+ "dependencies": {
+  "@tiptap/core": {
+   "requested": "3.31.4",
+   "installed": "3.31.4",
+   "license": "MIT"
+  },
+  "@tiptap/extension-image": {
+   "requested": "3.31.4",
+   "installed": "3.31.4",
+   "license": "MIT"
+  },
+  "@tiptap/extension-table": {
+   "requested": "3.31.4",
+   "installed": "3.31.4",
+   "license": "MIT"
+  },
+  "@tiptap/markdown": {
+   "requested": "3.31.4",
+   "installed": "3.31.4",
+   "license": "MIT"
+  },
+  "@tiptap/pm": {
+   "requested": "3.31.4",
+   "installed": "3.31.4",
+   "license": "MIT"
+  },
+  "@tiptap/starter-kit": {
+   "requested": "3.31.4",
+   "installed": "3.31.4",
+   "license": "MIT"
+  },
+  "dompurify": {
+   "requested": "3.4.16",
+   "installed": "3.4.16",
+   "license": "(MPL-2.0 OR Apache-2.0)"
+  },
+  "marked": {
+   "requested": "17.0.6",
+   "installed": "17.0.6",
+   "license": "MIT"
+  },
+  "esbuild": {
+   "requested": "0.28.2",
+   "installed": "0.28.2",
+   "license": "MIT"
+  }
+ }
+}

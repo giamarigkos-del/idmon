@@ -6,11 +6,12 @@
 <title>Content Management — Idmon</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/shared.css">
-<link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css">
-<link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/theme/toastui-editor-dark.min.css">
+<link rel="stylesheet" href="/idmon-editor.css">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
-<script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
+<script src="/vendor/editor.js"></script>
+<script src="/idmon-toolbar.js"></script>
+<script src="/idmon-doc-editor.js"></script>
 <style>
   html,body{height:100%;overflow-x:hidden;}
   /* overflow-x:hidden: δεύτερη γραμμή άμυνας -- αν κάτι (π.χ. ένα flex
@@ -334,6 +335,11 @@
   .edit-form input:disabled{background:var(--surface-2);color:var(--text-soft);}
 
   #tuiEditor{margin-bottom:2px;}
+  /* Tiptap (idmon-editor.css): ύψος σαν του παλιού Toast (420px), με κύλιση μέσα στο πεδίο. Το εφεδρικό πεδίο κειμένου ίδιο ύψος. */
+  #tuiEditor .rte{margin:0;}
+  #tuiEditor .rte-body{height:420px;min-height:0;max-height:none;}
+  #tuiEditor .rte-body .ProseMirror{min-height:100%;}
+  #tuiEditor .doc-fallback{width:100%;min-height:420px;line-height:1.6;resize:vertical;}
 
   .live-preview-label{font-size:11px;color:var(--text-soft);text-transform:uppercase;
     letter-spacing:.02em;margin-top:2px;}
@@ -1940,10 +1946,11 @@
     el("docTitle").value = title;
     el("docSourceUrl").value = sourceUrl;
 
-    // --- WYSIWYG: TOAST UI Editor -- ο χρήστης βλέπει το κείμενο ήδη
+    // --- WYSIWYG: Tiptap (public/idmon-doc-editor.js) -- ο χρήστης βλέπει το κείμενο ήδη
     // μορφοποιημένο ενώ γράφει (bold/λίστες/επικεφαλίδες/πίνακες/links/κ.λπ.),
     // χωρίς να χρειάζεται να ξέρει markdown syntax. Αποθηκεύει πάντα markdown
     // από πίσω (getMarkdown()) -- καμία αλλαγή στο πώς σώζουμε/κάνουμε diff.
+    // Η μεταβλητή λέγεται ακόμα tuiEditorInstance (ιστορικό όνομα από το Toast UI): κρατήθηκε ώστε να μην αλλάξει καμία από τις άλλες θέσεις της σελίδας.
     if (tuiEditorInstance) {
       tuiEditorInstance.destroy();
       tuiEditorInstance = null;
@@ -1952,17 +1959,10 @@
     const updatePreview = () => {
       livePreviewEl.innerHTML = renderMarkdown(tuiEditorInstance.getMarkdown());
     };
-    tuiEditorInstance = new toastui.Editor({
-      el: el("tuiEditor"),
-      height: "420px",
-      initialEditType: "wysiwyg",
-      previewStyle: "vertical",
-      initialValue: text || "",
-      theme: "dark",
-      usageStatistics: false,
-      hideModeSwitch: true,
+    tuiEditorInstance = IdmonDocEditor.create(el("tuiEditor"), {
+      markdown: text || "",
+      onChange: updatePreview,
     });
-    tuiEditorInstance.on("change", updatePreview);
     updatePreview();
 
     if (isExisting) {
