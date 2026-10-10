@@ -141,6 +141,17 @@
 <script src="/shared.js"></script>
 <script>
   const el = (id) => document.getElementById(id);
+
+  // Το χρώμα accent είναι ρύθμιση του πελάτη (μπορεί να είναι σκούρο ή ανοιχτό): το κείμενο πάνω του διαλέγεται από τη φωτεινότητά του,
+  // ώστε να διαβάζεται πάντα (σκούρο πάνω σε ανοιχτό, άσπρο πάνω σε σκούρο).
+  function pickOnAccent(hex) {
+    let h = String(hex || "").replace("#", "").trim();
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    if (!/^[0-9a-fA-F]{6}$/.test(h)) return "#17110E";
+    const c = [0, 2, 4].map((i) => { const v = parseInt(h.substr(i, 2), 16) / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+    const lum = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    return lum > 0.192 ? "#17110E" : "#FFFFFF";
+  }
   const thread = el("thread");
 
   applyTranslations();
@@ -170,6 +181,7 @@
       if (settings.accentColor) {
         document.documentElement.style.setProperty("--accent", settings.accentColor);
         document.documentElement.style.setProperty("--accent-soft", settings.accentColor + "22");
+        document.documentElement.style.setProperty("--on-accent", pickOnAccent(settings.accentColor));
       }
       if (settings.botName) {
         el("assistantNameText").textContent = settings.botName;
