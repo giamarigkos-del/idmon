@@ -28,6 +28,8 @@
 <style>
   /* Ίδια ζεστή παλέτα με το landing και τη σελίδα τιμών (το shared.css έχει ουδέτερο γκρι accent). */
   :root{--accent:#D97757;--accent-soft:rgba(217,119,87,.16);--on-accent:#17110E;}
+  /* Το toggle γλώσσας είναι μέρος του κελύφους του Idmon: μένει πάντα στο πορτοκαλί του προϊόντος (όπως στο editor), ανεξάρτητα από το χρώμα που έχει ορίσει ο πελάτης για τον βοηθό. */
+  .host-nav .lang-toggle .lang-btn.active{background:#D97757;color:#17110E;}
 
   .host-nav{height:56px;background:var(--surface);border-bottom:1px solid var(--border);
     display:flex;align-items:center;padding:0 28px;gap:28px;font-size:14px;color:var(--text-soft);}
