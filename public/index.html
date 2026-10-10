@@ -232,6 +232,10 @@
   .faq p{margin:0;color:var(--text-soft);}
   .footer-links{margin-top:3em;padding-top:1.2em;border-top:1px solid var(--border);font-size:.9rem;color:var(--text-soft);}
   .footer-links a{color:var(--text-soft);}
+
+  /* Φορητά υψηλής ανάλυσης (π.χ. 1920x1080 στο 150%): στο 100% zoom το παράθυρο έχει ~1280 CSS pixels και όλα φαίνονται μεγάλα. Εδώ μικραίνουμε
+     τη σελίδα στο 80% (ό,τι θα έκανε ο χρήστης με Ctrl+μείον). Όχι σε κινητό (<=900px), ούτε όταν το παράθυρο είναι ήδη μεγάλο. */
+  @media (min-width:901px) and (max-width:1450px) and (min-resolution:1.25dppx){html{zoom:.8;}}
 </style>
 </head>
 <body>

@@ -20,6 +20,10 @@
 *{box-sizing:border-box;}
 body{margin:0;font-family:"Manrope",-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);}
 input,textarea,button{font-family:inherit;}
+/* Πεδία φόρμας: σκούρα (χωρίς αυτό ο browser τα έδειχνε λευκά πάνω στο σκούρο θέμα). :where() = μηδενική ειδικότητα: ό,τι ορίζει μια σελίδα νικάει. */
+:where(input[type=text],input[type=email],input[type=url],input[type=search],input[type=password],input[type=number],input[type=tel],select,textarea){
+  background:#12151B;color:var(--text);border-color:#2E3440;}
+:where(input,textarea)::placeholder{color:var(--text-soft);opacity:.7;}
 
 /* Λεπτή, διακριτική μπάρα κύλισης (σαν resend.com/claude.ai) αντί για την
    χοντρή προεπιλογή του browser -- ισχύει παντού αφού είναι στο shared.css.

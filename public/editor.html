@@ -13,6 +13,11 @@
 <script src="/idmon-toolbar.js"></script>
 <script src="/idmon-doc-editor.js"></script>
 <style>
+  /* Ίδια ζεστή παλέτα με το landing και τη σελίδα τιμών (το shared.css έχει ουδέτερο γκρι accent). */
+  :root{--accent:#D97757;--accent-soft:rgba(217,119,87,.16);--on-accent:#17110E;}
+  /* Τα δευτερεύοντα κουμπιά (σκούρο φόντο από inline style) δεν πρέπει να παίρνουν το σκούρο κείμενο του accent. */
+  #addFromUrlBtn,#uploadFileBtn{color:var(--text);border:1px solid var(--border);}
+
   html,body{height:100%;overflow-x:hidden;}
   /* overflow-x:hidden: δεύτερη γραμμή άμυνας -- αν κάτι (π.χ. ένα flex
      container χωρίς wrap) ξεχειλίσει σε στενή οθόνη, ΔΕΝ κάνει ολόκληρη τη
