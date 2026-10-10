@@ -15,23 +15,23 @@
   /* Section: ζεστή παλέτα μόνο για το landing -- override του --accent
      ΜΟΝΟ μέσα σε αυτό το :root block, που φορτώνει μόνο σε αυτή τη σελίδα
      (δεν αγγίζει το shared.css, άρα δεν επηρεάζει editor/article/κτλ). */
-  :root{--accent:#D97757;--accent-soft:rgba(217,119,87,.16);}
+  :root{--accent:#D97757;--accent-soft:rgba(217,119,87,.16);--on-accent:#17110E;}
 
   body{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;}
-  .landing-box{max-width:420px;width:100%;text-align:center;}
-  .landing-box h1{font-size:26px;margin:0 0 8px;font-family:Georgia,"Iowan Old Style",serif;
-    display:flex;align-items:center;justify-content:center;gap:10px;letter-spacing:-.3px;}
+  .landing-box{max-width:460px;width:100%;text-align:center;}
+  .landing-box h1{font-size:30px;font-weight:700;margin:0 0 12px;
+    display:flex;align-items:center;justify-content:center;gap:12px;letter-spacing:-.01em;}
   .logo-mark circle{fill:var(--accent);}
   .logo-mark path{stroke:var(--accent);}
-  .landing-box p{font-size:14px;color:var(--text-soft);line-height:1.6;margin:0 0 32px;}
-  .choice-grid{display:flex;flex-direction:column;gap:12px;}
+  .landing-box p{font-size:16px;color:var(--text-soft);line-height:1.6;margin:0 0 40px;}
+  .choice-grid{display:flex;flex-direction:column;gap:16px;}
   .choice-btn{display:block;width:100%;text-align:left;background:var(--surface);
-    border:1px solid var(--border);border-radius:10px;padding:18px 20px;cursor:pointer;
-    font-family:inherit;color:var(--text);transition:border-color .15s;}
-  .choice-btn:hover{border-color:var(--accent);}
-  .choice-btn .choice-title{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px;margin-bottom:4px;}
-  .choice-btn .choice-desc{font-size:12.5px;color:var(--text-soft);line-height:1.5;}
-  .choice-icon-wrap{flex-shrink:0;width:26px;height:26px;border-radius:7px;background:var(--surface-2);
+    border:1px solid var(--border);border-radius:14px;padding:20px;cursor:pointer;
+    font-family:inherit;color:var(--text);transition:border-color .15s,background .15s;}
+  .choice-btn:hover{border-color:#3A4150;background:#191D25;}
+  .choice-btn .choice-title{font-size:17px;font-weight:600;display:flex;align-items:center;gap:12px;margin-bottom:8px;}
+  .choice-btn .choice-desc{font-size:14.5px;color:var(--text-soft);line-height:1.55;}
+  .choice-icon-wrap{flex-shrink:0;width:36px;height:36px;border-radius:10px;background:var(--surface-2);
     display:flex;align-items:center;justify-content:center;}
   .choice-icon{stroke:var(--accent);}
   .choice-icon polygon{fill:var(--accent);}
@@ -42,11 +42,12 @@
      ΘΕΣΗ (fixed, πάνω-δεξιά), βλ. .lang-toggle-fixed στο shared.css. */
 
   .dev-form{display:none;background:var(--surface);border:1px solid var(--border);
-    border-radius:10px;padding:18px 20px;text-align:left;margin-top:4px;}
+    border-radius:14px;padding:24px;text-align:left;margin-top:4px;}
   .dev-form.show{display:block;}
-  .dev-form label{font-size:12px;color:var(--text-soft);display:block;margin-bottom:6px;}
-  .dev-form input{width:100%;border:1px solid var(--border);border-radius:6px;
-    padding:9px 10px;font-size:13.5px;background:var(--bg);color:var(--text);}
+  .dev-form label{font-size:13.5px;font-weight:500;color:var(--text-soft);display:block;margin-bottom:8px;}
+  .dev-form input{width:100%;min-height:44px;border:1px solid #2E3440;border-radius:10px;
+    padding:10px 14px;font-size:15px;background:#12151B;color:var(--text);}
+  .dev-form input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
   .password-field{position:relative;}
   .password-field input{padding-right:48px;}
   .password-toggle-btn{position:absolute;right:0;top:0;bottom:0;width:48px;
@@ -56,46 +57,46 @@
   .password-toggle-btn svg{width:26px;height:26px;stroke-width:2;}
   .google-signin-btn{margin-top:14px;display:flex;justify-content:center;min-height:40px;}
   .or-divider{display:flex;align-items:center;gap:10px;margin:14px 0;
-    font-size:11.5px;color:var(--text-soft);}
+    font-size:13px;color:var(--text-soft);}
   .or-divider::before,.or-divider::after{content:"";flex:1;height:1px;background:var(--border);}
-  .dev-form-actions{display:flex;gap:8px;margin-top:10px;}
-  .dev-form button{border:none;border-radius:6px;padding:9px 16px;font-size:13px;
+  .dev-form-actions{display:flex;gap:12px;margin-top:16px;}
+  .dev-form button{border:none;border-radius:10px;padding:11px 20px;min-height:44px;font-size:15px;
     cursor:pointer;font-weight:600;font-family:inherit;}
   .dev-form .submit-btn{background:var(--accent);color:var(--on-accent);}
-  .dev-form .cancel-btn{background:none;border:1px solid var(--border);color:var(--text);}
-  .dev-error{font-size:12.5px;color:var(--danger);margin-top:10px;display:none;}
+  .dev-form .cancel-btn{background:none;border:1px solid #2E3440;color:var(--text);}
+  .dev-error{font-size:13.5px;color:var(--danger);margin-top:10px;display:none;}
   /* Σημείωμα όταν ο επισκέπτης ήρθε από "Αναβάθμιση" της σελίδας τιμολόγησης. */
-  .intent-note{font-size:12.5px;line-height:1.5;color:var(--text);background:var(--accent-soft);
-    border:1px solid var(--accent);border-radius:6px;padding:9px 11px;margin-bottom:14px;}
+  .intent-note{font-size:13.5px;line-height:1.55;color:var(--text);background:var(--accent-soft);
+    border:1px solid var(--accent);border-radius:10px;padding:11px 14px;margin-bottom:16px;}
   .dev-error.show{display:block;}
 
   /* Section H: tabs Sign up / Log in μέσα στο account-form -- ίδια χρωματική
      λογική με το lang-toggle (ενεργό tab = accent background). */
-  .account-tabs{display:flex;gap:2px;background:var(--surface-2);border:1px solid var(--border);
-    border-radius:6px;padding:2px;margin-bottom:16px;}
-  .account-tabs button{flex:1;border:none;background:none;color:var(--text-soft);font-size:12.5px;
-    font-weight:700;padding:7px 0;border-radius:4px;cursor:pointer;font-family:inherit;}
+  .account-tabs{display:flex;gap:4px;background:var(--surface-2);border:1px solid var(--border);
+    border-radius:12px;padding:4px;margin-bottom:20px;}
+  .account-tabs button{flex:1;border:none;background:none;color:var(--text-soft);font-size:14px;
+    font-weight:600;padding:10px 0;border-radius:8px;cursor:pointer;font-family:inherit;}
   .account-tabs button.active{background:var(--accent);color:var(--on-accent);}
 
-  .forgot-link{display:block;text-align:right;font-size:11.5px;color:var(--text-soft);
+  .forgot-link{display:block;text-align:right;font-size:13px;color:var(--text-soft);
     text-decoration:none;margin-top:8px;}
   .forgot-link:hover{color:var(--accent);text-decoration:underline;}
 
-  .forgot-success{font-size:12.5px;color:var(--text-soft);line-height:1.5;
-    background:var(--surface-2);border:1px solid var(--border);border-radius:8px;
-    padding:12px 14px;display:none;}
+  .forgot-success{font-size:13.5px;color:var(--text-soft);line-height:1.55;
+    background:var(--surface-2);border:1px solid var(--border);border-radius:10px;
+    padding:14px 16px;display:none;}
   .forgot-success.show{display:block;}
 
-  .legal-footer{margin-top:24px;font-size:11.5px;color:var(--text-soft);}
-  .legal-footer a{color:var(--text-soft);text-decoration:underline;}
+  .legal-footer{margin-top:36px;font-size:13.5px;color:var(--text-soft);}
+  .legal-footer a{color:var(--text-soft);text-decoration:none;}
   .legal-footer a:hover{color:var(--accent);}
 
   /* Ίδιο .back-link στυλ με article.html/editor.html, αλλά fixed πάνω-
      αριστερά (συμμετρικό με το ήδη υπάρχον lang-toggle-fixed δεξιά) --
      αυτή η σελίδα δεν έχει top-bar, οπότε δεν υπάρχει έτοιμο container. */
-  .back-link-fixed{position:fixed;top:16px;left:16px;font-size:11.5px;font-weight:700;
+  .back-link-fixed{position:fixed;top:16px;left:16px;font-size:13px;font-weight:600;
     color:var(--text);text-decoration:none;background:var(--surface-2);
-    border:1px solid var(--border);border-radius:4px;padding:5px 10px;z-index:10;}
+    border:1px solid var(--border);border-radius:8px;padding:8px 14px;z-index:10;}
   .back-link-fixed:hover{background:var(--accent-soft);border-color:var(--accent);}
 </style>
 </head>
