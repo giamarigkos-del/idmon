@@ -99,9 +99,8 @@
     border:1px solid var(--border);border-radius:8px;padding:8px 14px;z-index:10;}
   .back-link-fixed:hover{background:var(--accent-soft);border-color:var(--accent);}
 
-  /* Φορητά υψηλής ανάλυσης (π.χ. 1920x1080 στο 150%): στο 100% zoom το παράθυρο έχει ~1280 CSS pixels και όλα φαίνονται μεγάλα. Εδώ μικραίνουμε
-     τη σελίδα στο 80% (ό,τι θα έκανε ο χρήστης με Ctrl+μείον). Όχι σε κινητό (<=900px), ούτε όταν το παράθυρο είναι ήδη μεγάλο. */
-  @media (min-width:901px) and (max-width:1450px) and (min-resolution:1.25dppx){html{zoom:.8;}body{min-height:125vh;}}
+  /* Φορητά υψηλής ανάλυσης (π.χ. 1920x1080 στο 150%): στο 100% zoom το παράθυρο έχει ~1277 CSS pixels και όλα φαίνονται μεγάλα, οπότε το 72 τοις εκατό (το ίδιο με τις σελίδες του Beacon). Όχι σε κινητό (<=900px), ούτε όταν το παράθυρο είναι ήδη μεγάλο. */
+  @media (min-width:901px) and (max-width:1450px) and (min-resolution:1.25dppx){html{zoom:.72;}body{min-height:139vh;}}
 </style>
 </head>
 <body>
